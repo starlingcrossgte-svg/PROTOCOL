@@ -6,7 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.draw.drawBehind
+import coil.compose.AsyncImage
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -138,6 +138,8 @@ fun ProtocolScreen(
     onClearSessionLog: () -> Unit,
     onCopySessionLog: () -> Unit,
     onExportSessionLog: () -> Unit,
+    onPickBackground: () -> Unit,
+    onClearBackground: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -158,58 +160,83 @@ fun ProtocolScreen(
     // openSubPage clears editMode anyway, so the two never both fire.
     BackHandler(enabled = uiState.activeSubPage != null) { onCloseSubPage() }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(ScreenBg)
-            .drawBehind { drawY2kBackgroundDecor(this) }
-    ) {
-        ProtocolHeader(
-            subPageTitle = subPageTitle,
-            onHamburger = { onOpenSubPage(SubPage.Parameters) },
-            onClose = onCloseSubPage
-        )
+    Box(modifier = modifier.fillMaxSize().background(ScreenBg)) {
+        // Layer 1 — user-chosen background image, if any. ContentScale.Crop
+        // fills the screen, possibly cropping; the dim overlay keeps text
+        // readable regardless of photo brightness.
+        val bgUri = uiState.backgroundUri
+        if (bgUri != null) {
+            AsyncImage(
+                model = bgUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+            )
+        }
 
-        // Body — main pager or sub-page content. Adapter pill is gone from
-        // the chrome; discovery now triggers off the action buttons (Test
-        // Probe / Read Live / Log Live).
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when (uiState.activeSubPage) {
-                null -> HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize()
-                ) { page ->
-                    when (page) {
-                        0 -> HomePage(
-                            uiState = uiState,
-                            onRunProbe = onRunProbe,
-                            onClearLog = onClearLog,
-                            onCopyLog = onCopyLog,
-                            onExportLog = onExportLog,
-                            onOpenSubPage = onOpenSubPage
-                        )
-                        else -> LiveDataPage(
-                            uiState = uiState,
-                            onStartReadingLive = onStartReadingLive,
-                            onStopReadingLive = onStopReadingLive,
-                            onStartLogging = onStartLogging,
-                            onStopLogging = onStopLogging,
-                            onClearSessionLog = onClearSessionLog,
-                            onCopySessionLog = onCopySessionLog,
-                            onExportSessionLog = onExportSessionLog,
-                            onEnterEditMode = onEnterEditMode,
-                            onExitEditMode = onExitEditMode,
-                            onRemoveGauge = onRemoveGauge,
-                            onResizeGauge = onResizeGauge
-                        )
+        // Layer 2 — Y2K spike decor. Sits over the photo (or the solid bg
+        // if no photo). Low alpha so it whispers either way.
+        Canvas(modifier = Modifier.fillMaxSize()) { drawY2kBackgroundDecor(this) }
+
+        // Layer 3 — actual content.
+        Column(modifier = Modifier.fillMaxSize()) {
+            ProtocolHeader(
+                subPageTitle = subPageTitle,
+                onHamburger = { onOpenSubPage(SubPage.Parameters) },
+                onClose = onCloseSubPage
+            )
+
+            // Body — main pager or sub-page content. Adapter pill is gone
+            // from the chrome; discovery now triggers off the action
+            // buttons (Test Probe / Read Live / Log Live).
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when (uiState.activeSubPage) {
+                    null -> HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
+                        when (page) {
+                            0 -> HomePage(
+                                uiState = uiState,
+                                onRunProbe = onRunProbe,
+                                onClearLog = onClearLog,
+                                onCopyLog = onCopyLog,
+                                onExportLog = onExportLog,
+                                onOpenSubPage = onOpenSubPage
+                            )
+                            else -> LiveDataPage(
+                                uiState = uiState,
+                                onStartReadingLive = onStartReadingLive,
+                                onStopReadingLive = onStopReadingLive,
+                                onStartLogging = onStartLogging,
+                                onStopLogging = onStopLogging,
+                                onClearSessionLog = onClearSessionLog,
+                                onCopySessionLog = onCopySessionLog,
+                                onExportSessionLog = onExportSessionLog,
+                                onEnterEditMode = onEnterEditMode,
+                                onExitEditMode = onExitEditMode,
+                                onRemoveGauge = onRemoveGauge,
+                                onResizeGauge = onResizeGauge
+                            )
+                        }
                     }
+                    SubPage.Parameters -> ParametersBody(
+                        uiState = uiState,
+                        onTogglePid = onToggleGaugeForPid
+                    )
+                    SubPage.Settings -> SettingsBody(
+                        uiState = uiState,
+                        onPickBackground = onPickBackground,
+                        onClearBackground = onClearBackground
+                    )
+                    SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
+                        StubBody(page = uiState.activeSubPage!!)
                 }
-                SubPage.Parameters -> ParametersBody(
-                    uiState = uiState,
-                    onTogglePid = onToggleGaugeForPid
-                )
-                SubPage.Settings, SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
-                    StubBody(page = uiState.activeSubPage!!)
             }
         }
     }
@@ -217,8 +244,9 @@ fun ProtocolScreen(
 
 // Decorative background — sharp angular black "spikes" scattered around
 // the edges of the screen for Y2K terminal-panel depth without overdoing
-// it. Drawn via Modifier.drawBehind so it sits underneath the entire
-// content stack. Alpha kept low so the shapes whisper rather than shout.
+// it. Drawn via a Canvas layer beneath the content Column. Alpha kept
+// low so the shapes whisper rather than shout against whatever surface
+// (default ScreenBg or a user-picked photo) sits under them.
 private fun drawY2kBackgroundDecor(scope: androidx.compose.ui.graphics.drawscope.DrawScope) = with(scope) {
     val w = size.width
     val h = size.height
@@ -689,6 +717,88 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
                 fontSize = 20.sp
             )
         }
+    }
+}
+
+// Settings sub-page. First setting wired up: a user-chosen background
+// image. More settings (units, baud override, etc.) get added here in
+// future phases. Title + close X live in the shared header.
+@Composable
+private fun SettingsBody(
+    uiState: ProtocolUiState,
+    onPickBackground: () -> Unit,
+    onClearBackground: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        CategoryHeader("BACKGROUND")
+        Text(
+            text = if (uiState.backgroundUri == null)
+                "No custom background. App uses the default Y2K dark surface."
+            else
+                "Custom background active. Tap below to change or clear.",
+            color = Color.White,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Button(
+            onClick = onPickBackground,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = SurfaceBg,
+                contentColor = InkPrimary
+            ),
+            shape = y2kCornerShape(),
+            border = BorderStroke(1.dp, Accent),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 16.dp, vertical = 14.dp
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = if (uiState.backgroundUri == null) "Choose Background"
+                else "Change Background",
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+        }
+
+        if (uiState.backgroundUri != null) {
+            Button(
+                onClick = onClearBackground,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SurfaceAlt,
+                    contentColor = InkPrimary
+                ),
+                shape = y2kCornerShape(),
+                border = BorderStroke(1.dp, BorderGray),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 16.dp, vertical = 14.dp
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "Clear Background",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+            }
+        }
+
+        Text(
+            text = "Pick any image from your gallery. A 50% dark overlay is applied automatically so text stays readable against bright photos.",
+            color = NeutralGray,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
 

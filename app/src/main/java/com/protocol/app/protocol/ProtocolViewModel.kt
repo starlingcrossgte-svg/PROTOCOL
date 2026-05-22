@@ -29,6 +29,7 @@ class ProtocolViewModel : ViewModel() {
     private var tactrixClient: TactrixClient? = null
     private var runJob: Job? = null
     private var layoutStore: GaugeLayoutStore? = null
+    private var backgroundStore: BackgroundStore? = null
 
     // Action the user requested while the adapter wasn't yet connected.
     // setOpenSession replays this once a session is open so the user
@@ -51,6 +52,21 @@ class ProtocolViewModel : ViewModel() {
         val loaded = store.load() ?: GaugeLayout()
         _uiState.value = _uiState.value.copy(gaugeLayout = loaded)
         if (store.load() == null) store.save(loaded)
+    }
+
+    /**
+     * Wire the persistent background-image store. Loaded URI (if any) is
+     * dropped into UiState so the photo renders on first composition.
+     */
+    fun attachBackgroundStore(store: BackgroundStore) {
+        backgroundStore = store
+        _uiState.value = _uiState.value.copy(backgroundUri = store.load())
+    }
+
+    fun setBackgroundUri(uri: String?) {
+        if (_uiState.value.backgroundUri == uri) return
+        _uiState.value = _uiState.value.copy(backgroundUri = uri)
+        backgroundStore?.save(uri)
     }
 
     private fun updateLayout(transform: (GaugeLayout) -> GaugeLayout) {

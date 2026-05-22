@@ -60,4 +60,8 @@ dependencies {
     implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.6.2"
 
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+
+    // Async image loading for the user-chosen background. URI -> ImageBitmap
+    // with disk cache + downsampling out of the box. ~150 KB on the APK.
+    implementation "io.coil-kt:coil-compose:2.5.0"
 }

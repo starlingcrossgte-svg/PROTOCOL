@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -67,6 +68,34 @@ class Protocol : ComponentActivity() {
         } finally { pendingCsvText = "" }
     }
 
+    // Settings → Choose Background. Android Photo Picker handles the
+    // gallery selection — no runtime READ_EXTERNAL_STORAGE permission
+    // needed. We take persistable read permission on the returned URI so
+    // it survives process death and reboots.
+    private val pickBackgroundLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // Some content providers don't support persistable grants
+            // (older Storage Access Framework providers). The URI is still
+            // valid for the current process — user just needs to re-pick
+            // after a kill.
+        }
+        viewModel.setBackgroundUri(uri.toString())
+    }
+
+    private fun launchBackgroundPicker() {
+        pickBackgroundLauncher.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        )
+    }
+
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
@@ -91,6 +120,7 @@ class Protocol : ComponentActivity() {
         viewModel = ViewModelProvider(this)[ProtocolViewModel::class.java]
         viewModel.attachSessionManager(sessionManager)
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
+        viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
 
         refreshConnectionStatus()
 
@@ -132,7 +162,9 @@ class Protocol : ComponentActivity() {
                     onExportLog = { launchExportLog() },
                     onClearSessionLog = { viewModel.clearSessionLog() },
                     onCopySessionLog = { copySessionLogToClipboard() },
-                    onExportSessionLog = { launchExportSessionLog() }
+                    onExportSessionLog = { launchExportSessionLog() },
+                    onPickBackground = { launchBackgroundPicker() },
+                    onClearBackground = { viewModel.setBackgroundUri(null) }
                 )
             }
         }
