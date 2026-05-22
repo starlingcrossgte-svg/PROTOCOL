@@ -21,7 +21,9 @@ data class ProtocolUiState(
     val sessionLog: List<PollSample> = emptyList(),
     val gaugeLayout: GaugeLayout = GaugeLayout(),
     val tappedParamLongName: String? = null,
-    val showingParameters: Boolean = false
+    val showingParameters: Boolean = false,
+    /** True while the user is moving/resizing/removing gauges. Transient — not persisted. */
+    val editMode: Boolean = false
 ) {
     /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
     val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds

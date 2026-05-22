@@ -117,6 +117,12 @@ class Protocol : ComponentActivity() {
                     onOpenParameters = { viewModel.openParameters() },
                     onCloseParameters = { viewModel.closeParameters() },
                     onToggleGaugeForPid = { pidId -> viewModel.toggleGaugeForPid(pidId) },
+                    onEnterEditMode = { viewModel.enterEditMode() },
+                    onExitEditMode = { viewModel.exitEditMode() },
+                    onRemoveGauge = { pidId -> viewModel.removeGaugeForPid(pidId) },
+                    onResizeGauge = { pidId, c, r, w, h ->
+                        viewModel.resizeGauge(pidId, c, r, w, h)
+                    },
                     onRunProbe = { viewModel.runProbe() },
                     onStartReadingLive = { viewModel.startReadingLive(recordToLog = false) },
                     onStopReadingLive = { viewModel.stopReadingLive() },

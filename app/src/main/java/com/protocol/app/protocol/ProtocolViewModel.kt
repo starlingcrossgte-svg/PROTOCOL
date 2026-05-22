@@ -79,12 +79,24 @@ class ProtocolViewModel : ViewModel() {
 
     fun openParameters() {
         if (_uiState.value.showingParameters) return
-        _uiState.value = _uiState.value.copy(showingParameters = true)
+        // Switching screens implicitly exits edit mode — drag handles would
+        // be confusing if they hung around after the user moved off Live Data.
+        _uiState.value = _uiState.value.copy(showingParameters = true, editMode = false)
     }
 
     fun closeParameters() {
         if (!_uiState.value.showingParameters) return
         _uiState.value = _uiState.value.copy(showingParameters = false)
+    }
+
+    fun enterEditMode() {
+        if (_uiState.value.editMode) return
+        _uiState.value = _uiState.value.copy(editMode = true)
+    }
+
+    fun exitEditMode() {
+        if (!_uiState.value.editMode) return
+        _uiState.value = _uiState.value.copy(editMode = false)
     }
 
     /**
