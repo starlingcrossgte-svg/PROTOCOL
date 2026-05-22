@@ -334,7 +334,7 @@ private fun ProtocolHeader(
             contentDescription = "PROTOCOL",
             contentScale = ContentScale.Fit,
             modifier = Modifier
-                .height(300.dp)
+                .height(96.dp)
                 .align(Alignment.Center)
         )
 
