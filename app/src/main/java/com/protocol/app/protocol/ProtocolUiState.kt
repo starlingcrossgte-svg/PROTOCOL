@@ -20,7 +20,8 @@ data class ProtocolUiState(
     val lastSampleTimestampMs: Long = 0L,
     val sessionLog: List<PollSample> = emptyList(),
     val gaugeLayout: GaugeLayout = GaugeLayout(),
-    val tappedParamLongName: String? = null
+    val tappedParamLongName: String? = null,
+    val showingParameters: Boolean = false
 ) {
     /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
     val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds

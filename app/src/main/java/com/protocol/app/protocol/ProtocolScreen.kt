@@ -1,6 +1,8 @@
 package com.protocol.app.protocol
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -30,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +45,8 @@ import com.protocol.app.openport2.Ssm2DecodeBundle
 import com.protocol.app.openport2.Ssm2EcmProbe
 import com.protocol.app.openport2.Ssm2Frame
 import com.protocol.app.openport2.Ssm2FrameParser
+import com.protocol.app.openport2.Ssm2Pid
+import com.protocol.app.openport2.Ssm2PidCategory
 import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.TactrixCommandLog
 import com.protocol.app.openport2.TactrixHex
@@ -63,6 +68,9 @@ private val InkBlack   = Color(0xFF171A20)
 fun ProtocolScreen(
     uiState: ProtocolUiState,
     onDiscoverDevice: () -> Unit,
+    onOpenParameters: () -> Unit,
+    onCloseParameters: () -> Unit,
+    onToggleGaugeForPid: (String) -> Unit,
     onRunProbe: () -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
@@ -76,14 +84,25 @@ fun ProtocolScreen(
     onExportSessionLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Hoisted here so the user's currently-visible page (Debug vs Live Data) is
+    // preserved when they pop into Parameters and back.
     val pagerState = rememberPagerState(pageCount = { 2 })
 
+    if (uiState.showingParameters) {
+        ParametersScreen(
+            uiState = uiState,
+            onClose = onCloseParameters,
+            onTogglePid = onToggleGaugeForPid,
+            onDiscoverDevice = onDiscoverDevice,
+            modifier = modifier
+        )
+        return
+    }
+
     Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
-        // Header: page title on the left (locked to whichever page is visible),
-        // adapter pill geometrically centered, hamburger menu on the right.
-        // Swipe the body left/right to switch pages — the title swaps to match.
-        // Hamburger is wired to a no-op stub for Stage 1; Stage 2 hooks it to
-        // the Parameters drawer.
+        // Header: page title left (locked to the visible page), adapter pill
+        // geometrically centered, hamburger right. Swiping the body changes
+        // the title; tapping the hamburger pushes the Parameters page.
         val currentTitle = when (pagerState.currentPage) {
             0 -> "Debug"
             else -> "Live Data"
@@ -107,7 +126,7 @@ fun ProtocolScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
             HamburgerButton(
-                onClick = { /* TODO Stage 2 — open Parameters drawer */ },
+                onClick = onOpenParameters,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
@@ -136,6 +155,210 @@ fun ProtocolScreen(
                     onExportSessionLog = onExportSessionLog
                 )
             }
+        }
+    }
+}
+
+// ─── Parameters page ────────────────────────────────────────────────────────
+//
+// Full-page list (not a drawer). Tapping a parameter toggles whether its
+// gauge is on the Live Data page; a checkmark marks parameters that already
+// have a gauge present. The parameter never disappears from the list — that
+// is intentional, so re-tapping puts the gauge back. Hardware back closes
+// the page via BackHandler.
+
+@Composable
+private fun ParametersScreen(
+    uiState: ProtocolUiState,
+    onClose: () -> Unit,
+    onTogglePid: (String) -> Unit,
+    onDiscoverDevice: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BackHandler(enabled = true) { onClose() }
+
+    Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = "Parameters",
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+            AdapterPill(
+                uiState = uiState,
+                onDiscoverClick = onDiscoverDevice,
+                modifier = Modifier.align(Alignment.Center)
+            )
+            CloseButton(
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+        }
+        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BorderGray))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val onLiveData = uiState.pidIdsOnLiveData
+            val grouped = Ssm2Pids.DEFAULT_DEMO_PIDS.groupBy { it.category }
+
+            CategoryHeader("ECU")
+            val ecuPids = grouped[Ssm2PidCategory.ECU].orEmpty()
+            if (ecuPids.isEmpty()) {
+                EmptyCategoryRow("No ECU parameters available.")
+            } else {
+                for (pid in ecuPids) {
+                    ParameterRow(
+                        pid = pid,
+                        checked = pid.id in onLiveData,
+                        onClick = { onTogglePid(pid.id) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            CategoryHeader("TCM")
+            val tcmPids = grouped[Ssm2PidCategory.TCM].orEmpty()
+            if (tcmPids.isEmpty()) {
+                EmptyCategoryRow("No TCM parameters available yet.")
+            } else {
+                for (pid in tcmPids) {
+                    ParameterRow(
+                        pid = pid,
+                        checked = pid.id in onLiveData,
+                        onClick = { onTogglePid(pid.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryHeader(label: String) {
+    Text(
+        "── $label ──",
+        color = SectionGray,
+        fontFamily = FontFamily.Monospace,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun EmptyCategoryRow(text: String) {
+    Text(
+        text,
+        color = NeutralGray,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+    )
+}
+
+@Composable
+private fun ParameterRow(
+    pid: Ssm2Pid,
+    checked: Boolean,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (checked) Checkmark()
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    pid.displayName,
+                    color = InkBlack,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (pid.longName != pid.displayName) {
+                    Text(
+                        pid.longName,
+                        color = NeutralGray,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            Text(
+                pid.unit,
+                color = NeutralGray,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(BorderGray.copy(alpha = 0.4f))
+        )
+    }
+}
+
+@Composable
+private fun Checkmark() {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val stroke = 2.5f.dp.toPx()
+        drawLine(
+            color = PassGreen,
+            start = Offset(size.width * 0.18f, size.height * 0.55f),
+            end = Offset(size.width * 0.42f, size.height * 0.80f),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = PassGreen,
+            start = Offset(size.width * 0.42f, size.height * 0.80f),
+            end = Offset(size.width * 0.85f, size.height * 0.25f),
+            strokeWidth = stroke
+        )
+    }
+}
+
+@Composable
+private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .size(width = 44.dp, height = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.size(22.dp)) {
+            val stroke = 2.5f.dp.toPx()
+            drawLine(
+                color = InkBlack,
+                start = Offset(size.width * 0.18f, size.height * 0.18f),
+                end = Offset(size.width * 0.82f, size.height * 0.82f),
+                strokeWidth = stroke
+            )
+            drawLine(
+                color = InkBlack,
+                start = Offset(size.width * 0.82f, size.height * 0.18f),
+                end = Offset(size.width * 0.18f, size.height * 0.82f),
+                strokeWidth = stroke
+            )
         }
     }
 }

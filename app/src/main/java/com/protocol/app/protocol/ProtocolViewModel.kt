@@ -77,6 +77,16 @@ class ProtocolViewModel : ViewModel() {
         updateLayout { if (it.contains(pidId)) it.withRemoved(pidId) else it.withAdded(pidId) }
     }
 
+    fun openParameters() {
+        if (_uiState.value.showingParameters) return
+        _uiState.value = _uiState.value.copy(showingParameters = true)
+    }
+
+    fun closeParameters() {
+        if (!_uiState.value.showingParameters) return
+        _uiState.value = _uiState.value.copy(showingParameters = false)
+    }
+
     /**
      * Move/resize an existing gauge. Returns true if the change was accepted
      * (no overlap, fits in grid). Phase C wires this to the edit-mode drag

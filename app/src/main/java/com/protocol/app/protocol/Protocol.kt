@@ -114,6 +114,9 @@ class Protocol : ComponentActivity() {
                 ProtocolScreen(
                     uiState = uiState,
                     onDiscoverDevice = { discoverAndConnect() },
+                    onOpenParameters = { viewModel.openParameters() },
+                    onCloseParameters = { viewModel.closeParameters() },
+                    onToggleGaugeForPid = { pidId -> viewModel.toggleGaugeForPid(pidId) },
                     onRunProbe = { viewModel.runProbe() },
                     onStartReadingLive = { viewModel.startReadingLive(recordToLog = false) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
