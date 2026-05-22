@@ -3,6 +3,7 @@ package com.protocol.app.protocol
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -27,6 +28,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -47,12 +49,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.protocol.app.R
 import com.protocol.app.openport2.EcuIdDecoder
 import com.protocol.app.openport2.OpenPortCommand
 import com.protocol.app.openport2.OpenPortCommandParser
@@ -79,13 +84,20 @@ private val ScreenBg    = Color(0xFF0F1115)
 private val SurfaceBg   = Color(0xFF1A1C22)
 private val SurfaceAlt  = Color(0xFF2A2C32)
 private val BorderGray  = Color(0xFF3A3C42)
-private val Accent      = Color(0xFF2F6FE4)
+// Accent flipped from the old material blue to neon green per the Y2K UI
+// direction. Used for non-text decoration only — icon strokes, the header
+// divider stripe, edit-mode gauge border, drag-bar visuals.
+private val Accent      = Color(0xFF22FF77)
 private val PassGreen   = Color(0xFF22C55E)
 private val FailRed     = Color(0xFFEF4444)
 private val NeutralGray = Color(0xFFB8B8C0)
 private val SectionGray = Color(0xFFB8B8C0)
 private val InkPrimary  = Color.White
 private val InkMuted    = Color(0xFFB8B8C0)
+
+// Subtle angular shape used on the home menu + Test SSM2 Probe button for
+// the Y2K "terminal panel" feel. Sparing — most surfaces stay rounded.
+private fun y2kCornerShape() = CutCornerShape(topEnd = 10.dp, bottomStart = 10.dp)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -116,92 +128,142 @@ fun ProtocolScreen(
     // is preserved when they pop into a sub-page and back.
     val pagerState = rememberPagerState(pageCount = { 2 })
 
-    when (val sub = uiState.activeSubPage) {
-        SubPage.Parameters -> {
-            ParametersScreen(
-                uiState = uiState,
-                onClose = onCloseSubPage,
-                onTogglePid = onToggleGaugeForPid,
-                onDiscoverDevice = onDiscoverDevice,
-                modifier = modifier
-            )
-            return
-        }
-        SubPage.Settings, SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning -> {
-            StubSubPage(
-                page = sub,
-                uiState = uiState,
-                onClose = onCloseSubPage,
-                onDiscoverDevice = onDiscoverDevice,
-                modifier = modifier
-            )
-            return
-        }
-        null -> Unit
+    val subPageTitle: String? = when (uiState.activeSubPage) {
+        SubPage.Parameters -> "Parameters"
+        SubPage.Settings -> "Settings"
+        SubPage.Flash -> "Flash ECU"
+        SubPage.Diagnostics -> "Diagnostics / CEL"
+        SubPage.Tuning -> "Minor Tuning"
+        null -> null
     }
 
+    // Sub-page BackHandler. LiveDataPage's edit-mode BackHandler is nested
+    // deeper and stacks above this one when both could be relevant — but
+    // openSubPage clears editMode anyway, so the two never both fire.
+    BackHandler(enabled = uiState.activeSubPage != null) { onCloseSubPage() }
+
     Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
-        // Header: page title left (locked to the visible page), adapter pill
-        // geometrically centered, hamburger right. Swiping the body changes
-        // the title; tapping the hamburger opens the Parameters sub-page.
-        val currentTitle = when (pagerState.currentPage) {
-            0 -> "Home"
-            else -> "Live Data"
+        ProtocolHeader(
+            subPageTitle = subPageTitle,
+            onHamburger = { onOpenSubPage(SubPage.Parameters) },
+            onClose = onCloseSubPage
+        )
+
+        // Body — main pager or sub-page content. weight(1f) lets the
+        // adapter footer claim its natural height at the bottom.
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            when (uiState.activeSubPage) {
+                null -> HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    when (page) {
+                        0 -> HomePage(
+                            uiState = uiState,
+                            onRunProbe = onRunProbe,
+                            onClearLog = onClearLog,
+                            onCopyLog = onCopyLog,
+                            onExportLog = onExportLog,
+                            onOpenSubPage = onOpenSubPage
+                        )
+                        else -> LiveDataPage(
+                            uiState = uiState,
+                            onStartReadingLive = onStartReadingLive,
+                            onStopReadingLive = onStopReadingLive,
+                            onStartLogging = onStartLogging,
+                            onStopLogging = onStopLogging,
+                            onClearSessionLog = onClearSessionLog,
+                            onCopySessionLog = onCopySessionLog,
+                            onExportSessionLog = onExportSessionLog,
+                            onEnterEditMode = onEnterEditMode,
+                            onExitEditMode = onExitEditMode,
+                            onRemoveGauge = onRemoveGauge,
+                            onResizeGauge = onResizeGauge
+                        )
+                    }
+                }
+                SubPage.Parameters -> ParametersBody(
+                    uiState = uiState,
+                    onTogglePid = onToggleGaugeForPid
+                )
+                SubPage.Settings, SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
+                    StubBody(page = uiState.activeSubPage!!)
+            }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceBg)
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        ) {
+
+        AdapterFooter(uiState = uiState, onDiscoverDevice = onDiscoverDevice)
+    }
+}
+
+// ─── Shared header / footer ─────────────────────────────────────────────────
+
+@Composable
+private fun ProtocolHeader(
+    subPageTitle: String?,
+    onHamburger: () -> Unit,
+    onClose: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceBg)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        // Sub-page title on the left (none on the main pager — the logo
+        // alone identifies the app and the visible page is implied by
+        // content / swipe state).
+        if (subPageTitle != null) {
             Text(
-                text = currentTitle,
-                color = Accent,
+                text = subPageTitle,
+                color = Color.White,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.align(Alignment.CenterStart)
             )
-            AdapterPill(
-                uiState = uiState,
-                onDiscoverClick = onDiscoverDevice,
-                modifier = Modifier.align(Alignment.Center)
-            )
+        }
+
+        // Logo lives in the center of every header, always visible.
+        Image(
+            painter = painterResource(id = R.drawable.protocol_logo),
+            contentDescription = "PROTOCOL",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .height(40.dp)
+                .align(Alignment.Center)
+        )
+
+        // Hamburger on the main pager; close X on any sub-page.
+        if (subPageTitle == null) {
             HamburgerButton(
-                onClick = { onOpenSubPage(SubPage.Parameters) },
+                onClick = onHamburger,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+        } else {
+            CloseButton(
+                onClick = onClose,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
-        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BorderGray))
+    }
+    // Thin neon stripe under the header — replaces the old grey divider
+    // and gives the Y2K terminal feel.
+    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
+}
 
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.weight(1f).fillMaxWidth()
-        ) { page ->
-            when (page) {
-                0 -> HomePage(
-                    uiState = uiState,
-                    onRunProbe = onRunProbe,
-                    onClearLog = onClearLog,
-                    onCopyLog = onCopyLog,
-                    onExportLog = onExportLog,
-                    onOpenSubPage = onOpenSubPage
-                )
-                else -> LiveDataPage(
-                    uiState = uiState,
-                    onStartReadingLive = onStartReadingLive,
-                    onStopReadingLive = onStopReadingLive,
-                    onStartLogging = onStartLogging,
-                    onStopLogging = onStopLogging,
-                    onClearSessionLog = onClearSessionLog,
-                    onCopySessionLog = onCopySessionLog,
-                    onExportSessionLog = onExportSessionLog,
-                    onEnterEditMode = onEnterEditMode,
-                    onExitEditMode = onExitEditMode,
-                    onRemoveGauge = onRemoveGauge,
-                    onResizeGauge = onResizeGauge
-                )
-            }
-        }
+@Composable
+private fun AdapterFooter(
+    uiState: ProtocolUiState,
+    onDiscoverDevice: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceBg)
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        AdapterPill(uiState = uiState, onDiscoverClick = onDiscoverDevice)
     }
 }
 
@@ -214,78 +276,46 @@ fun ProtocolScreen(
 // the page via BackHandler.
 
 @Composable
-private fun ParametersScreen(
+private fun ParametersBody(
     uiState: ProtocolUiState,
-    onClose: () -> Unit,
-    onTogglePid: (String) -> Unit,
-    onDiscoverDevice: () -> Unit,
-    modifier: Modifier = Modifier
+    onTogglePid: (String) -> Unit
 ) {
-    BackHandler(enabled = true) { onClose() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        val onLiveData = uiState.pidIdsOnLiveData
+        val grouped = Ssm2Pids.DEFAULT_DEMO_PIDS.groupBy { it.category }
 
-    Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceBg)
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        ) {
-            Text(
-                text = "Parameters",
-                color = Accent,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.CenterStart)
-            )
-            AdapterPill(
-                uiState = uiState,
-                onDiscoverClick = onDiscoverDevice,
-                modifier = Modifier.align(Alignment.Center)
-            )
-            CloseButton(
-                onClick = onClose,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
-        }
-        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BorderGray))
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            val onLiveData = uiState.pidIdsOnLiveData
-            val grouped = Ssm2Pids.DEFAULT_DEMO_PIDS.groupBy { it.category }
-
-            CategoryHeader("ECU")
-            val ecuPids = grouped[Ssm2PidCategory.ECU].orEmpty()
-            if (ecuPids.isEmpty()) {
-                EmptyCategoryRow("No ECU parameters available.")
-            } else {
-                for (pid in ecuPids) {
-                    ParameterRow(
-                        pid = pid,
-                        checked = pid.id in onLiveData,
-                        onClick = { onTogglePid(pid.id) }
-                    )
-                }
+        CategoryHeader("ECU")
+        val ecuPids = grouped[Ssm2PidCategory.ECU].orEmpty()
+        if (ecuPids.isEmpty()) {
+            EmptyCategoryRow("No ECU parameters available.")
+        } else {
+            for (pid in ecuPids) {
+                ParameterRow(
+                    pid = pid,
+                    checked = pid.id in onLiveData,
+                    onClick = { onTogglePid(pid.id) }
+                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            CategoryHeader("TCM")
-            val tcmPids = grouped[Ssm2PidCategory.TCM].orEmpty()
-            if (tcmPids.isEmpty()) {
-                EmptyCategoryRow("No TCM parameters available yet.")
-            } else {
-                for (pid in tcmPids) {
-                    ParameterRow(
-                        pid = pid,
-                        checked = pid.id in onLiveData,
-                        onClick = { onTogglePid(pid.id) }
-                    )
-                }
+        Spacer(modifier = Modifier.height(8.dp))
+        CategoryHeader("TCM")
+        val tcmPids = grouped[Ssm2PidCategory.TCM].orEmpty()
+        if (tcmPids.isEmpty()) {
+            EmptyCategoryRow("No TCM parameters available yet.")
+        } else {
+            for (pid in tcmPids) {
+                ParameterRow(
+                    pid = pid,
+                    checked = pid.id in onLiveData,
+                    onClick = { onTogglePid(pid.id) }
+                )
             }
         }
     }
@@ -394,13 +424,13 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Canvas(modifier = Modifier.size(22.dp)) {
             val stroke = 2.5f.dp.toPx()
             drawLine(
-                color = InkPrimary,
+                color = Accent,
                 start = Offset(size.width * 0.18f, size.height * 0.18f),
                 end = Offset(size.width * 0.82f, size.height * 0.82f),
                 strokeWidth = stroke
             )
             drawLine(
-                color = InkPrimary,
+                color = Accent,
                 start = Offset(size.width * 0.82f, size.height * 0.18f),
                 end = Offset(size.width * 0.18f, size.height * 0.82f),
                 strokeWidth = stroke
@@ -470,7 +500,7 @@ private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) 
                     modifier = Modifier
                         .width(22.dp)
                         .height(2.dp)
-                        .background(InkPrimary)
+                        .background(Accent)
                 )
             }
         }
@@ -520,25 +550,17 @@ private fun HomePage(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Text logo. Replace later with an actual graphic if you commit a
-        // vector to res/drawable.
-        Text(
-            text = "PROTOCOL",
-            color = Accent,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 38.sp,
-            letterSpacing = 6.sp
-        )
+        // App identity sits in the header logo. Home gets a slim subtitle
+        // line + version so the user knows what build they're on.
         Text(
             text = "OpenPort 2.0  ·  Subaru SSM2 K-line",
-            color = InkMuted,
+            color = Color.White,
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.bodySmall
         )
         Text(
             text = "v1.0",
-            color = InkMuted,
+            color = Color.White,
             fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(bottom = 4.dp)
@@ -579,7 +601,7 @@ private fun HomePage(
                 disabledContainerColor = Color(0xFFFF6A00).copy(alpha = 0.5f),
                 disabledContentColor = Color.Black.copy(alpha = 0.7f)
             ),
-            shape = RoundedCornerShape(8.dp),
+            shape = y2kCornerShape(),
             // Keep the button click-enabled while the probe runs so the
             // unlock counter still increments on rapid taps — the VM's
             // runProbe guard makes the actual probe call idempotent.
@@ -624,8 +646,11 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
             containerColor = SurfaceBg,
             contentColor = InkPrimary
         ),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, BorderGray),
+        // Y2K terminal-panel slant — cut the top-right and bottom-left
+        // corners. Visible enough to read as "this is a tool, not a
+        // generic Material 3 button" without being a gimmick.
+        shape = y2kCornerShape(),
+        border = BorderStroke(1.dp, Accent),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             horizontal = 16.dp,
             vertical = 16.dp
@@ -638,7 +663,7 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
         ) {
             Text(
                 label,
-                color = InkPrimary,
+                color = Color.White,
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.bodyLarge,
                 fontFamily = FontFamily.Monospace,
@@ -646,7 +671,7 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
             )
             Text(
                 "›",
-                color = InkMuted,
+                color = Accent,
                 fontWeight = FontWeight.Bold,
                 fontSize = 20.sp
             )
@@ -654,96 +679,56 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
     }
 }
 
-// Generic "coming soon" sub-page. Same header pattern as Parameters so
-// nav feels consistent. Each entry in SubPage that isn't Parameters maps
-// to a title + description here.
+// Generic "coming soon" body. Title + close X live in the shared header;
+// this composable only renders the body content.
 @Composable
-private fun StubSubPage(
-    page: SubPage,
-    uiState: ProtocolUiState,
-    onClose: () -> Unit,
-    onDiscoverDevice: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    BackHandler(enabled = true) { onClose() }
-
-    val (title, blurb, eta) = when (page) {
-        SubPage.Settings -> Triple(
-            "Settings",
+private fun StubBody(page: SubPage) {
+    val (blurb, eta) = when (page) {
+        SubPage.Settings -> Pair(
             "Tunable app preferences — units (F/C), session log size, gauge layout reset, baud override for adapter testing.",
             "Lightweight — days of work once the list of options is locked."
         )
-        SubPage.Flash -> Triple(
-            "Flash ECU",
+        SubPage.Flash -> Pair(
             "Full ECU reflash over OpenPort. Seed/key security access, flash-mode init, page-aligned erase + write, checksum, verify, ECU reset.",
             "Substantial — a multi-week project. The lower layers (USB + Tactrix line protocol + frame parser) are already in place; the flash sequence itself still needs to be written and tested very carefully."
         )
-        SubPage.Diagnostics -> Triple(
-            "Diagnostics / CEL",
+        SubPage.Diagnostics -> Pair(
             "Read stored DTCs from ECM (and TCM later) and decode them to P-codes with descriptions. SSM2 has a dedicated query for this; we'd sweep modules and group results.",
             "Moderate — couple of weeks, mostly because the DTC label table has to be hand-curated per family."
         )
-        SubPage.Tuning -> Triple(
-            "Minor Tuning",
+        SubPage.Tuning -> Pair(
             "Live RAM-resident tunables: rev limiter, fuel cutoff, idle target, etc. Reads via SSM2 0xA8, writes via 0xB8. Addresses come from the per-ECU calibration definitions (EcuFlash/RomRaider XML).",
             "Few weeks once we settle on which parameters are in scope and pull the EZ30R definitions in."
         )
-        SubPage.Parameters -> Triple("Parameters", "", "")
+        SubPage.Parameters -> Pair("", "")
     }
 
-    Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceBg)
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        ) {
-            Text(
-                text = title,
-                color = Accent,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.CenterStart)
-            )
-            AdapterPill(
-                uiState = uiState,
-                onDiscoverClick = onDiscoverDevice,
-                modifier = Modifier.align(Alignment.Center)
-            )
-            CloseButton(
-                onClick = onClose,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
-        }
-        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BorderGray))
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Text(
-                text = "Coming soon",
-                color = Accent,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.titleLarge
-            )
-            Text(
-                text = blurb,
-                color = InkPrimary,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            CategoryHeader("EFFORT")
-            Text(
-                text = eta,
-                color = InkPrimary,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace
-            )
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text(
+            text = "Coming soon",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.titleLarge
+        )
+        Text(
+            text = blurb,
+            color = InkPrimary,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        CategoryHeader("EFFORT")
+        Text(
+            text = eta,
+            color = InkPrimary,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace
+        )
     }
 }
 
