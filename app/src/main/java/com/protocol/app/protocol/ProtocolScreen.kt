@@ -187,6 +187,11 @@ fun ProtocolScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             ProtocolHeader(
                 subPageTitle = subPageTitle,
+                // Hamburger is only meaningful on Live Data (opens the
+                // Parameters menu for managing gauges). Home is the root
+                // and has no right-side action.
+                showHamburger = uiState.activeSubPage == null &&
+                    pagerState.currentPage == 1,
                 onHamburger = { onOpenSubPage(SubPage.Parameters) },
                 onClose = onCloseSubPage
             )
@@ -306,6 +311,7 @@ private fun drawY2kBackgroundDecor(scope: androidx.compose.ui.graphics.drawscope
 @Composable
 private fun ProtocolHeader(
     subPageTitle: String?,
+    showHamburger: Boolean,
     onHamburger: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -313,7 +319,7 @@ private fun ProtocolHeader(
         modifier = Modifier
             .fillMaxWidth()
             .background(brush = headerBrush)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
     ) {
         // Sub-page title on the left (none on the main pager — the logo
         // alone identifies the app and the visible page is implied by
@@ -334,19 +340,21 @@ private fun ProtocolHeader(
             contentDescription = "PROTOCOL",
             contentScale = ContentScale.Fit,
             modifier = Modifier
-                .height(96.dp)
+                .height(80.dp)
                 .align(Alignment.Center)
         )
 
-        // Hamburger on the main pager; close X on any sub-page.
-        if (subPageTitle == null) {
-            HamburgerButton(
-                onClick = onHamburger,
+        // Right-side action varies by where the user is:
+        //   sub-page  → close X
+        //   Live Data → hamburger (opens Parameters)
+        //   Home      → nothing (no action available there)
+        when {
+            subPageTitle != null -> CloseButton(
+                onClick = onClose,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
-        } else {
-            CloseButton(
-                onClick = onClose,
+            showHamburger -> HamburgerButton(
+                onClick = onHamburger,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
@@ -989,14 +997,17 @@ private fun ModeButton(
         onClick = onClick,
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (active) PassGreen else SurfaceAlt,
-            contentColor = if (active) Color.White else InkPrimary,
-            disabledContainerColor = SurfaceAlt.copy(alpha = 0.5f),
+            // Active state stays green to communicate "live" — but the
+            // Y2K shape + Accent border match the home menu / probe
+            // button so the whole app reads as one button family.
+            containerColor = if (active) PassGreen else SurfaceBg,
+            contentColor = Color.White,
+            disabledContainerColor = SurfaceBg.copy(alpha = 0.5f),
             disabledContentColor = NeutralGray
         ),
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(1.dp, if (active) PassGreen else BorderGray),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        shape = y2kCornerShape(),
+        border = BorderStroke(1.dp, Accent),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp),
         modifier = modifier
     ) {
         Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
@@ -1313,19 +1324,19 @@ private fun EditModeOverlay(
                 .width(EDIT_BAR_THICKNESS)
         )
 
-        // Center X — removes the gauge entirely. Sits above the value text;
-        // the user can still see the parameter name behind the red circle so
-        // they know what they're about to delete.
+        // Center X — removes the gauge entirely. Kept small (28dp) so it
+        // doesn't eat the body's drag-to-move surface area; the user
+        // dragging the gauge around shouldn't accidentally hit delete.
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
-                .size(40.dp)
+                .size(28.dp)
                 .background(Color(0xCCEF4444), CircleShape)
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(modifier = Modifier.size(18.dp)) {
-                val stroke = 2.5f.dp.toPx()
+            Canvas(modifier = Modifier.size(12.dp)) {
+                val stroke = 2.dp.toPx()
                 drawLine(
                     color = Color.White,
                     start = Offset(size.width * 0.2f, size.height * 0.2f),
@@ -1414,9 +1425,12 @@ private fun DragBar(
 private fun SmallLogButton(text: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = SurfaceAlt, contentColor = InkPrimary),
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(1.dp, BorderGray),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SurfaceBg,
+            contentColor = Color.White
+        ),
+        shape = y2kCornerShape(),
+        border = BorderStroke(1.dp, Accent),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
@@ -1463,11 +1477,14 @@ private val csvTimeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 private fun SmallActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Button(
         onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = SurfaceAlt, contentColor = InkPrimary),
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(1.dp, BorderGray),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SurfaceBg,
+            contentColor = Color.White
+        ),
+        shape = y2kCornerShape(),
+        border = BorderStroke(1.dp, Accent),
         modifier = modifier
-    ) { Text(text) }
+    ) { Text(text, color = Color.White) }
 }
 
 // ─── Outcome & Run Log (debug page) ──────────────────────────────────────────
