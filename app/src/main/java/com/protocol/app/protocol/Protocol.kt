@@ -16,6 +16,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.collectAsState
@@ -107,6 +108,10 @@ class Protocol : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // installSplashScreen() must be called BEFORE super.onCreate so
+        // the system swaps the splash theme out before content draws.
+        // Backported to pre-Android-12 via androidx.core:core-splashscreen.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
@@ -121,6 +126,7 @@ class Protocol : ComponentActivity() {
         viewModel.attachSessionManager(sessionManager)
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
+        viewModel.attachSettingsStore(SettingsStore(applicationContext))
 
         refreshConnectionStatus()
 
@@ -164,7 +170,11 @@ class Protocol : ComponentActivity() {
                     onCopySessionLog = { copySessionLogToClipboard() },
                     onExportSessionLog = { launchExportSessionLog() },
                     onPickBackground = { launchBackgroundPicker() },
-                    onClearBackground = { viewModel.setBackgroundUri(null) }
+                    onClearBackground = { viewModel.setBackgroundUri(null) },
+                    onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
+                    onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
+                    onDevModeChange = { on -> viewModel.setDevMode(on) },
+                    onResetLayout = { viewModel.resetLayout() }
                 )
             }
         }

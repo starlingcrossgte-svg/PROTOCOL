@@ -140,6 +140,10 @@ fun ProtocolScreen(
     onExportSessionLog: () -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
+    onPollIntervalChange: (Int) -> Unit,
+    onSessionLogMaxChange: (Int) -> Unit,
+    onDevModeChange: (Boolean) -> Unit,
+    onResetLayout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -185,6 +189,12 @@ fun ProtocolScreen(
 
         // Layer 3 — actual content.
         Column(modifier = Modifier.fillMaxSize()) {
+            // Connection status stripe — 3dp colored bar at the very top
+            // of the screen. Always visible across every page so the user
+            // can tell at a glance whether the adapter is alive. Replaces
+            // the old AdapterPill without occupying meaningful real estate.
+            ConnectionStatusStripe(uiState.connectionStatus)
+
             ProtocolHeader(
                 subPageTitle = subPageTitle,
                 // Hamburger is only meaningful on Live Data (opens the
@@ -237,7 +247,11 @@ fun ProtocolScreen(
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,
                         onPickBackground = onPickBackground,
-                        onClearBackground = onClearBackground
+                        onClearBackground = onClearBackground,
+                        onPollIntervalChange = onPollIntervalChange,
+                        onSessionLogMaxChange = onSessionLogMaxChange,
+                        onDevModeChange = onDevModeChange,
+                        onResetLayout = onResetLayout
                     )
                     SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)
@@ -304,6 +318,25 @@ private fun drawY2kBackgroundDecor(scope: androidx.compose.ui.graphics.drawscope
         w * 0.10f to h * 0.97f,
         0f to h * 0.96f
     ))
+}
+
+// ─── Connection status stripe ───────────────────────────────────────────────
+
+@Composable
+private fun ConnectionStatusStripe(status: ConnectionStatus) {
+    val color = when (status) {
+        is ConnectionStatus.Connected -> PassGreen
+        is ConnectionStatus.Ready,
+        is ConnectionStatus.PermissionRequired -> Accent
+        is ConnectionStatus.Error,
+        ConnectionStatus.NoDevice -> FailRed
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .background(color)
+    )
 }
 
 // ─── Shared header / footer ─────────────────────────────────────────────────
@@ -563,21 +596,16 @@ private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) 
 
 // ─── Page 0: Home ────────────────────────────────────────────────────────────
 //
-// Replaces the old Debug page. Layout (top to bottom):
-//   - Text logo + app version
-//   - Four menu buttons that push sub-pages (Settings, Flash, Diagnostics,
-//     Tuning — each currently a Coming-soon stub)
-//   - Test SSM2 Probe button. Hidden inside it: 10 quick taps (each
-//     within 1.5 s of the previous) reveal the dev-mode "Run Log" card
-//     and the Clear / Copy / Export log buttons. The probe still fires
-//     normally each tap; the VM's internal re-entry guard makes back-
-//     to-back taps a no-op while a probe is in flight.
+// Layout (top to bottom):
+//   - One-line app subtitle + version
+//   - Four menu buttons (Settings, Flash, Diagnostics, Tuning)
+//   - Test SSM2 Probe button (runs the probe; auto-discover wraps it
+//     in the Activity when no adapter is connected)
 //   - OutcomeCard (shown after any probe run)
-//   - 10-tap-revealed dev section: Clear/Copy/Export Log + RunLogCard
+//   - Dev panel — Clear/Copy/Export Log + RunLogCard. Visible only when
+//     settings.devMode is on (toggled from Settings → Developer Mode).
+//     Replaces the old 10-tap easter egg.
 //   - Swipe hint at the bottom
-
-private const val RUN_LOG_UNLOCK_TAP_COUNT = 10
-private const val RUN_LOG_UNLOCK_TAP_WINDOW_MS = 1500L
 
 @Composable
 private fun HomePage(
@@ -588,14 +616,6 @@ private fun HomePage(
     onExportLog: () -> Unit,
     onOpenSubPage: (SubPage) -> Unit
 ) {
-    // Easter-egg state. Lives in the composable's remember scope so it
-    // survives recomposition but resets on process restart — that's fine,
-    // we don't want the dev panel pinned forever just because someone
-    // mashed the button once.
-    var rapidTapCount by remember { mutableStateOf(0) }
-    var lastTapMs by remember { mutableStateOf(0L) }
-    var runLogRevealed by remember { mutableStateOf(false) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -629,21 +649,9 @@ private fun HomePage(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Test SSM2 Probe — also the unlock surface for the run log.
+        // Test SSM2 Probe.
         Button(
-            onClick = {
-                val now = System.currentTimeMillis()
-                rapidTapCount = if (now - lastTapMs < RUN_LOG_UNLOCK_TAP_WINDOW_MS) {
-                    rapidTapCount + 1
-                } else {
-                    1
-                }
-                lastTapMs = now
-                if (rapidTapCount >= RUN_LOG_UNLOCK_TAP_COUNT && !runLogRevealed) {
-                    runLogRevealed = true
-                }
-                onRunProbe()
-            },
+            onClick = onRunProbe,
             colors = ButtonDefaults.buttonColors(
                 containerColor = Color(0xFFFF6A00),
                 contentColor = Color.Black,
@@ -665,12 +673,12 @@ private fun HomePage(
         }
 
         // Outcome stays visible after any probe so the user can see the
-        // last result without digging into the dev panel.
+        // last result without flipping into the dev panel.
         OutcomeCard(uiState)
 
-        // Dev panel — hidden until the 10-tap unlock. Same controls as the
-        // old Debug page so nothing is lost.
-        if (runLogRevealed) {
+        // Dev panel — Clear/Copy/Export Log + RunLogCard. Gated on
+        // settings.devMode. Toggle in Settings → Developer Mode.
+        if (uiState.settings.devMode) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -728,15 +736,20 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
     }
 }
 
-// Settings sub-page. First setting wired up: a user-chosen background
-// image. More settings (units, baud override, etc.) get added here in
-// future phases. Title + close X live in the shared header.
+// Settings sub-page. Background image, polling, session log size,
+// layout reset, developer mode. Title + close X live in the shared
+// header.
 @Composable
 private fun SettingsBody(
     uiState: ProtocolUiState,
     onPickBackground: () -> Unit,
-    onClearBackground: () -> Unit
+    onClearBackground: () -> Unit,
+    onPollIntervalChange: (Int) -> Unit,
+    onSessionLogMaxChange: (Int) -> Unit,
+    onDevModeChange: (Boolean) -> Unit,
+    onResetLayout: () -> Unit
 ) {
+    val s = uiState.settings
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -744,6 +757,7 @@ private fun SettingsBody(
             .padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // ── Background ─────────────────────────────────────────────
         CategoryHeader("BACKGROUND")
         Text(
             text = if (uiState.backgroundUri == null)
@@ -754,60 +768,152 @@ private fun SettingsBody(
             style = MaterialTheme.typography.bodySmall,
             fontFamily = FontFamily.Monospace
         )
+        SettingsButton(
+            label = if (uiState.backgroundUri == null) "Choose Background" else "Change Background",
+            onClick = onPickBackground
+        )
+        if (uiState.backgroundUri != null) {
+            SettingsButton(label = "Clear Background", onClick = onClearBackground)
+        }
+        SettingsHelp("Pick any image from your gallery. A 50% dark overlay is applied automatically so text stays readable against bright photos.")
 
-        Button(
-            onClick = onPickBackground,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = SurfaceBg,
-                contentColor = InkPrimary
-            ),
-            shape = y2kCornerShape(),
-            border = BorderStroke(1.dp, Accent),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                horizontal = 16.dp, vertical = 14.dp
-            ),
-            modifier = Modifier.fillMaxWidth()
+        // ── Polling ────────────────────────────────────────────────
+        CategoryHeader("POLLING")
+        SliderRow(
+            label = "Poll interval",
+            value = s.pollIntervalMs,
+            suffix = "ms",
+            range = AppSettings.POLL_INTERVAL_MIN..AppSettings.POLL_INTERVAL_MAX,
+            stepDp = 50,
+            onChange = onPollIntervalChange
+        )
+        SettingsHelp("Lower = faster gauge updates, more K-line traffic. Changes apply on the next Read Live Data.")
+
+        // ── Session log ────────────────────────────────────────────
+        CategoryHeader("SESSION LOG")
+        SliderRow(
+            label = "Max rows",
+            value = s.sessionLogMaxSize,
+            suffix = "",
+            range = AppSettings.SESSION_LOG_MIN..AppSettings.SESSION_LOG_MAX,
+            stepDp = 500,
+            onChange = onSessionLogMaxChange
+        )
+        SettingsHelp("Older rows drop off when the cap is reached. Applies live to the running session.")
+
+        // ── Layout ─────────────────────────────────────────────────
+        CategoryHeader("LAYOUT")
+        SettingsButton(label = "Reset Gauge Layout", onClick = onResetLayout)
+        SettingsHelp("Clears all gauges from Live Data. Add new ones from the Parameters menu.")
+
+        // ── Developer ──────────────────────────────────────────────
+        CategoryHeader("DEVELOPER")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (uiState.backgroundUri == null) "Choose Background"
-                else "Change Background",
+                "Developer Mode",
+                color = Color.White,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            androidx.compose.material3.Switch(
+                checked = s.devMode,
+                onCheckedChange = onDevModeChange,
+                colors = androidx.compose.material3.SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Accent,
+                    uncheckedThumbColor = InkMuted,
+                    uncheckedTrackColor = SurfaceAlt,
+                    uncheckedBorderColor = BorderGray
+                )
             )
         }
+        SettingsHelp("Reveals the SSM2 Run Log + Clear/Copy/Export Log buttons on the Home page. For debugging adapter / protocol issues.")
+    }
+}
 
-        if (uiState.backgroundUri != null) {
-            Button(
-                onClick = onClearBackground,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = SurfaceAlt,
-                    contentColor = InkPrimary
-                ),
-                shape = y2kCornerShape(),
-                border = BorderStroke(1.dp, BorderGray),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 16.dp, vertical = 14.dp
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "Clear Background",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White
-                )
-            }
-        }
-
+@Composable
+private fun SettingsButton(label: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SurfaceBg,
+            contentColor = Color.White
+        ),
+        shape = y2kCornerShape(),
+        border = BorderStroke(1.dp, Accent),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 16.dp, vertical = 14.dp
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Text(
-            text = "Pick any image from your gallery. A 50% dark overlay is applied automatically so text stays readable against bright photos.",
-            color = NeutralGray,
-            style = MaterialTheme.typography.labelSmall,
+            label,
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(top = 4.dp)
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
         )
     }
+}
+
+@Composable
+private fun SettingsHelp(text: String) {
+    Text(
+        text = text,
+        color = NeutralGray,
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun SliderRow(
+    label: String,
+    value: Int,
+    suffix: String,
+    range: IntRange,
+    stepDp: Int,
+    onChange: (Int) -> Unit
+) {
+    val steps = ((range.last - range.first) / stepDp).coerceAtLeast(0) - 1
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color = Color.White,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = if (suffix.isEmpty()) "$value" else "$value $suffix",
+            color = Accent,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+    androidx.compose.material3.Slider(
+        value = value.toFloat(),
+        onValueChange = { onChange(it.toInt()) },
+        valueRange = range.first.toFloat()..range.last.toFloat(),
+        steps = if (steps > 0) steps else 0,
+        colors = androidx.compose.material3.SliderDefaults.colors(
+            thumbColor = Accent,
+            activeTrackColor = Accent,
+            inactiveTrackColor = SurfaceAlt,
+            activeTickColor = SurfaceBg,
+            inactiveTickColor = BorderGray
+        )
+    )
 }
 
 // Generic "coming soon" body. Title + close X live in the shared header;

@@ -30,6 +30,7 @@ class ProtocolViewModel : ViewModel() {
     private var runJob: Job? = null
     private var layoutStore: GaugeLayoutStore? = null
     private var backgroundStore: BackgroundStore? = null
+    private var settingsStore: SettingsStore? = null
 
     // Action the user requested while the adapter wasn't yet connected.
     // setOpenSession replays this once a session is open so the user
@@ -67,6 +68,43 @@ class ProtocolViewModel : ViewModel() {
         if (_uiState.value.backgroundUri == uri) return
         _uiState.value = _uiState.value.copy(backgroundUri = uri)
         backgroundStore?.save(uri)
+    }
+
+    /**
+     * Wire the persistent settings store. Loads existing prefs and pushes
+     * them into UiState so the rest of the app sees the user's last values
+     * on first composition.
+     */
+    fun attachSettingsStore(store: SettingsStore) {
+        settingsStore = store
+        _uiState.value = _uiState.value.copy(settings = store.load())
+    }
+
+    private fun updateSettings(transform: (AppSettings) -> AppSettings) {
+        val next = transform(_uiState.value.settings)
+        if (next == _uiState.value.settings) return
+        _uiState.value = _uiState.value.copy(settings = next)
+        settingsStore?.save(next)
+    }
+
+    fun setPollIntervalMs(ms: Int) = updateSettings {
+        it.copy(pollIntervalMs = ms.coerceIn(AppSettings.POLL_INTERVAL_MIN, AppSettings.POLL_INTERVAL_MAX))
+    }
+
+    fun setSessionLogMaxSize(rows: Int) = updateSettings {
+        it.copy(sessionLogMaxSize = rows.coerceIn(AppSettings.SESSION_LOG_MIN, AppSettings.SESSION_LOG_MAX))
+    }
+
+    fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
+
+    /**
+     * Clear all gauges from the Live Data page. Persists immediately.
+     * Surfaced from Settings → Reset Gauge Layout.
+     */
+    fun resetLayout() {
+        val empty = GaugeLayout()
+        _uiState.value = _uiState.value.copy(gaugeLayout = empty)
+        layoutStore?.save(empty)
     }
 
     private fun updateLayout(transform: (GaugeLayout) -> GaugeLayout) {
@@ -223,6 +261,18 @@ class ProtocolViewModel : ViewModel() {
             return
         }
 
+        // Only poll PIDs the user has placed on the Live Data page —
+        // saves K-line bandwidth and keeps the log columns aligned with
+        // what's visible. Refuse to start with an empty layout instead
+        // of running an empty A8 query.
+        val pidsOnPage = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in state.gaugeLayout.pidIds }
+        if (pidsOnPage.isEmpty()) {
+            _uiState.value = state.copy(
+                statusMessage = "Add gauges from the Parameters menu before reading live data."
+            )
+            return
+        }
+
         _uiState.value = state.copy(
             isReadingLive = true,
             isLogging = recordToLog,
@@ -231,6 +281,8 @@ class ProtocolViewModel : ViewModel() {
             sessionLog = if (recordToLog) emptyList() else state.sessionLog,
             statusMessage = if (client.channelInitialized) "Reusing channel..." else "Initializing channel..."
         )
+
+        val pollIntervalMs = state.settings.pollIntervalMs.toLong()
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
             client.drainResponseBuffer()
@@ -256,12 +308,13 @@ class ProtocolViewModel : ViewModel() {
                     "Reading live data..."
             )
 
-            val poller = Ssm2Poller(client, Ssm2Pids.DEFAULT_DEMO_PIDS)
+            val poller = Ssm2Poller(client, pidsOnPage)
             try {
-                poller.startFlow(200L).collect { sample ->
+                poller.startFlow(pollIntervalMs).collect { sample ->
                     val current = _uiState.value
+                    val maxRows = current.settings.sessionLogMaxSize
                     val nextSessionLog = if (current.isLogging) {
-                        val trimmed = if (current.sessionLog.size >= 1000)
+                        val trimmed = if (current.sessionLog.size >= maxRows)
                             current.sessionLog.drop(1)
                         else
                             current.sessionLog

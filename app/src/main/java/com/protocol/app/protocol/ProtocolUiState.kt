@@ -45,7 +45,9 @@ data class ProtocolUiState(
     /** True while the user is moving/resizing/removing gauges. Transient — not persisted. */
     val editMode: Boolean = false,
     /** URI of the user-chosen background image. Null = default Y2K dark surface. */
-    val backgroundUri: String? = null
+    val backgroundUri: String? = null,
+    /** Tunable preferences from the Settings sub-page. */
+    val settings: AppSettings = AppSettings()
 ) {
     /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
     val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds

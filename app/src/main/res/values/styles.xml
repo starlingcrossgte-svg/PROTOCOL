@@ -1,3 +1,18 @@
 <resources>
-    <style name="Theme.App" parent="Theme.AppCompat.Light.NoActionBar" />
+    <!-- App theme. Dark base so the system status bar / Compose default
+         surfaces don't render light surfaces behind our content. The
+         actual Compose UI sets its own MaterialTheme; this controls the
+         window decor before composition starts. -->
+    <style name="Theme.App" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/screen_bg</item>
+    </style>
+
+    <!-- Splash screen theme — shown by the system from app launch until
+         the Activity's window is ready. Backed by androidx.core
+         splashscreen library which backports the API to pre-12 Androids. -->
+    <style name="Theme.App.SplashScreen" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/screen_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.App</item>
+    </style>
 </resources>
