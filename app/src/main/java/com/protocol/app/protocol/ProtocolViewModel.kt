@@ -14,7 +14,6 @@ import com.protocol.app.openport2.TactrixHex
 import com.protocol.app.openport2.UsbDisconnectedException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,10 +28,66 @@ class ProtocolViewModel : ViewModel() {
     private var openSession: OpenPort2UsbSession? = null
     private var tactrixClient: TactrixClient? = null
     private var runJob: Job? = null
-    private var tappedParamClearJob: Job? = null
+    private var layoutStore: GaugeLayoutStore? = null
 
     fun attachSessionManager(manager: OpenPort2UsbSessionManager) {
         sessionManager = manager
+    }
+
+    /**
+     * Wire the persistent gauge-layout store. If a saved layout exists, use
+     * it; otherwise seed the page with [Ssm2Pids.DEFAULT_DEMO_PIDS] as 1x1
+     * gauges so first-launch isn't an empty page before the Parameters menu
+     * ships.
+     */
+    fun attachLayoutStore(store: GaugeLayoutStore) {
+        layoutStore = store
+        val loaded = store.load()
+        val initial = loaded ?: defaultSeedLayout()
+        _uiState.value = _uiState.value.copy(gaugeLayout = initial)
+        if (loaded == null) store.save(initial)
+    }
+
+    private fun defaultSeedLayout(): GaugeLayout {
+        var layout = GaugeLayout()
+        for (pid in Ssm2Pids.DEFAULT_DEMO_PIDS) layout = layout.withAdded(pid.id)
+        return layout
+    }
+
+    private fun updateLayout(transform: (GaugeLayout) -> GaugeLayout) {
+        val current = _uiState.value.gaugeLayout
+        val next = transform(current)
+        if (next === current) return
+        _uiState.value = _uiState.value.copy(gaugeLayout = next)
+        layoutStore?.save(next)
+    }
+
+    /** Add a gauge for [pidId] to the Live Data page if not already present. */
+    fun addGaugeForPid(pidId: String) {
+        updateLayout { it.withAdded(pidId) }
+    }
+
+    /** Remove the gauge for [pidId] from the Live Data page if present. */
+    fun removeGaugeForPid(pidId: String) {
+        updateLayout { it.withRemoved(pidId) }
+    }
+
+    /** Toggle: add the gauge if absent, remove it if present. */
+    fun toggleGaugeForPid(pidId: String) {
+        updateLayout { if (it.contains(pidId)) it.withRemoved(pidId) else it.withAdded(pidId) }
+    }
+
+    /**
+     * Move/resize an existing gauge. Returns true if the change was accepted
+     * (no overlap, fits in grid). Phase C wires this to the edit-mode drag
+     * handles; nothing calls it yet in Phase A.
+     */
+    fun resizeGauge(pidId: String, col: Int, row: Int, width: Int, height: Int): Boolean {
+        val current = _uiState.value.gaugeLayout
+        val next = current.withResized(pidId, col, row, width, height) ?: return false
+        _uiState.value = _uiState.value.copy(gaugeLayout = next)
+        layoutStore?.save(next)
+        return true
     }
 
     fun setConnectionStatus(status: ConnectionStatus, message: String = "") {
@@ -279,27 +334,6 @@ class ProtocolViewModel : ViewModel() {
 
     fun clearSessionLog() {
         _uiState.value = _uiState.value.copy(sessionLog = emptyList())
-    }
-
-    /**
-     * Toggle whether [pidId] contributes to the session log + copy/CSV
-     * output. The poller always reads all configured PIDs; this flag only
-     * filters which columns appear in the recorded/exported log. Gauges keep
-     * updating regardless.
-     */
-    fun togglePidSelected(pidId: String) {
-        val pid = Ssm2Pids.DEFAULT_DEMO_PIDS.find { it.id == pidId }
-        val current = _uiState.value.selectedPidIds
-        val next = if (pidId in current) current - pidId else current + pidId
-        _uiState.value = _uiState.value.copy(
-            selectedPidIds = next,
-            tappedParamLongName = pid?.longName
-        )
-        tappedParamClearJob?.cancel()
-        tappedParamClearJob = viewModelScope.launch {
-            delay(5000)
-            _uiState.value = _uiState.value.copy(tappedParamLongName = null)
-        }
     }
 
     override fun onCleared() {

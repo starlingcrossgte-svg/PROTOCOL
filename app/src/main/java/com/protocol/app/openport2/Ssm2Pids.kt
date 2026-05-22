@@ -23,13 +23,16 @@ package com.protocol.app.openport2
  *    0x113) follow the Subaru community mappings and produce sensible
  *    values on this ECU.
  */
+enum class Ssm2PidCategory { ECU, TCM }
+
 data class Ssm2Pid(
     val id: String,
     val displayName: String,
     val unit: String,
     val addresses: List<Ssm2Address>,
     val decode: (IntArray) -> Double,
-    val longName: String = displayName
+    val longName: String = displayName,
+    val category: Ssm2PidCategory = Ssm2PidCategory.ECU
 )
 
 object Ssm2Pids {

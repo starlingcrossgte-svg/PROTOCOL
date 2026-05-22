@@ -90,6 +90,7 @@ class Protocol : ComponentActivity() {
 
         viewModel = ViewModelProvider(this)[ProtocolViewModel::class.java]
         viewModel.attachSessionManager(sessionManager)
+        viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
 
         refreshConnectionStatus()
 
@@ -118,7 +119,6 @@ class Protocol : ComponentActivity() {
                     onStopReadingLive = { viewModel.stopReadingLive() },
                     onStartLogging = { viewModel.startLogging() },
                     onStopLogging = { viewModel.stopLogging() },
-                    onTogglePidSelected = { pidId -> viewModel.togglePidSelected(pidId) },
                     onClearLog = { viewModel.clearLog() },
                     onCopyLog = { copyLogToClipboard() },
                     onExportLog = { launchExportLog() },
@@ -284,7 +284,7 @@ class Protocol : ComponentActivity() {
         }
         val text = ProtocolLogFormatter.formatSessionLogCleanText(
             state.sessionLog,
-            state.selectedPidIds,
+            state.pidIdsOnLiveData,
             oldestFirst = true
         )
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

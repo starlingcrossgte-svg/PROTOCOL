@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,7 +19,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -57,7 +57,6 @@ private val FailRed    = Color(0xFFC92A2A)
 private val NeutralGray = Color(0xFF6B7280)
 private val SectionGray = Color(0xFF505968)
 private val InkBlack   = Color(0xFF171A20)
-private val IndicatorGreen = Color(0xFF00E676)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -69,7 +68,6 @@ fun ProtocolScreen(
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
     onStopLogging: () -> Unit,
-    onTogglePidSelected: (String) -> Unit,
     onClearLog: () -> Unit,
     onCopyLog: () -> Unit,
     onExportLog: () -> Unit,
@@ -133,7 +131,6 @@ fun ProtocolScreen(
                     onStopReadingLive = onStopReadingLive,
                     onStartLogging = onStartLogging,
                     onStopLogging = onStopLogging,
-                    onTogglePidSelected = onTogglePidSelected,
                     onClearSessionLog = onClearSessionLog,
                     onCopySessionLog = onCopySessionLog,
                     onExportSessionLog = onExportSessionLog
@@ -272,7 +269,6 @@ private fun LiveDataPage(
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
     onStopLogging: () -> Unit,
-    onTogglePidSelected: (String) -> Unit,
     onClearSessionLog: () -> Unit,
     onCopySessionLog: () -> Unit,
     onExportSessionLog: () -> Unit
@@ -310,11 +306,12 @@ private fun LiveDataPage(
             )
         }
 
-        // Gauges grid — 3x4, no surrounding card, always visible.
-        // Tiles are click-to-select: only selected PIDs appear in the
-        // session log + copy/export output. Default = all 3 active PIDs
-        // selected.
-        LiveGaugeGrid(uiState, onTogglePidSelected)
+        // Gauges grid — driven by the persisted gauge layout. Each entry is
+        // rendered at its (col, row) position. Phase A only renders 1x1
+        // cells; multi-cell spans land in Phase C. Tiles are passive — the
+        // Parameters page (Phase B) adds/removes gauges, edit mode (Phase C)
+        // moves/resizes.
+        LiveGaugeGrid(uiState)
 
         // Status line — when a gauge was tapped recently, show its full
         // parameter name (set by the ViewModel for 5s, then cleared);
@@ -376,41 +373,51 @@ private fun ModeButton(
     }
 }
 
-private const val GAUGE_COLUMNS = 3
-private const val GAUGE_TOTAL = 15
-
 @Composable
-private fun LiveGaugeGrid(
-    uiState: ProtocolUiState,
-    onTogglePidSelected: (String) -> Unit
-) {
-    val pids = Ssm2Pids.DEFAULT_DEMO_PIDS
+private fun LiveGaugeGrid(uiState: ProtocolUiState) {
+    val layout = uiState.gaugeLayout
     val live = uiState.liveValues
     val active = uiState.isReadingLive || uiState.isLogging || live.isNotEmpty()
-    val rows = GAUGE_TOTAL / GAUGE_COLUMNS
+
+    if (layout.entries.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "No gauges yet. Open the menu and choose parameters to add.",
+                color = NeutralGray,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        return
+    }
+
+    val pidById = Ssm2Pids.DEFAULT_DEMO_PIDS.associateBy { it.id }
+    val entriesByCell: Map<Pair<Int, Int>, GaugeLayoutEntry> =
+        layout.entries.associateBy { it.col to it.row }
+    val maxRow = layout.maxRow().coerceAtLeast(0)
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-        for (row in 0 until rows) {
+        for (row in 0..maxRow) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                for (col in 0 until GAUGE_COLUMNS) {
-                    val slot = row * GAUGE_COLUMNS + col
-                    val pid = pids.getOrNull(slot)
-                    if (pid != null) {
+                for (col in 0 until layout.columns) {
+                    val entry = entriesByCell[col to row]
+                    val pid = entry?.let { pidById[it.pidId] }
+                    if (entry != null && pid != null) {
                         val raw = live[pid.id]
-                        val selected = pid.id in uiState.selectedPidIds
                         LiveDataTile(
                             name = pid.displayName,
                             value = raw?.let { formatPidValue(pid.id, it) } ?: "--",
                             unit = pid.unit,
                             active = active,
-                            selected = selected,
-                            onClick = { onTogglePidSelected(pid.id) },
                             modifier = Modifier.weight(1f)
                         )
                     } else {
-                        PlaceholderTile(modifier = Modifier.weight(1f))
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -424,8 +431,6 @@ private fun LiveDataTile(
     value: String,
     unit: String,
     active: Boolean,
-    selected: Boolean,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val baseBg = if (active) Color(0xFF1A1C22) else Color(0xFF2A2C32)
@@ -433,54 +438,20 @@ private fun LiveDataTile(
         shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(containerColor = baseBg),
         border = BorderStroke(1.dp, Color(0xFF3A3C42)),
-        modifier = modifier.clickable(onClick = onClick)
-    ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(1.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(name, color = if (selected) Color(0xFFD4EFD9) else Color(0xFF9BA3AF),
-                    style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
-                Text(value, color = Color(0xFFEFEFEF), fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(unit, color = Color(0xFF6B7280), style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace)
-            }
-            if (selected) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 4.dp, end = 4.dp)
-                        .size(8.dp)
-                        .background(IndicatorGreen, CircleShape)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderTile(modifier: Modifier = Modifier) {
-    Card(
-        shape = RoundedCornerShape(6.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF24262C)),
-        border = BorderStroke(1.dp, Color(0xFF3A3C42)),
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(1.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("—", color = Color(0xFF4A4D55), style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace)
-            Text("—", color = Color(0xFF4A4D55), fontFamily = FontFamily.Monospace,
+            Text(name, color = Color(0xFF9BA3AF),
+                style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+            Text(value, color = Color(0xFFEFEFEF), fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-            Text(" ", color = Color(0xFF4A4D55), style = MaterialTheme.typography.labelSmall,
+            Text(unit, color = Color(0xFF6B7280), style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace)
         }
     }
@@ -518,7 +489,7 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
                 Text(
                     text = ProtocolLogFormatter.formatSessionLogCleanText(
                         uiState.sessionLog,
-                        uiState.selectedPidIds
+                        uiState.pidIdsOnLiveData
                     ),
                     color = Color(0xFFEFEFEF),
                     fontFamily = FontFamily.Monospace,
@@ -871,7 +842,7 @@ object ProtocolLogFormatter {
     fun formatSessionLogCsv(uiState: ProtocolUiState): String {
         val log = uiState.sessionLog
         if (log.isEmpty()) return ""
-        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in uiState.selectedPidIds }
+        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in uiState.pidIdsOnLiveData }
         if (pids.isEmpty()) return ""
         val sb = StringBuilder()
         sb.append("Timestamp")
@@ -894,18 +865,18 @@ object ProtocolLogFormatter {
      * context: fixed-width columns, single-space delimiters, ASCII-only
      * (degree sign stripped from unit labels).
      *
-     * Only PIDs whose ids are in [selectedPidIds] are included as columns —
-     * unselected gauges are excluded from the output, per the click-to-select
-     * UX. If no PIDs are selected, an explanatory placeholder is returned.
+     * Only PIDs in [pidIdsOnPage] (i.e., gauges currently placed on the Live
+     * Data page) become columns. If the page is empty, an explanatory
+     * placeholder is returned.
      */
     fun formatSessionLogCleanText(
         log: List<PollSample>,
-        selectedPidIds: Set<String>,
+        pidIdsOnPage: Set<String>,
         oldestFirst: Boolean = false
     ): String {
-        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in selectedPidIds }
+        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in pidIdsOnPage }
         if (pids.isEmpty()) {
-            return "(no gauges selected — tap a gauge to include it in the log)"
+            return "(no gauges — open the menu and add parameters to log them)"
         }
         val headers = pids.map(::pidHeaderText)
         val maxValueWidths = pids.map { maxValueWidth(it.id) }

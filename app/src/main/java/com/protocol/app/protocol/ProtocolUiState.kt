@@ -3,17 +3,7 @@ package com.protocol.app.protocol
 import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2DecodeBundle
 import com.protocol.app.openport2.Ssm2EcmProbe
-import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.TactrixCommandLog
-
-/*
- * Default selection = every PID the poller knows about. Derived from
- * [Ssm2Pids.DEFAULT_DEMO_PIDS] so adding or removing a PID can't desync
- * this list from the actual catalog. UX for choosing a different default
- * is the user's call (parameter-selection menu still to be designed).
- */
-private val DEFAULT_SELECTED_PID_IDS: Set<String> =
-    Ssm2Pids.DEFAULT_DEMO_PIDS.map { it.id }.toSet()
 
 data class ProtocolUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.NoDevice,
@@ -29,9 +19,12 @@ data class ProtocolUiState(
     val liveValues: Map<String, Double> = emptyMap(),
     val lastSampleTimestampMs: Long = 0L,
     val sessionLog: List<PollSample> = emptyList(),
-    val selectedPidIds: Set<String> = DEFAULT_SELECTED_PID_IDS,
+    val gaugeLayout: GaugeLayout = GaugeLayout(),
     val tappedParamLongName: String? = null
-)
+) {
+    /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
+    val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds
+}
 
 sealed class ConnectionStatus {
     object NoDevice : ConnectionStatus()
