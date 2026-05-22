@@ -319,7 +319,7 @@ private fun ProtocolHeader(
         modifier = Modifier
             .fillMaxWidth()
             .background(brush = headerBrush)
-            .padding(horizontal = 12.dp, vertical = 24.dp)
+            .padding(horizontal = 12.dp, vertical = 12.dp)
     ) {
         // Sub-page title on the left (none on the main pager — the logo
         // alone identifies the app and the visible page is implied by
