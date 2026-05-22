@@ -17,6 +17,14 @@ sealed class SubPage {
     object Tuning : SubPage()
 }
 
+/**
+ * Action the user kicked off from a button on Home / Live Data that needs
+ * a connected adapter. If we're not connected yet, the Activity stashes
+ * this in the VM and starts USB discovery; setOpenSession replays the
+ * action once the session is up.
+ */
+enum class PendingAction { Probe, ReadLive, LogLive }
+
 data class ProtocolUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.NoDevice,
     val statusMessage: String = "",

@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -80,14 +81,20 @@ import java.util.Locale
 // pure white (InkPrimary) except for the few intentional muted bits
 // (InkMuted) and accent colors. PassGreen/FailRed bumped saturation so they
 // still read clearly against the dark backgrounds.
-private val ScreenBg    = Color(0xFF0F1115)
-private val SurfaceBg   = Color(0xFF1A1C22)
-private val SurfaceAlt  = Color(0xFF2A2C32)
+// Dark Y2K palette, lightened a touch from the previous pass so the
+// background spikes have something to read against. Solid colors are
+// the "low" end of each surface; the matching gradient brushes blend
+// to a darker shade for depth (see headerBrush / surfaceBrush below).
+private val ScreenBg    = Color(0xFF181B22)
+private val SurfaceBg   = Color(0xFF22252C)
+private val SurfaceAlt  = Color(0xFF2E323A)
 private val BorderGray  = Color(0xFF3A3C42)
-// Accent flipped from the old material blue to neon green per the Y2K UI
-// direction. Used for non-text decoration only — icon strokes, the header
-// divider stripe, edit-mode gauge border, drag-bar visuals.
-private val Accent      = Color(0xFF22FF77)
+// Accent reverted from neon green to burnt orange — the "shaded" tone the
+// user liked on the probe button. Less saturated than #FF6A00 so it reads
+// with more depth and less retina burn. Used for non-text decoration
+// only: hamburger lines, close-X strokes, header/footer stripes,
+// edit-mode gauge border, drag-bar visuals.
+private val Accent      = Color(0xFFB85419)
 private val PassGreen   = Color(0xFF22C55E)
 private val FailRed     = Color(0xFFEF4444)
 private val NeutralGray = Color(0xFFB8B8C0)
@@ -99,11 +106,20 @@ private val InkMuted    = Color(0xFFB8B8C0)
 // the Y2K "terminal panel" feel. Sparing — most surfaces stay rounded.
 private fun y2kCornerShape() = CutCornerShape(topEnd = 10.dp, bottomStart = 10.dp)
 
+// Vertical gradient brushes — top of the surface a touch lighter than the
+// bottom, gives buttons and panels visible depth without needing real
+// shadows or textures.
+private val headerBrush = androidx.compose.ui.graphics.Brush.verticalGradient(
+    colors = listOf(Color(0xFF2A2D34), Color(0xFF1A1C22))
+)
+private val surfaceBrush = androidx.compose.ui.graphics.Brush.verticalGradient(
+    colors = listOf(Color(0xFF272A31), Color(0xFF1B1D24))
+)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ProtocolScreen(
     uiState: ProtocolUiState,
-    onDiscoverDevice: () -> Unit,
     onOpenSubPage: (SubPage) -> Unit,
     onCloseSubPage: () -> Unit,
     onToggleGaugeForPid: (String) -> Unit,
@@ -142,15 +158,21 @@ fun ProtocolScreen(
     // openSubPage clears editMode anyway, so the two never both fire.
     BackHandler(enabled = uiState.activeSubPage != null) { onCloseSubPage() }
 
-    Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(ScreenBg)
+            .drawBehind { drawY2kBackgroundDecor(this) }
+    ) {
         ProtocolHeader(
             subPageTitle = subPageTitle,
             onHamburger = { onOpenSubPage(SubPage.Parameters) },
             onClose = onCloseSubPage
         )
 
-        // Body — main pager or sub-page content. weight(1f) lets the
-        // adapter footer claim its natural height at the bottom.
+        // Body — main pager or sub-page content. Adapter pill is gone from
+        // the chrome; discovery now triggers off the action buttons (Test
+        // Probe / Read Live / Log Live).
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (uiState.activeSubPage) {
                 null -> HorizontalPager(
@@ -190,9 +212,65 @@ fun ProtocolScreen(
                     StubBody(page = uiState.activeSubPage!!)
             }
         }
-
-        AdapterFooter(uiState = uiState, onDiscoverDevice = onDiscoverDevice)
     }
+}
+
+// Decorative background — sharp angular black "spikes" scattered around
+// the edges of the screen for Y2K terminal-panel depth without overdoing
+// it. Drawn via Modifier.drawBehind so it sits underneath the entire
+// content stack. Alpha kept low so the shapes whisper rather than shout.
+private fun drawY2kBackgroundDecor(scope: androidx.compose.ui.graphics.drawscope.DrawScope) = with(scope) {
+    val w = size.width
+    val h = size.height
+    val deep = Color(0xFF000000).copy(alpha = 0.55f)
+
+    fun spike(points: List<Pair<Float, Float>>) {
+        val p = androidx.compose.ui.graphics.Path().apply {
+            moveTo(points[0].first, points[0].second)
+            for (i in 1 until points.size) lineTo(points[i].first, points[i].second)
+            close()
+        }
+        drawPath(path = p, color = deep)
+    }
+
+    // Top-left horizontal shard pointing right.
+    spike(listOf(
+        0f to h * 0.04f,
+        w * 0.32f to h * 0.07f,
+        w * 0.18f to h * 0.09f,
+        0f to h * 0.08f
+    ))
+
+    // Right edge thin shard pointing left.
+    spike(listOf(
+        w to h * 0.22f,
+        w * 0.66f to h * 0.26f,
+        w * 0.82f to h * 0.28f,
+        w to h * 0.27f
+    ))
+
+    // Left mid-ish stubby triangle pointing right.
+    spike(listOf(
+        0f to h * 0.50f,
+        w * 0.18f to h * 0.52f,
+        0f to h * 0.54f
+    ))
+
+    // Bottom-right diagonal slash.
+    spike(listOf(
+        w to h * 0.78f,
+        w * 0.62f to h * 0.86f,
+        w * 0.78f to h * 0.88f,
+        w to h * 0.83f
+    ))
+
+    // Bottom-left small chevron.
+    spike(listOf(
+        0f to h * 0.93f,
+        w * 0.22f to h * 0.95f,
+        w * 0.10f to h * 0.97f,
+        0f to h * 0.96f
+    ))
 }
 
 // ─── Shared header / footer ─────────────────────────────────────────────────
@@ -206,7 +284,7 @@ private fun ProtocolHeader(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceBg)
+            .background(brush = headerBrush)
             .padding(horizontal = 12.dp, vertical = 4.dp)
     ) {
         // Sub-page title on the left (none on the main pager — the logo
@@ -250,22 +328,6 @@ private fun ProtocolHeader(
     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
 }
 
-@Composable
-private fun AdapterFooter(
-    uiState: ProtocolUiState,
-    onDiscoverDevice: () -> Unit
-) {
-    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceBg)
-            .padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        AdapterPill(uiState = uiState, onDiscoverClick = onDiscoverDevice)
-    }
-}
 
 // ─── Parameters page ────────────────────────────────────────────────────────
 //
@@ -439,50 +501,6 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-@Composable
-private fun AdapterPill(
-    uiState: ProtocolUiState,
-    onDiscoverClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val connected = uiState.connectionStatus is ConnectionStatus.Connected
-    val label: String
-    val bgColor: Color
-    if (connected) {
-        val ids = (uiState.connectionStatus as ConnectionStatus.Connected).deviceLabel
-        label = "OpenPort 2.0  ${formatVidPidShort(ids)}"
-        bgColor = PassGreen
-    } else {
-        label = "Discover Adapter"
-        bgColor = FailRed
-    }
-    val baseModifier = modifier
-        .background(bgColor, RoundedCornerShape(6.dp))
-    val clickableModifier = if (connected) baseModifier
-        else baseModifier.clickable(onClick = onDiscoverClick)
-    Box(
-        modifier = clickableModifier.padding(horizontal = 10.dp, vertical = 5.dp)
-    ) {
-        Text(
-            text = label,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1
-        )
-    }
-}
-
-// Converts the Activity's "VID=1027 PID=52301" decimal label to a compact
-// "0403:CC4D" hex form. Drops the VID=/PID= prefixes (implied by the
-// "OpenPort 2.0" label and order) so the pill fits in the tab bar.
-private fun formatVidPidShort(label: String): String {
-    val m = Regex("""VID=(\d+)\s+PID=(\d+)""").find(label) ?: return label
-    val vid = m.groupValues[1].toIntOrNull() ?: return label
-    val pid = m.groupValues[2].toIntOrNull() ?: return label
-    return "%04X:%04X".format(vid, pid)
-}
-
 // Three-line hamburger icon, click area sized to a comfortable tap target
 // without inflating the header height. Stage 1: no-op stub. Stage 2: wired
 // to the Parameters drawer.
@@ -550,19 +568,14 @@ private fun HomePage(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App identity sits in the header logo. Home gets a slim subtitle
-        // line + version so the user knows what build they're on.
+        // App identity sits in the header logo. Home gets a single
+        // subtitle line so the user knows what build they're on without
+        // taking up real estate with stacked text.
         Text(
-            text = "OpenPort 2.0  ·  Subaru SSM2 K-line",
+            text = "OpenPort 2.0  ·  Subaru SSM2 K-line  ·  v1.0",
             color = Color.White,
             fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            text = "v1.0",
-            color = Color.White,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(bottom = 4.dp)
         )
 
@@ -745,7 +758,7 @@ private fun SwipeHintRow() {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "swipe left for Live Data →",
+            text = "swipe for Live Data →",
             color = NeutralGray,
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace
@@ -1012,6 +1025,13 @@ private fun GaugeTile(
         else -> 28.sp         // 1x1
     }
 
+    // rememberUpdatedState gives the still-running drag coroutine a
+    // pointer at the latest entry coords after a snap (entry is a value
+    // captured by closure; without this the next snap in the same drag
+    // would compute from stale col/row).
+    val latestEntry by rememberUpdatedState(entry)
+    val latestResize by rememberUpdatedState(onResize)
+
     Card(
         shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(containerColor = baseBg),
@@ -1031,6 +1051,54 @@ private fun GaugeTile(
                         }
                     )
                 }
+            }
+            // Drag the gauge body to move it. Active only in edit mode.
+            // Touches on the four drag bars or the center X hit those
+            // children first (they're drawn on top via EditModeOverlay),
+            // so this handler only fires for drags inside the body area.
+            .pointerInput(editMode, cellUnitWidthPx, cellUnitHeightPx) {
+                if (!editMode) return@pointerInput
+                var accX = 0f
+                var accY = 0f
+                val thresholdX = cellUnitWidthPx * 0.5f
+                val thresholdY = cellUnitHeightPx * 0.5f
+                detectDragGestures(
+                    onDragStart = { accX = 0f; accY = 0f },
+                    onDrag = { _, drag ->
+                        accX += drag.x
+                        accY += drag.y
+                        // Track position locally across multiple snaps in
+                        // one frame; latestEntry only updates after Compose
+                        // settles, so we can't rely on it inside the loop.
+                        val base = latestEntry
+                        var col = base.col
+                        var row = base.row
+                        val w = base.width
+                        val h = base.height
+                        while (accX >= thresholdX) {
+                            if (latestResize(col + 1, row, w, h)) {
+                                col += 1; accX -= cellUnitWidthPx
+                            } else { accX = thresholdX - 1f; break }
+                        }
+                        while (accX <= -thresholdX) {
+                            if (latestResize(col - 1, row, w, h)) {
+                                col -= 1; accX += cellUnitWidthPx
+                            } else { accX = -thresholdX + 1f; break }
+                        }
+                        while (accY >= thresholdY) {
+                            if (latestResize(col, row + 1, w, h)) {
+                                row += 1; accY -= cellUnitHeightPx
+                            } else { accY = thresholdY - 1f; break }
+                        }
+                        while (accY <= -thresholdY) {
+                            if (latestResize(col, row - 1, w, h)) {
+                                row -= 1; accY += cellUnitHeightPx
+                            } else { accY = -thresholdY + 1f; break }
+                        }
+                    },
+                    onDragEnd = { accX = 0f; accY = 0f },
+                    onDragCancel = { accX = 0f; accY = 0f }
+                )
             }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {

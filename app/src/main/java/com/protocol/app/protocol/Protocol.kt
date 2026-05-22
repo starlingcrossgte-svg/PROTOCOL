@@ -113,7 +113,6 @@ class Protocol : ComponentActivity() {
             MaterialTheme(colorScheme = colors) {
                 ProtocolScreen(
                     uiState = uiState,
-                    onDiscoverDevice = { discoverAndConnect() },
                     onOpenSubPage = { page -> viewModel.openSubPage(page) },
                     onCloseSubPage = { viewModel.closeSubPage() },
                     onToggleGaugeForPid = { pidId -> viewModel.toggleGaugeForPid(pidId) },
@@ -123,10 +122,10 @@ class Protocol : ComponentActivity() {
                     onResizeGauge = { pidId, c, r, w, h ->
                         viewModel.resizeGauge(pidId, c, r, w, h)
                     },
-                    onRunProbe = { viewModel.runProbe() },
-                    onStartReadingLive = { viewModel.startReadingLive(recordToLog = false) },
+                    onRunProbe = { runActionOrDiscover(PendingAction.Probe) },
+                    onStartReadingLive = { runActionOrDiscover(PendingAction.ReadLive) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
-                    onStartLogging = { viewModel.startLogging() },
+                    onStartLogging = { runActionOrDiscover(PendingAction.LogLive) },
                     onStopLogging = { viewModel.stopLogging() },
                     onClearLog = { viewModel.clearLog() },
                     onCopyLog = { copyLogToClipboard() },
@@ -153,6 +152,25 @@ class Protocol : ComponentActivity() {
     override fun onDestroy() {
         viewModel.clearOpenSession()
         super.onDestroy()
+    }
+
+    /**
+     * Connected path: kick off the action immediately. Disconnected path:
+     * stash the action in the VM and start USB discovery; once the session
+     * opens, ProtocolViewModel.setOpenSession replays the stashed action
+     * so the user doesn't have to tap a second time.
+     */
+    private fun runActionOrDiscover(action: PendingAction) {
+        if (viewModel.isConnected()) {
+            when (action) {
+                PendingAction.Probe -> viewModel.runProbe()
+                PendingAction.ReadLive -> viewModel.startReadingLive(recordToLog = false)
+                PendingAction.LogLive -> viewModel.startLogging()
+            }
+        } else {
+            viewModel.setPendingAction(action)
+            discoverAndConnect()
+        }
     }
 
     private fun discoverAndConnect() {

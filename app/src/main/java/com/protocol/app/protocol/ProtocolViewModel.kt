@@ -30,28 +30,27 @@ class ProtocolViewModel : ViewModel() {
     private var runJob: Job? = null
     private var layoutStore: GaugeLayoutStore? = null
 
+    // Action the user requested while the adapter wasn't yet connected.
+    // setOpenSession replays this once a session is open so the user
+    // doesn't have to tap the button a second time after granting USB
+    // permission.
+    private var pendingAction: PendingAction? = null
+
     fun attachSessionManager(manager: OpenPort2UsbSessionManager) {
         sessionManager = manager
     }
 
     /**
-     * Wire the persistent gauge-layout store. If a saved layout exists, use
-     * it; otherwise seed the page with [Ssm2Pids.DEFAULT_DEMO_PIDS] as 1x1
-     * gauges so first-launch isn't an empty page before the Parameters menu
-     * ships.
+     * Wire the persistent gauge-layout store. First-launch behavior is an
+     * empty Live Data page — the user opts in to each parameter from the
+     * Parameters menu. Existing installs that already have a saved layout
+     * keep it.
      */
     fun attachLayoutStore(store: GaugeLayoutStore) {
         layoutStore = store
-        val loaded = store.load()
-        val initial = loaded ?: defaultSeedLayout()
-        _uiState.value = _uiState.value.copy(gaugeLayout = initial)
-        if (loaded == null) store.save(initial)
-    }
-
-    private fun defaultSeedLayout(): GaugeLayout {
-        var layout = GaugeLayout()
-        for (pid in Ssm2Pids.DEFAULT_DEMO_PIDS) layout = layout.withAdded(pid.id)
-        return layout
+        val loaded = store.load() ?: GaugeLayout()
+        _uiState.value = _uiState.value.copy(gaugeLayout = loaded)
+        if (store.load() == null) store.save(loaded)
     }
 
     private fun updateLayout(transform: (GaugeLayout) -> GaugeLayout) {
@@ -126,7 +125,31 @@ class ProtocolViewModel : ViewModel() {
             connectionStatus = ConnectionStatus.Connected(deviceLabel),
             statusMessage = "Connected to $deviceLabel"
         )
+        // Replay whatever action the user kicked off while we were
+        // discovering / waiting for USB permission. Cleared first so a
+        // failed action doesn't loop.
+        val pending = pendingAction
+        pendingAction = null
+        when (pending) {
+            PendingAction.Probe -> runProbe()
+            PendingAction.ReadLive -> startReadingLive(recordToLog = false)
+            PendingAction.LogLive -> startLogging()
+            null -> Unit
+        }
     }
+
+    /**
+     * Action the user requested but couldn't run yet because the adapter
+     * wasn't connected. [setOpenSession] consumes this once the session is
+     * up. Stays unset on success — caller is responsible for triggering
+     * discovery alongside this call.
+     */
+    fun setPendingAction(action: PendingAction) {
+        pendingAction = action
+    }
+
+    fun isConnected(): Boolean =
+        _uiState.value.connectionStatus is ConnectionStatus.Connected
 
     fun clearOpenSession() {
         runJob?.cancel()
