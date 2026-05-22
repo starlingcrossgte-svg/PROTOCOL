@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,9 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,7 +45,6 @@ import com.protocol.app.openport2.Ssm2FrameParser
 import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.TactrixCommandLog
 import com.protocol.app.openport2.TactrixHex
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,37 +79,39 @@ fun ProtocolScreen(
     modifier: Modifier = Modifier
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
-    val scope = rememberCoroutineScope()
 
     Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
-        // Tab bar with dual-function adapter pill on the right
-        Row(
+        // Header: page title on the left (locked to whichever page is visible),
+        // adapter pill geometrically centered, hamburger menu on the right.
+        // Swipe the body left/right to switch pages — the title swaps to match.
+        // Hamburger is wired to a no-op stub for Stage 1; Stage 2 hooks it to
+        // the Parameters drawer.
+        val currentTitle = when (pagerState.currentPage) {
+            0 -> "Debug"
+            else -> "Live Data"
+        }
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color.White)
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
-            listOf("Debug", "Live Data").forEachIndexed { index, label ->
-                val active = pagerState.currentPage == index
-                TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(index) } }) {
-                    Text(
-                        text = label,
-                        color = if (active) Accent else NeutralGray,
-                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-                if (index == 0) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(if (active) Accent else Color.Transparent, CircleShape)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            AdapterPill(uiState = uiState, onDiscoverClick = onDiscoverDevice)
+            Text(
+                text = currentTitle,
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+            AdapterPill(
+                uiState = uiState,
+                onDiscoverClick = onDiscoverDevice,
+                modifier = Modifier.align(Alignment.Center)
+            )
+            HamburgerButton(
+                onClick = { /* TODO Stage 2 — open Parameters drawer */ },
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
         }
         Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BorderGray))
 
@@ -146,7 +144,11 @@ fun ProtocolScreen(
 }
 
 @Composable
-private fun AdapterPill(uiState: ProtocolUiState, onDiscoverClick: () -> Unit) {
+private fun AdapterPill(
+    uiState: ProtocolUiState,
+    onDiscoverClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val connected = uiState.connectionStatus is ConnectionStatus.Connected
     val label: String
     val bgColor: Color
@@ -158,7 +160,7 @@ private fun AdapterPill(uiState: ProtocolUiState, onDiscoverClick: () -> Unit) {
         label = "Discover Adapter"
         bgColor = FailRed
     }
-    val baseModifier = Modifier
+    val baseModifier = modifier
         .background(bgColor, RoundedCornerShape(6.dp))
     val clickableModifier = if (connected) baseModifier
         else baseModifier.clickable(onClick = onDiscoverClick)
@@ -183,6 +185,30 @@ private fun formatVidPidShort(label: String): String {
     val vid = m.groupValues[1].toIntOrNull() ?: return label
     val pid = m.groupValues[2].toIntOrNull() ?: return label
     return "%04X:%04X".format(vid, pid)
+}
+
+// Three-line hamburger icon, click area sized to a comfortable tap target
+// without inflating the header height. Stage 1: no-op stub. Stage 2: wired
+// to the Parameters drawer.
+@Composable
+private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .size(width = 44.dp, height = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .width(22.dp)
+                        .height(2.dp)
+                        .background(InkBlack)
+                )
+            }
+        }
+    }
 }
 
 // ─── Page 0: Debug ───────────────────────────────────────────────────────────
