@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.protocol.app.openport2.EcuIdDecoder
 import com.protocol.app.openport2.OpenPortCommand
 import com.protocol.app.openport2.OpenPortCommandParser
@@ -69,14 +70,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val ScreenBg   = Color(0xFFF3F4F6)
-private val BorderGray = Color(0xFFD4D7DE)
-private val Accent     = Color(0xFF2F6FE4)
-private val PassGreen  = Color(0xFF1B873F)
-private val FailRed    = Color(0xFFC92A2A)
-private val NeutralGray = Color(0xFF6B7280)
-private val SectionGray = Color(0xFF505968)
-private val InkBlack   = Color(0xFF171A20)
+// Dark-mode palette. ScreenBg is the deepest layer; SurfaceBg sits one step
+// up (header, cards); SurfaceAlt is for buttons + elevated chips. Text is
+// pure white (InkPrimary) except for the few intentional muted bits
+// (InkMuted) and accent colors. PassGreen/FailRed bumped saturation so they
+// still read clearly against the dark backgrounds.
+private val ScreenBg    = Color(0xFF0F1115)
+private val SurfaceBg   = Color(0xFF1A1C22)
+private val SurfaceAlt  = Color(0xFF2A2C32)
+private val BorderGray  = Color(0xFF3A3C42)
+private val Accent      = Color(0xFF2F6FE4)
+private val PassGreen   = Color(0xFF22C55E)
+private val FailRed     = Color(0xFFEF4444)
+private val NeutralGray = Color(0xFFB8B8C0)
+private val SectionGray = Color(0xFFB8B8C0)
+private val InkPrimary  = Color.White
+private val InkMuted    = Color(0xFFB8B8C0)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -129,7 +138,7 @@ fun ProtocolScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(SurfaceBg)
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
             Text(
@@ -204,7 +213,7 @@ private fun ParametersScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(SurfaceBg)
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
             Text(
@@ -313,7 +322,7 @@ private fun ParameterRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     pid.displayName,
-                    color = InkBlack,
+                    color = InkPrimary,
                     fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -371,13 +380,13 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Canvas(modifier = Modifier.size(22.dp)) {
             val stroke = 2.5f.dp.toPx()
             drawLine(
-                color = InkBlack,
+                color = InkPrimary,
                 start = Offset(size.width * 0.18f, size.height * 0.18f),
                 end = Offset(size.width * 0.82f, size.height * 0.82f),
                 strokeWidth = stroke
             )
             drawLine(
-                color = InkBlack,
+                color = InkPrimary,
                 start = Offset(size.width * 0.82f, size.height * 0.18f),
                 end = Offset(size.width * 0.18f, size.height * 0.82f),
                 strokeWidth = stroke
@@ -447,7 +456,7 @@ private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) 
                     modifier = Modifier
                         .width(22.dp)
                         .height(2.dp)
-                        .background(InkBlack)
+                        .background(InkPrimary)
                 )
             }
         }
@@ -475,7 +484,7 @@ private fun DebugPage(
             text = "PROTOCOL — OpenPort SSM2 ECM Probe",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
-            color = InkBlack
+            color = InkPrimary
         )
 
         Button(
@@ -602,7 +611,7 @@ private fun LiveDataPage(
         if (statusLine.isNotBlank()) {
             Text(
                 text = statusLine,
-                color = InkBlack,
+                color = InkPrimary,
                 style = MaterialTheme.typography.bodySmall
             )
         }
@@ -615,7 +624,7 @@ private fun LiveDataPage(
         ) {
             Text(
                 text = "Session Log (${uiState.sessionLog.size})",
-                color = InkBlack,
+                color = InkPrimary,
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
@@ -641,9 +650,9 @@ private fun ModeButton(
         onClick = onClick,
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (active) PassGreen else Color(0xFFEFEFEF),
-            contentColor = if (active) Color.White else InkBlack,
-            disabledContainerColor = Color(0xFFE4E5E8),
+            containerColor = if (active) PassGreen else SurfaceAlt,
+            contentColor = if (active) Color.White else InkPrimary,
+            disabledContainerColor = SurfaceAlt.copy(alpha = 0.5f),
             disabledContentColor = NeutralGray
         ),
         shape = RoundedCornerShape(6.dp),
@@ -773,9 +782,19 @@ private fun GaugeTile(
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
-    val baseBg = if (active) Color(0xFF1A1C22) else Color(0xFF2A2C32)
-    val borderColor = if (editMode) Accent else Color(0xFF3A3C42)
+    val baseBg = if (active) SurfaceBg else SurfaceAlt
+    val borderColor = if (editMode) Accent else BorderGray
     val borderWidth = if (editMode) 2.dp else 1.dp
+
+    // Value font scales by cell footprint. The abbreviation (display name)
+    // and the unit stay small per spec — only the number gets big so it
+    // reads at a glance.
+    val cells = entry.width * entry.height
+    val valueFontSize = when {
+        cells >= 4 -> 64.sp   // 2x2
+        cells >= 2 -> 44.sp   // 2x1 or 1x2
+        else -> 28.sp         // 1x1
+    }
 
     Card(
         shape = RoundedCornerShape(6.dp),
@@ -806,7 +825,7 @@ private fun GaugeTile(
             ) {
                 Text(
                     pid.displayName,
-                    color = Color(0xFF9BA3AF),
+                    color = Color.White,
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace
                 )
@@ -814,14 +833,16 @@ private fun GaugeTile(
                     text = rawValue?.let {
                         ProtocolLogFormatter.formatPidValueText(pid.id, it)
                     } ?: "--",
-                    color = Color(0xFFEFEFEF),
+                    color = Color.White,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium
+                    fontSize = valueFontSize,
+                    maxLines = 1,
+                    softWrap = false
                 )
                 Text(
                     pid.unit,
-                    color = Color(0xFF6B7280),
+                    color = Color.White,
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace
                 )
@@ -905,7 +926,7 @@ private fun EditModeOverlay(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(40.dp)
-                .background(Color(0xCCC92A2A), CircleShape)
+                .background(Color(0xCCEF4444), CircleShape)
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center
         ) {
@@ -999,7 +1020,7 @@ private fun DragBar(
 private fun SmallLogButton(text: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEFEFEF), contentColor = InkBlack),
+        colors = ButtonDefaults.buttonColors(containerColor = SurfaceAlt, contentColor = InkPrimary),
         shape = RoundedCornerShape(6.dp),
         border = BorderStroke(1.dp, BorderGray),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
@@ -1029,7 +1050,7 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
                         uiState.sessionLog,
                         uiState.pidIdsOnLiveData
                     ),
-                    color = Color(0xFFEFEFEF),
+                    color = Color.White,
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
                     softWrap = false
@@ -1048,7 +1069,7 @@ private val csvTimeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 private fun SmallActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Button(
         onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEFEFEF), contentColor = Color.Black),
+        colors = ButtonDefaults.buttonColors(containerColor = SurfaceAlt, contentColor = InkPrimary),
         shape = RoundedCornerShape(6.dp),
         border = BorderStroke(1.dp, BorderGray),
         modifier = modifier
@@ -1065,7 +1086,7 @@ private fun OutcomeCard(uiState: ProtocolUiState) {
     val lastStep = uiState.log.lastOrNull()
     Card(
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F8FA)),
+        colors = CardDefaults.cardColors(containerColor = SurfaceBg),
         border = BorderStroke(1.dp, BorderGray)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1074,7 +1095,7 @@ private fun OutcomeCard(uiState: ProtocolUiState) {
                     .padding(horizontal = 14.dp, vertical = 6.dp)) {
                     Text(pillText, color = Color.White, fontWeight = FontWeight.Bold)
                 }
-                Text("Last Probe Outcome", color = InkBlack, fontWeight = FontWeight.Bold,
+                Text("Last Probe Outcome", color = InkPrimary, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium)
             }
             HumanSummarySection(outcome, bundle, uiState.attStepDurationMs)
@@ -1208,16 +1229,16 @@ private fun SectionHeader(text: String) {
 @Composable
 private fun KvRow(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth()) {
-        Text(label.padEnd(16), color = InkBlack, fontFamily = FontFamily.Monospace,
+        Text(label.padEnd(16), color = InkPrimary, fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-        Text(": $value", color = InkBlack, fontFamily = FontFamily.Monospace,
+        Text(": $value", color = InkPrimary, fontFamily = FontFamily.Monospace,
             style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun BodyMono(text: String) {
-    Text(text, color = InkBlack, fontFamily = FontFamily.Monospace,
+    Text(text, color = InkPrimary, fontFamily = FontFamily.Monospace,
         style = MaterialTheme.typography.bodySmall)
 }
 
@@ -1230,15 +1251,15 @@ private fun RunLogCard(log: List<TactrixCommandLog>) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            Text("Run Log", color = Color(0xFFE4E4E4), fontWeight = FontWeight.Bold,
+            Text("Run Log", color = Color.White, fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
             if (log.isEmpty()) {
-                Text("No probe runs yet.", color = Color(0xFFB8B8B8), fontFamily = FontFamily.Monospace,
+                Text("No probe runs yet.", color = InkMuted, fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodyMedium)
             } else {
                 Column(modifier = Modifier.fillMaxWidth().height(520.dp).verticalScroll(rememberScrollState())) {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                        Text(formatLog(log), color = Color(0xFFEFEFEF), fontFamily = FontFamily.Monospace,
+                        Text(formatLog(log), color = Color.White, fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall, softWrap = false)
                     }
                 }

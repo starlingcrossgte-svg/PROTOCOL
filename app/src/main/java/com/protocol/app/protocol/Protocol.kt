@@ -101,13 +101,13 @@ class Protocol : ComponentActivity() {
                 primary = Color(0xFFFF6A00),
                 secondary = Color(0xFF2F6FE4),
                 tertiary = Color(0xFFFF6A00),
-                background = Color(0xFFF3F4F6),
-                surface = Color(0xFFFFFFFF),
+                background = Color(0xFF0F1115),
+                surface = Color(0xFF1A1C22),
                 onPrimary = Color.Black,
                 onSecondary = Color.White,
                 onTertiary = Color.Black,
-                onBackground = Color(0xFF171A20),
-                onSurface = Color(0xFF171A20)
+                onBackground = Color.White,
+                onSurface = Color.White
             )
 
             MaterialTheme(colorScheme = colors) {
