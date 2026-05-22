@@ -1,5 +1,6 @@
 package com.protocol.app.openport2
 
+import com.protocol.app.EcuLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -33,6 +34,21 @@ data class PollSample(
 }
 
 /**
+ * Outcome of a single poll cycle. Lets the flow loop tell apart:
+ *  - a clean sample (emit and reset miss counter)
+ *  - a corrupt/incomplete SSM2 frame (recoverable — K-line glitch, log and retry)
+ *  - a transport miss with the adapter (recoverable — att3 timed out / no ar3, log and retry)
+ *
+ * A real USB detach is NOT a [PollResult] — it propagates as
+ * [UsbDisconnectedException] out of [pollOnce], the same as before.
+ */
+sealed class PollResult {
+    data class Sample(val sample: PollSample) : PollResult()
+    data class BadFrame(val reason: String) : PollResult()
+    data class Transport(val reason: String) : PollResult()
+}
+
+/**
  * Polls a set of SSM2 parameters in a tight loop by sending repeated A8
  * (read address) queries over the already-initialized Tactrix channel.
  *
@@ -51,32 +67,51 @@ class Ssm2Poller(
 ) {
     private companion object {
         private const val ATT_TIMEOUT_MICROS = 400_000L
-        private const val CHANNEL = 3
+        private const val DEFAULT_MAX_CONSECUTIVE_MISSES = 5
     }
 
     private val allAddresses: List<Ssm2Address> = pids.flatMap { it.addresses }
     private val addressCount: Int = allAddresses.size
 
     /**
-     * Sends one batched A8 query and decodes the response.
-     * Returns null on transport failure or unparseable response.
+     * Sends one batched A8 query and classifies the response.
+     *
+     * Returns [PollResult.Sample] on a clean decode. Returns [PollResult.BadFrame]
+     * when bytes arrived but the SSM2 frame is truncated, fails checksum, or
+     * isn't a valid A8 response — these are recoverable on K-line. Returns
+     * [PollResult.Transport] when the adapter ack/ar3 frame never showed up.
+     *
+     * @throws UsbDisconnectedException if the underlying bulk transfer fails.
      */
-    fun pollOnce(): PollSample? {
-        if (allAddresses.isEmpty()) return null
+    fun pollOnce(): PollResult {
+        if (allAddresses.isEmpty()) return PollResult.Transport("no addresses configured")
         val queryBytes = Ssm2AddressQuery.buildA8Query(allAddresses)
         val outcome = client.sendAsciiPlusBinary(
             asciiBodyWithoutReqId = "att3 ${queryBytes.size} 0 $ATT_TIMEOUT_MICROS",
             binaryTail = queryBytes,
             appendReqId = true,
-            expectVehicleFrameOnChannel = CHANNEL,
+            expectVehicleFrameOnChannel = K_LINE_CHANNEL,
             readTimeoutMs = 1000L
         )
-        if (!outcome.matched) return null
+        if (!outcome.matched) return PollResult.Transport("att3 read timed out before ar3 frame")
 
         val raw = TactrixHex.parseHexPayload(outcome.responseHex.replace(" ", ""))
-        val vehicleFrame = client.extractVehicleFrame(raw, CHANNEL) ?: return null
-        val parsed = Ssm2FrameParser.parseSsm2Frame(vehicleFrame) ?: return null
-        val rawValues = Ssm2AddressQuery.parseA8Response(parsed, addressCount) ?: return null
+        val vehicleFrame = client.extractVehicleFrame(raw, K_LINE_CHANNEL)
+            ?: return PollResult.Transport("no ar3 wrapper found in adapter response")
+        val parsed = Ssm2FrameParser.parseSsm2Frame(vehicleFrame)
+            ?: return PollResult.BadFrame("ssm2 reply too short to parse header (${vehicleFrame.size} bytes)")
+        if (parsed.truncated) {
+            return PollResult.BadFrame(
+                "ssm2 reply truncated (got ${parsed.rawBytes.size} of ${parsed.length + 5} bytes)"
+            )
+        }
+        if (!parsed.checksumValid) {
+            return PollResult.BadFrame(
+                "ssm2 checksum mismatch (rx=0x%02X)".format(parsed.checksum)
+            )
+        }
+        val rawValues = Ssm2AddressQuery.parseA8Response(parsed, addressCount)
+            ?: return PollResult.BadFrame("A8 response payload invalid (code or length mismatch)")
 
         val values = mutableMapOf<String, Double>()
         var offset = 0
@@ -86,21 +121,58 @@ class Ssm2Poller(
             offset += pid.addresses.size
         }
 
-        return PollSample(
-            timestampMs = System.currentTimeMillis(),
-            values = values,
-            rawValues = rawValues
+        return PollResult.Sample(
+            PollSample(
+                timestampMs = System.currentTimeMillis(),
+                values = values,
+                rawValues = rawValues
+            )
         )
     }
 
     /**
-     * Emits poll samples until the collecting coroutine is cancelled or a
-     * transport error occurs (null from [pollOnce]).
+     * Emits poll samples until the collecting coroutine is cancelled, the
+     * USB device disconnects, or [maxConsecutiveMisses] back-to-back misses
+     * (any mix of bad frames and transport misses) accumulate.
+     *
+     * A single dropped K-line frame no longer breaks the flow — one good
+     * sample resets the miss counter. UsbDisconnectedException propagates
+     * out of the flow unchanged so the ViewModel can show "USB disconnected".
      */
-    fun startFlow(intervalMs: Long = 200L): Flow<PollSample> = flow {
+    fun startFlow(
+        intervalMs: Long = 200L,
+        maxConsecutiveMisses: Int = DEFAULT_MAX_CONSECUTIVE_MISSES
+    ): Flow<PollSample> = flow {
+        var consecutiveMisses = 0
         while (true) {
-            val sample = pollOnce() ?: break
-            emit(sample)
+            when (val result = pollOnce()) {
+                is PollResult.Sample -> {
+                    consecutiveMisses = 0
+                    emit(result.sample)
+                }
+                is PollResult.BadFrame -> {
+                    consecutiveMisses++
+                    EcuLogger.comm(
+                        "poller: bad frame ($consecutiveMisses/$maxConsecutiveMisses) — ${result.reason}"
+                    )
+                    if (consecutiveMisses >= maxConsecutiveMisses) {
+                        EcuLogger.error("poller: $maxConsecutiveMisses consecutive misses — stopping")
+                        client.channelInitialized = false
+                        break
+                    }
+                }
+                is PollResult.Transport -> {
+                    consecutiveMisses++
+                    EcuLogger.comm(
+                        "poller: transport miss ($consecutiveMisses/$maxConsecutiveMisses) — ${result.reason}"
+                    )
+                    if (consecutiveMisses >= maxConsecutiveMisses) {
+                        EcuLogger.error("poller: $maxConsecutiveMisses consecutive misses — stopping")
+                        client.channelInitialized = false
+                        break
+                    }
+                }
+            }
             if (intervalMs > 0) delay(intervalMs)
         }
     }

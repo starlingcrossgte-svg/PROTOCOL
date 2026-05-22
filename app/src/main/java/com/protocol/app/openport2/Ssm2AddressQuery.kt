@@ -57,10 +57,16 @@ object Ssm2AddressQuery {
 
     /**
      * Parses a raw SSM2 A8 response frame (starting at `80 F0 10`) into one
-     * unsigned int per address. Returns null if the frame is too short or the
-     * response code is not 0xE8.
+     * unsigned int per address. Returns null if the frame is truncated, the
+     * checksum is invalid, the response code is not 0xE8, or the payload is
+     * too short to cover [addressCount] data bytes.
+     *
+     * Checksum and truncation are rejected here (not just at the parser level)
+     * so corrupt K-line frames cannot be decoded into gauge values.
      */
     fun parseA8Response(frame: Ssm2Frame, addressCount: Int): IntArray? {
+        if (frame.truncated) return null
+        if (!frame.checksumValid) return null
         val payload = frame.payload
         if (payload.isEmpty()) return null
         if (payload[0] != RSP_E8) return null

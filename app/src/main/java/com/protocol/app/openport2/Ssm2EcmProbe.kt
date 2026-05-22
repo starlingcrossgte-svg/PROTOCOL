@@ -36,7 +36,6 @@ import java.nio.charset.StandardCharsets
 class Ssm2EcmProbe(private val client: TactrixClient) {
 
     companion object {
-        private const val CHANNEL_K_LINE = 3
         private const val SETTLE_MS = 200L
         private val SSM2_READ_ID_FRAME = byteArrayOf(
             0x80.toByte(),
@@ -88,6 +87,22 @@ class Ssm2EcmProbe(private val client: TactrixClient) {
      * this method.
      */
     fun initializeChannel(log: MutableList<TactrixCommandLog>): Boolean {
+        if (client.channelInitialized) {
+            log.add(
+                TactrixCommandLog(
+                    stepIndex = 0,
+                    stepLabel = "channel reuse — ati→atv already initialized, skipping",
+                    requestAscii = "",
+                    requestHex = "",
+                    responseAscii = "",
+                    responseHex = "",
+                    durationMs = 0L,
+                    outcome = TactrixCommandLog.Outcome.PASS,
+                    notes = ""
+                )
+            )
+            return true
+        }
         runStep(log, 1, "ati — device bring-up") {
             client.sendAsciiCommand("ati", appendReqId = false, expectAck = false, readTimeoutMs = 1500L)
         }
@@ -139,6 +154,7 @@ class Ssm2EcmProbe(private val client: TactrixClient) {
         if (log.last().outcome != TactrixCommandLog.Outcome.PASS) return false
 
         runSettle(log, 13)
+        client.channelInitialized = true
         return true
     }
 
@@ -158,13 +174,13 @@ class Ssm2EcmProbe(private val client: TactrixClient) {
             asciiBodyWithoutReqId = "att3 ${SSM2_READ_ID_FRAME.size} 0 $ATT_TIMEOUT_MICROS",
             binaryTail = SSM2_READ_ID_FRAME,
             appendReqId = true,
-            expectVehicleFrameOnChannel = CHANNEL_K_LINE,
+            expectVehicleFrameOnChannel = K_LINE_CHANNEL,
             readTimeoutMs = 3000L
         )
         val sendDuration = System.currentTimeMillis() - sendStart
 
         val raw = TactrixHex.parseHexPayload(attOutcome.responseHex.replace(" ", ""))
-        val vehicleFrame = client.extractVehicleFrame(raw, CHANNEL_K_LINE)
+        val vehicleFrame = client.extractVehicleFrame(raw, K_LINE_CHANNEL)
 
         val attLogOutcome: TactrixCommandLog.Outcome
         val notes: String
@@ -207,6 +223,10 @@ class Ssm2EcmProbe(private val client: TactrixClient) {
             )
         )
 
+        if (probeOutcome != ProbeOutcome.SUCCESS_ECU_REPLIED) {
+            client.channelInitialized = false
+        }
+
         val parsedRequest = Ssm2FrameParser.parseSsm2Frame(SSM2_READ_ID_FRAME)
         val parsedResponse = vehicleFrame?.let { Ssm2FrameParser.parseSsm2Frame(it) }
         val decodedEcuId = parsedResponse?.let { EcuIdDecoder.decodeEcuIdResponse(it) }
@@ -223,6 +243,7 @@ class Ssm2EcmProbe(private val client: TactrixClient) {
 
         return ProbeResult(log, probeOutcome, vehicleFrame, bundle, sendDuration)
         } catch (e: UsbDisconnectedException) {
+            client.channelInitialized = false
             return ProbeResult(log, ProbeOutcome.FAIL_USB_DISCONNECTED, null, null, null)
         }
     }

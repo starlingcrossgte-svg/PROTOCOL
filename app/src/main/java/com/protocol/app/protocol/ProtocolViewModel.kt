@@ -2,7 +2,6 @@ package com.protocol.app.protocol
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.protocol.app.openport2.OpenPort2SessionResult
 import com.protocol.app.openport2.OpenPort2UsbSession
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import com.protocol.app.openport2.Ssm2EcmProbe
@@ -28,6 +27,7 @@ class ProtocolViewModel : ViewModel() {
 
     private var sessionManager: OpenPort2UsbSessionManager? = null
     private var openSession: OpenPort2UsbSession? = null
+    private var tactrixClient: TactrixClient? = null
     private var runJob: Job? = null
     private var tappedParamClearJob: Job? = null
 
@@ -44,6 +44,7 @@ class ProtocolViewModel : ViewModel() {
 
     fun setOpenSession(session: OpenPort2UsbSession, deviceLabel: String) {
         openSession = session
+        tactrixClient = TactrixClient(TactrixBulkIo(session))
         _uiState.value = _uiState.value.copy(
             connectionStatus = ConnectionStatus.Connected(deviceLabel),
             statusMessage = "Connected to $deviceLabel"
@@ -58,6 +59,7 @@ class ProtocolViewModel : ViewModel() {
         val wasLogging = _uiState.value.isLogging
         val session = openSession
         openSession = null
+        tactrixClient = null
         if (session != null) {
             sessionManager?.closeSession(session)
         }
@@ -96,8 +98,12 @@ class ProtocolViewModel : ViewModel() {
             }
             return
         }
-        val session = openSession ?: run {
+        openSession ?: run {
             _uiState.value = state.copy(statusMessage = "No OpenPort session — discover and grant USB permission first")
+            return
+        }
+        val client = tactrixClient ?: run {
+            _uiState.value = state.copy(statusMessage = "No adapter client — reconnect the OpenPort")
             return
         }
 
@@ -107,12 +113,10 @@ class ProtocolViewModel : ViewModel() {
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
             sessionLog = if (recordToLog) emptyList() else state.sessionLog,
-            statusMessage = "Initializing channel..."
+            statusMessage = if (client.channelInitialized) "Reusing channel..." else "Initializing channel..."
         )
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
-            val io = TactrixBulkIo(session)
-            val client = TactrixClient(io)
             client.drainResponseBuffer()
             client.resetRequestIdCounter(startFrom = 2)
 
@@ -203,9 +207,15 @@ class ProtocolViewModel : ViewModel() {
 
     fun runProbe() {
         if (_uiState.value.isRunningProbe || _uiState.value.isReadingLive || _uiState.value.isLogging) return
-        val session = openSession ?: run {
+        openSession ?: run {
             _uiState.value = _uiState.value.copy(
                 statusMessage = "No OpenPort session — discover and grant USB permission first"
+            )
+            return
+        }
+        val client = tactrixClient ?: run {
+            _uiState.value = _uiState.value.copy(
+                statusMessage = "No adapter client — reconnect the OpenPort"
             )
             return
         }
@@ -217,12 +227,13 @@ class ProtocolViewModel : ViewModel() {
             ssm2DecodeBundle = null,
             ssm2ResponseHex = "",
             attStepDurationMs = null,
-            statusMessage = "Running SSM2 ECM probe..."
+            statusMessage = if (client.channelInitialized)
+                "Running SSM2 ECM probe (channel reused)..."
+            else
+                "Running SSM2 ECM probe..."
         )
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
-            val io = TactrixBulkIo(session)
-            val client = TactrixClient(io)
             val probe = Ssm2EcmProbe(client)
             val result = probe.run()
 

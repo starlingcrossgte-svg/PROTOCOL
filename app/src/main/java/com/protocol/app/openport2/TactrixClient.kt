@@ -4,6 +4,20 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicInteger
 
 /*
+ * Tactrix adapter channel number used for the K-line SSM2 bus on this project.
+ *
+ * The 12-step ati→atv setup binds the K-line bus to Tactrix channel 3 via
+ * "ato3 512 4800 ..." (where the "3" is part of the command name, hardcoded
+ * to match captured EcuFlash/RomRaider traffic). Every subsequent atf3/ats3/
+ * att3 command targets that same channel, so all SSM2 reads and writes flow
+ * through channel 3 in our setup.
+ *
+ * Hoisted here so the value lives in one place; callers reference it by name
+ * for the ar<channel> frame extraction step instead of redefining "3" locally.
+ */
+internal const val K_LINE_CHANNEL: Int = 3
+
+/*
  * High-level Tactrix adapter client.
  *
  * Composes the line-based ASCII command set observed in USBPcap traces of the
@@ -20,6 +34,18 @@ import java.util.concurrent.atomic.AtomicInteger
 class TactrixClient(private val io: TactrixBulkIo) {
 
     private val nextRequestId = AtomicInteger(2)
+
+    /*
+     * Whether the 12-step ati→atv setup has been successfully run on this
+     * client+adapter pair. Set by Ssm2EcmProbe.initializeChannel after a clean
+     * pass. Cleared on att3 failure, USB disconnect, or repeated poller misses
+     * so the next operation re-runs the full setup from scratch.
+     *
+     * Lives on TactrixClient (not the probe) because channel state is a
+     * property of the client+adapter, not of the ephemeral probe object that
+     * the ViewModel constructs per button press.
+     */
+    var channelInitialized: Boolean = false
 
     fun resetRequestIdCounter(startFrom: Int = 2) {
         nextRequestId.set(startFrom)

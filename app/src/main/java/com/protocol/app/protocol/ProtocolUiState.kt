@@ -3,7 +3,17 @@ package com.protocol.app.protocol
 import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2DecodeBundle
 import com.protocol.app.openport2.Ssm2EcmProbe
+import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.TactrixCommandLog
+
+/*
+ * Default selection = every PID the poller knows about. Derived from
+ * [Ssm2Pids.DEFAULT_DEMO_PIDS] so adding or removing a PID can't desync
+ * this list from the actual catalog. UX for choosing a different default
+ * is the user's call (parameter-selection menu still to be designed).
+ */
+private val DEFAULT_SELECTED_PID_IDS: Set<String> =
+    Ssm2Pids.DEFAULT_DEMO_PIDS.map { it.id }.toSet()
 
 data class ProtocolUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.NoDevice,
@@ -19,11 +29,7 @@ data class ProtocolUiState(
     val liveValues: Map<String, Double> = emptyMap(),
     val lastSampleTimestampMs: Long = 0L,
     val sessionLog: List<PollSample> = emptyList(),
-    val selectedPidIds: Set<String> = setOf(
-        "rpm", "coolant", "battery",
-        "afc1", "afl1", "afs1", "ign", "maf", "oil", "iat",
-        "fbkc", "load", "flkc", "iam"
-    ),
+    val selectedPidIds: Set<String> = DEFAULT_SELECTED_PID_IDS,
     val tappedParamLongName: String? = null
 )
 
