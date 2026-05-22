@@ -92,8 +92,8 @@ private val InkMuted    = Color(0xFFB8B8C0)
 fun ProtocolScreen(
     uiState: ProtocolUiState,
     onDiscoverDevice: () -> Unit,
-    onOpenParameters: () -> Unit,
-    onCloseParameters: () -> Unit,
+    onOpenSubPage: (SubPage) -> Unit,
+    onCloseSubPage: () -> Unit,
     onToggleGaugeForPid: (String) -> Unit,
     onEnterEditMode: () -> Unit,
     onExitEditMode: () -> Unit,
@@ -112,27 +112,40 @@ fun ProtocolScreen(
     onExportSessionLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Hoisted here so the user's currently-visible page (Debug vs Live Data) is
-    // preserved when they pop into Parameters and back.
+    // Hoisted here so the user's currently-visible page (Home vs Live Data)
+    // is preserved when they pop into a sub-page and back.
     val pagerState = rememberPagerState(pageCount = { 2 })
 
-    if (uiState.showingParameters) {
-        ParametersScreen(
-            uiState = uiState,
-            onClose = onCloseParameters,
-            onTogglePid = onToggleGaugeForPid,
-            onDiscoverDevice = onDiscoverDevice,
-            modifier = modifier
-        )
-        return
+    when (val sub = uiState.activeSubPage) {
+        SubPage.Parameters -> {
+            ParametersScreen(
+                uiState = uiState,
+                onClose = onCloseSubPage,
+                onTogglePid = onToggleGaugeForPid,
+                onDiscoverDevice = onDiscoverDevice,
+                modifier = modifier
+            )
+            return
+        }
+        SubPage.Settings, SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning -> {
+            StubSubPage(
+                page = sub,
+                uiState = uiState,
+                onClose = onCloseSubPage,
+                onDiscoverDevice = onDiscoverDevice,
+                modifier = modifier
+            )
+            return
+        }
+        null -> Unit
     }
 
     Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
         // Header: page title left (locked to the visible page), adapter pill
         // geometrically centered, hamburger right. Swiping the body changes
-        // the title; tapping the hamburger pushes the Parameters page.
+        // the title; tapping the hamburger opens the Parameters sub-page.
         val currentTitle = when (pagerState.currentPage) {
-            0 -> "Debug"
+            0 -> "Home"
             else -> "Live Data"
         }
         Box(
@@ -154,7 +167,7 @@ fun ProtocolScreen(
                 modifier = Modifier.align(Alignment.Center)
             )
             HamburgerButton(
-                onClick = onOpenParameters,
+                onClick = { onOpenSubPage(SubPage.Parameters) },
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
@@ -165,12 +178,13 @@ fun ProtocolScreen(
             modifier = Modifier.weight(1f).fillMaxWidth()
         ) { page ->
             when (page) {
-                0 -> DebugPage(
+                0 -> HomePage(
                     uiState = uiState,
                     onRunProbe = onRunProbe,
                     onClearLog = onClearLog,
                     onCopyLog = onCopyLog,
-                    onExportLog = onExportLog
+                    onExportLog = onExportLog,
+                    onOpenSubPage = onOpenSubPage
                 )
                 else -> LiveDataPage(
                     uiState = uiState,
@@ -463,56 +477,273 @@ private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) 
     }
 }
 
-// ─── Page 0: Debug ───────────────────────────────────────────────────────────
+// ─── Page 0: Home ────────────────────────────────────────────────────────────
+//
+// Replaces the old Debug page. Layout (top to bottom):
+//   - Text logo + app version
+//   - Four menu buttons that push sub-pages (Settings, Flash, Diagnostics,
+//     Tuning — each currently a Coming-soon stub)
+//   - Test SSM2 Probe button. Hidden inside it: 10 quick taps (each
+//     within 1.5 s of the previous) reveal the dev-mode "Run Log" card
+//     and the Clear / Copy / Export log buttons. The probe still fires
+//     normally each tap; the VM's internal re-entry guard makes back-
+//     to-back taps a no-op while a probe is in flight.
+//   - OutcomeCard (shown after any probe run)
+//   - 10-tap-revealed dev section: Clear/Copy/Export Log + RunLogCard
+//   - Swipe hint at the bottom
+
+private const val RUN_LOG_UNLOCK_TAP_COUNT = 10
+private const val RUN_LOG_UNLOCK_TAP_WINDOW_MS = 1500L
 
 @Composable
-private fun DebugPage(
+private fun HomePage(
     uiState: ProtocolUiState,
     onRunProbe: () -> Unit,
     onClearLog: () -> Unit,
     onCopyLog: () -> Unit,
-    onExportLog: () -> Unit
+    onExportLog: () -> Unit,
+    onOpenSubPage: (SubPage) -> Unit
 ) {
+    // Easter-egg state. Lives in the composable's remember scope so it
+    // survives recomposition but resets on process restart — that's fine,
+    // we don't want the dev panel pinned forever just because someone
+    // mashed the button once.
+    var rapidTapCount by remember { mutableStateOf(0) }
+    var lastTapMs by remember { mutableStateOf(0L) }
+    var runLogRevealed by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 14.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Text logo. Replace later with an actual graphic if you commit a
+        // vector to res/drawable.
         Text(
-            text = "PROTOCOL — OpenPort SSM2 ECM Probe",
-            style = MaterialTheme.typography.titleLarge,
+            text = "PROTOCOL",
+            color = Accent,
+            fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
-            color = InkPrimary
+            fontSize = 38.sp,
+            letterSpacing = 6.sp
+        )
+        Text(
+            text = "OpenPort 2.0  ·  Subaru SSM2 K-line",
+            color = InkMuted,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            text = "v1.0",
+            color = InkMuted,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(bottom = 4.dp)
         )
 
+        // Main menu — four destinations. Each opens a sub-page (stub for
+        // now). Wide tappable rows so they're glove-friendly under the dash.
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
+            HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
+            HomeMenuButton(label = "Diagnostics / CEL") { onOpenSubPage(SubPage.Diagnostics) }
+            HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Test SSM2 Probe — also the unlock surface for the run log.
         Button(
-            onClick = onRunProbe,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00), contentColor = Color.Black),
+            onClick = {
+                val now = System.currentTimeMillis()
+                rapidTapCount = if (now - lastTapMs < RUN_LOG_UNLOCK_TAP_WINDOW_MS) {
+                    rapidTapCount + 1
+                } else {
+                    1
+                }
+                lastTapMs = now
+                if (rapidTapCount >= RUN_LOG_UNLOCK_TAP_COUNT && !runLogRevealed) {
+                    runLogRevealed = true
+                }
+                onRunProbe()
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFFF6A00),
+                contentColor = Color.Black,
+                disabledContainerColor = Color(0xFFFF6A00).copy(alpha = 0.5f),
+                disabledContentColor = Color.Black.copy(alpha = 0.7f)
+            ),
             shape = RoundedCornerShape(8.dp),
-            enabled = !uiState.isRunningProbe && !uiState.isReadingLive && !uiState.isLogging &&
+            // Keep the button click-enabled while the probe runs so the
+            // unlock counter still increments on rapid taps — the VM's
+            // runProbe guard makes the actual probe call idempotent.
+            enabled = !uiState.isReadingLive && !uiState.isLogging &&
                 uiState.connectionStatus is ConnectionStatus.Connected,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = if (uiState.isRunningProbe) "Probing..." else "Run SSM2 ECM Probe",
+                text = if (uiState.isRunningProbe) "Probing..." else "Test SSM2 Probe",
                 fontWeight = FontWeight.Bold
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            SmallActionButton("Clear Log", onClearLog, Modifier.weight(1f))
-            SmallActionButton("Copy Log", onCopyLog, Modifier.weight(1f))
-            SmallActionButton("Export Log", onExportLog, Modifier.weight(1f))
+        // Outcome stays visible after any probe so the user can see the
+        // last result without digging into the dev panel.
+        OutcomeCard(uiState)
+
+        // Dev panel — hidden until the 10-tap unlock. Same controls as the
+        // old Debug page so nothing is lost.
+        if (runLogRevealed) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SmallActionButton("Clear Log", onClearLog, Modifier.weight(1f))
+                SmallActionButton("Copy Log", onCopyLog, Modifier.weight(1f))
+                SmallActionButton("Export Log", onExportLog, Modifier.weight(1f))
+            }
+            RunLogCard(uiState.log)
         }
 
-        OutcomeCard(uiState)
-        RunLogCard(uiState.log)
         SwipeHintRow()
+    }
+}
+
+@Composable
+private fun HomeMenuButton(label: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SurfaceBg,
+            contentColor = InkPrimary
+        ),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, BorderGray),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 16.dp,
+            vertical = 16.dp
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                label,
+                color = InkPrimary,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyLarge,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "›",
+                color = InkMuted,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
+        }
+    }
+}
+
+// Generic "coming soon" sub-page. Same header pattern as Parameters so
+// nav feels consistent. Each entry in SubPage that isn't Parameters maps
+// to a title + description here.
+@Composable
+private fun StubSubPage(
+    page: SubPage,
+    uiState: ProtocolUiState,
+    onClose: () -> Unit,
+    onDiscoverDevice: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    BackHandler(enabled = true) { onClose() }
+
+    val (title, blurb, eta) = when (page) {
+        SubPage.Settings -> Triple(
+            "Settings",
+            "Tunable app preferences — units (F/C), session log size, gauge layout reset, baud override for adapter testing.",
+            "Lightweight — days of work once the list of options is locked."
+        )
+        SubPage.Flash -> Triple(
+            "Flash ECU",
+            "Full ECU reflash over OpenPort. Seed/key security access, flash-mode init, page-aligned erase + write, checksum, verify, ECU reset.",
+            "Substantial — a multi-week project. The lower layers (USB + Tactrix line protocol + frame parser) are already in place; the flash sequence itself still needs to be written and tested very carefully."
+        )
+        SubPage.Diagnostics -> Triple(
+            "Diagnostics / CEL",
+            "Read stored DTCs from ECM (and TCM later) and decode them to P-codes with descriptions. SSM2 has a dedicated query for this; we'd sweep modules and group results.",
+            "Moderate — couple of weeks, mostly because the DTC label table has to be hand-curated per family."
+        )
+        SubPage.Tuning -> Triple(
+            "Minor Tuning",
+            "Live RAM-resident tunables: rev limiter, fuel cutoff, idle target, etc. Reads via SSM2 0xA8, writes via 0xB8. Addresses come from the per-ECU calibration definitions (EcuFlash/RomRaider XML).",
+            "Few weeks once we settle on which parameters are in scope and pull the EZ30R definitions in."
+        )
+        SubPage.Parameters -> Triple("Parameters", "", "")
+    }
+
+    Column(modifier = modifier.fillMaxSize().background(ScreenBg)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SurfaceBg)
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = title,
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+            AdapterPill(
+                uiState = uiState,
+                onDiscoverClick = onDiscoverDevice,
+                modifier = Modifier.align(Alignment.Center)
+            )
+            CloseButton(
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+        }
+        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BorderGray))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "Coming soon",
+                color = Accent,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.titleLarge
+            )
+            Text(
+                text = blurb,
+                color = InkPrimary,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            CategoryHeader("EFFORT")
+            Text(
+                text = eta,
+                color = InkPrimary,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace
+            )
+        }
     }
 }
 

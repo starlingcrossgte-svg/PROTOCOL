@@ -77,16 +77,16 @@ class ProtocolViewModel : ViewModel() {
         updateLayout { if (it.contains(pidId)) it.withRemoved(pidId) else it.withAdded(pidId) }
     }
 
-    fun openParameters() {
-        if (_uiState.value.showingParameters) return
+    fun openSubPage(page: SubPage) {
+        if (_uiState.value.activeSubPage == page) return
         // Switching screens implicitly exits edit mode — drag handles would
         // be confusing if they hung around after the user moved off Live Data.
-        _uiState.value = _uiState.value.copy(showingParameters = true, editMode = false)
+        _uiState.value = _uiState.value.copy(activeSubPage = page, editMode = false)
     }
 
-    fun closeParameters() {
-        if (!_uiState.value.showingParameters) return
-        _uiState.value = _uiState.value.copy(showingParameters = false)
+    fun closeSubPage() {
+        if (_uiState.value.activeSubPage == null) return
+        _uiState.value = _uiState.value.copy(activeSubPage = null)
     }
 
     fun enterEditMode() {

@@ -5,6 +5,18 @@ import com.protocol.app.openport2.Ssm2DecodeBundle
 import com.protocol.app.openport2.Ssm2EcmProbe
 import com.protocol.app.openport2.TactrixCommandLog
 
+/**
+ * Top-level destinations reachable above the Home / Live Data pager. When
+ * activeSubPage is null the pager is visible; otherwise its sub-page is.
+ */
+sealed class SubPage {
+    object Parameters : SubPage()
+    object Settings : SubPage()
+    object Flash : SubPage()
+    object Diagnostics : SubPage()
+    object Tuning : SubPage()
+}
+
 data class ProtocolUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.NoDevice,
     val statusMessage: String = "",
@@ -21,7 +33,7 @@ data class ProtocolUiState(
     val sessionLog: List<PollSample> = emptyList(),
     val gaugeLayout: GaugeLayout = GaugeLayout(),
     val tappedParamLongName: String? = null,
-    val showingParameters: Boolean = false,
+    val activeSubPage: SubPage? = null,
     /** True while the user is moving/resizing/removing gauges. Transient — not persisted. */
     val editMode: Boolean = false
 ) {

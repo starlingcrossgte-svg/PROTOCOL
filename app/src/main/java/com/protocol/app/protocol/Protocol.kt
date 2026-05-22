@@ -114,8 +114,8 @@ class Protocol : ComponentActivity() {
                 ProtocolScreen(
                     uiState = uiState,
                     onDiscoverDevice = { discoverAndConnect() },
-                    onOpenParameters = { viewModel.openParameters() },
-                    onCloseParameters = { viewModel.closeParameters() },
+                    onOpenSubPage = { page -> viewModel.openSubPage(page) },
+                    onCloseSubPage = { viewModel.closeSubPage() },
                     onToggleGaugeForPid = { pidId -> viewModel.toggleGaugeForPid(pidId) },
                     onEnterEditMode = { viewModel.enterEditMode() },
                     onExitEditMode = { viewModel.exitEditMode() },
