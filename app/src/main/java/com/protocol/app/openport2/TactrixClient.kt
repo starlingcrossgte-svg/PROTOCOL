@@ -115,6 +115,11 @@ class TactrixClient(private val io: TactrixBulkIo) {
         binaryTail: ByteArray,
         appendReqId: Boolean,
         expectVehicleFrameOnChannel: Int? = null,
+        // SSM2 source byte we expect in the reply ("who is replying"). For a
+        // request with destination 0x10 (ECM), the reply has source 0x10 — so
+        // pass 0x10 here. For a TCM request (destination 0x18), pass 0x18.
+        // Defaults to ECM for backwards-compat with the probe path.
+        expectedReplySource: Byte = 0x10.toByte(),
         readTimeoutMs: Long = 3000L
     ): Outcome {
         val reqId = if (appendReqId) nextRequestId.getAndIncrement() else -1
@@ -139,7 +144,7 @@ class TactrixClient(private val io: TactrixBulkIo) {
         }
 
         val readResult = if (expectVehicleFrameOnChannel != null) {
-            io.readUntil(readTimeoutMs) { buf -> containsArVehicleFrame(buf, expectVehicleFrameOnChannel) }
+            io.readUntil(readTimeoutMs) { buf -> containsArVehicleFrame(buf, expectVehicleFrameOnChannel, expectedReplySource) }
         } else if (reqId >= 0) {
             io.readUntil(readTimeoutMs) { buf -> containsAnyResponseFor(buf, reqId) }
         } else {
@@ -182,9 +187,13 @@ class TactrixClient(private val io: TactrixBulkIo) {
      * Falls back to the simpler header-search approach if wrapper parsing
      * fails (e.g. unexpected buffer layout), so the PoC path is not broken.
      */
-    fun extractVehicleFrame(responseBytes: ByteArray, channel: Int): ByteArray? {
+    fun extractVehicleFrame(
+        responseBytes: ByteArray,
+        channel: Int,
+        sourceByte: Byte = 0x10.toByte()
+    ): ByteArray? {
         val wrapperMarker = "ar$channel".toByteArray(StandardCharsets.US_ASCII)
-        val ssm2Header = byteArrayOf(0x80.toByte(), 0xF0.toByte(), 0x10.toByte())
+        val ssm2Header = byteArrayOf(0x80.toByte(), 0xF0.toByte(), sourceByte)
         val rxStatus: Byte = 0x00
 
         // Walk the buffer and gather all RX-status payloads in order.
@@ -302,8 +311,8 @@ class TactrixClient(private val io: TactrixBulkIo) {
      * back to the header-present check so short replies still terminate
      * promptly.
      */
-    private fun containsArVehicleFrame(buf: ByteArray, channel: Int): Boolean {
-        val ssm2Header = byteArrayOf(0x80.toByte(), 0xF0.toByte(), 0x10.toByte())
+    private fun containsArVehicleFrame(buf: ByteArray, channel: Int, sourceByte: Byte): Boolean {
+        val ssm2Header = byteArrayOf(0x80.toByte(), 0xF0.toByte(), sourceByte)
         val headerIdx = indexOfSubsequence(buf, ssm2Header) ?: return false
 
         // Try to determine declared length from the bytes we have.

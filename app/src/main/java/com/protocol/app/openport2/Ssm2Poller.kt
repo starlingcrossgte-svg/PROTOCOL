@@ -139,18 +139,23 @@ class Ssm2Poller(
 
     private fun queryModule(addresses: List<Ssm2Address>, destination: Byte): ModuleQueryResult {
         val queryBytes = Ssm2AddressQuery.buildA8Query(addresses, destination)
+        // The SSM2 reply's source byte mirrors our request's destination —
+        // pass `destination` as expectedReplySource so the readUntil predicate
+        // and frame extractor recognize the right module's reply (80 F0 10
+        // for ECM, 80 F0 18 for TCM).
         val outcome = client.sendAsciiPlusBinary(
             asciiBodyWithoutReqId = "att3 ${queryBytes.size} 0 $ATT_TIMEOUT_MICROS",
             binaryTail = queryBytes,
             appendReqId = true,
             expectVehicleFrameOnChannel = K_LINE_CHANNEL,
+            expectedReplySource = destination,
             readTimeoutMs = 1000L
         )
         if (!outcome.matched) {
             return ModuleQueryResult.Transport("att3 read timed out before ar3 frame")
         }
         val raw = TactrixHex.parseHexPayload(outcome.responseHex.replace(" ", ""))
-        val vehicleFrame = client.extractVehicleFrame(raw, K_LINE_CHANNEL)
+        val vehicleFrame = client.extractVehicleFrame(raw, K_LINE_CHANNEL, destination)
             ?: return ModuleQueryResult.Transport("no ar3 wrapper found in adapter response")
         val parsed = Ssm2FrameParser.parseSsm2Frame(vehicleFrame)
             ?: return ModuleQueryResult.BadFrame("ssm2 reply too short to parse header (${vehicleFrame.size} bytes)")
