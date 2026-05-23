@@ -220,10 +220,14 @@ class ProtocolViewModel : ViewModel() {
         // Wipe the probe outcome card whenever the adapter goes away — a stale
         // "ECU REPLIED" sitting on screen after detach is misleading. If a run
         // was mid-flight, mark it as USB-disconnected; otherwise just clear.
+        // Also drop liveValues so gauges revert to "--" instead of showing
+        // the last value they had before the adapter vanished.
         _uiState.value = _uiState.value.copy(
             isRunningProbe = false,
             isReadingLive = false,
             isLogging = false,
+            liveValues = emptyMap(),
+            lastSampleTimestampMs = 0L,
             log = if (wasRunning) _uiState.value.log else emptyList(),
             lastOutcome = if (wasRunning) Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED else null,
             ssm2DecodeBundle = if (wasRunning) _uiState.value.ssm2DecodeBundle else null,
@@ -340,15 +344,22 @@ class ProtocolViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(
                     isReadingLive = false,
                     isLogging = false,
+                    liveValues = emptyMap(),
+                    lastSampleTimestampMs = 0L,
                     statusMessage = "USB device disconnected"
                 )
                 return@launch
             } catch (_: Exception) {
                 // Coroutine cancelled — fall through to finally
             } finally {
+                // Drop the last-known values so gauges revert to "--" when
+                // polling stops for any reason. Showing stale numbers after
+                // a stop is misleading.
                 _uiState.value = _uiState.value.copy(
                     isReadingLive = false,
-                    isLogging = false
+                    isLogging = false,
+                    liveValues = emptyMap(),
+                    lastSampleTimestampMs = 0L
                 )
             }
         }
@@ -378,6 +389,8 @@ class ProtocolViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(
             isReadingLive = false,
             isLogging = false,
+            liveValues = emptyMap(),
+            lastSampleTimestampMs = 0L,
             statusMessage = "Reading stopped"
         )
     }

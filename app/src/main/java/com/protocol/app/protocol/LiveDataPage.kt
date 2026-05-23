@@ -67,7 +67,7 @@ internal fun LiveDataPage(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ModeButton(
-                label = if (uiState.isReadingLive) "Reading Live ●" else "Read Live Data",
+                label = if (uiState.isReadingLive) "Stop" else "Read Live Data",
                 active = uiState.isReadingLive,
                 enabled = !uiState.isRunningProbe && !uiState.isLogging,
                 onClick = {
@@ -76,7 +76,7 @@ internal fun LiveDataPage(
                 modifier = Modifier.weight(1f)
             )
             ModeButton(
-                label = if (uiState.isLogging) "Logging ●" else "Log Live Data",
+                label = if (uiState.isLogging) "Stop" else "Log Live Data",
                 active = uiState.isLogging,
                 enabled = !uiState.isRunningProbe && !uiState.isReadingLive,
                 onClick = {
@@ -143,10 +143,11 @@ private fun ModeButton(
         onClick = onClick,
         enabled = enabled,
         colors = ButtonDefaults.buttonColors(
-            // Active state stays green to communicate "live" — but the
-            // Y2K shape + Accent border match the home menu / probe
-            // button so the whole app reads as one button family.
-            containerColor = if (active) PassGreen else SurfaceBg,
+            // Active state fills with the Accent burnt-orange so a running
+            // Read/Log press reads as the orange "Stop" press; idle stays
+            // SurfaceBg with the orange Accent outline (matches the home
+            // menu / probe button so the whole app reads as one family).
+            containerColor = if (active) Accent else SurfaceBg,
             contentColor = Color.White,
             disabledContainerColor = SurfaceBg.copy(alpha = 0.5f),
             disabledContentColor = NeutralGray
