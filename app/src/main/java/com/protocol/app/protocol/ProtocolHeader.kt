@@ -1,8 +1,10 @@
 package com.protocol.app.protocol
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,15 +14,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.protocol.app.R
@@ -61,7 +70,8 @@ internal fun ConnectionStatusStripe(status: ConnectionStatus) {
 internal fun ProtocolHeader(
     subPageTitle: String?,
     showHamburger: Boolean,
-    onHamburger: () -> Unit,
+    onOpenParameters: () -> Unit,
+    onOpenLiveDataSettings: () -> Unit,
     onClose: () -> Unit
 ) {
     Box(
@@ -94,8 +104,9 @@ internal fun ProtocolHeader(
                 onClick = onClose,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
-            showHamburger -> HamburgerButton(
-                onClick = onHamburger,
+            showHamburger -> HamburgerMenu(
+                onOpenParameters = onOpenParameters,
+                onOpenLiveDataSettings = onOpenLiveDataSettings,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
@@ -103,11 +114,20 @@ internal fun ProtocolHeader(
     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
 }
 
+// Hamburger now opens a tiny dropdown with two destinations rather than
+// jumping straight to the full Parameters page. The dropdown is anchored
+// to the icon — selecting an item triggers the matching sub-page nav and
+// dismisses the menu.
 @Composable
-private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun HamburgerMenu(
+    onOpenParameters: () -> Unit,
+    onOpenLiveDataSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
-            .clickable(onClick = onClick)
+            .clickable { expanded = true }
             .size(width = 44.dp, height = 32.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -120,6 +140,42 @@ private fun HamburgerButton(onClick: () -> Unit, modifier: Modifier = Modifier) 
                         .background(Accent)
                 )
             }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(SurfaceBg)
+                .border(BorderStroke(1.dp, Accent))
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "Live Data Settings",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onOpenLiveDataSettings()
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "Parameters",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onOpenParameters()
+                }
+            )
         }
     }
 }

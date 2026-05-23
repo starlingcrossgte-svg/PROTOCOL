@@ -26,20 +26,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-// Settings sub-page. Background image, polling, session log size,
-// layout reset, developer mode. Title + close X live in the shared
-// header. Each section uses CategoryHeader for visual consistency
-// with the Parameters and Outcome bodies.
+// General app Settings sub-page. Background image + developer mode +
+// future global app preferences. Live-Data-specific knobs (poll
+// interval, session log size, layout reset) live on the new
+// LiveDataSettingsBody, accessed via the hamburger on Live Data.
 
 @Composable
 internal fun SettingsBody(
     uiState: ProtocolUiState,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
-    onPollIntervalChange: (Int) -> Unit,
-    onSessionLogMaxChange: (Int) -> Unit,
-    onDevModeChange: (Boolean) -> Unit,
-    onResetLayout: () -> Unit
+    onDevModeChange: (Boolean) -> Unit
 ) {
     val s = uiState.settings
     Column(
@@ -68,35 +65,6 @@ internal fun SettingsBody(
             SettingsButton(label = "Clear Background", onClick = onClearBackground)
         }
         SettingsHelp("Pick any image from your gallery. A 50% dark overlay is applied automatically so text stays readable against bright photos.")
-
-        // ── Polling ────────────────────────────────────────────────
-        CategoryHeader("POLLING")
-        SliderRow(
-            label = "Poll interval",
-            value = s.pollIntervalMs,
-            suffix = "ms",
-            range = AppSettings.POLL_INTERVAL_MIN..AppSettings.POLL_INTERVAL_MAX,
-            stepDp = 50,
-            onChange = onPollIntervalChange
-        )
-        SettingsHelp("Lower = faster gauge updates, more K-line traffic. Changes apply on the next Read Live Data.")
-
-        // ── Session log ────────────────────────────────────────────
-        CategoryHeader("SESSION LOG")
-        SliderRow(
-            label = "Max rows",
-            value = s.sessionLogMaxSize,
-            suffix = "",
-            range = AppSettings.SESSION_LOG_MIN..AppSettings.SESSION_LOG_MAX,
-            stepDp = 500,
-            onChange = onSessionLogMaxChange
-        )
-        SettingsHelp("Older rows drop off when the cap is reached. Applies live to the running session.")
-
-        // ── Layout ─────────────────────────────────────────────────
-        CategoryHeader("LAYOUT")
-        SettingsButton(label = "Reset Gauge Layout", onClick = onResetLayout)
-        SettingsHelp("Clears all gauges from Live Data. Add new ones from the Parameters menu.")
 
         // ── Developer ──────────────────────────────────────────────
         CategoryHeader("DEVELOPER")
@@ -129,7 +97,7 @@ internal fun SettingsBody(
 }
 
 @Composable
-private fun SettingsButton(label: String, onClick: () -> Unit) {
+internal fun SettingsButton(label: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
@@ -151,7 +119,7 @@ private fun SettingsButton(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SettingsHelp(text: String) {
+internal fun SettingsHelp(text: String) {
     Text(
         text = text,
         color = NeutralGray,
@@ -162,7 +130,7 @@ private fun SettingsHelp(text: String) {
 }
 
 @Composable
-private fun SliderRow(
+internal fun SliderRow(
     label: String,
     value: Int,
     suffix: String,

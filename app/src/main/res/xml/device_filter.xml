@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Tactrix OpenPort 2.0. VID=0x0403 (FTDI), PID=0xCC4D (Tactrix-specific).
+      Declared in decimal here because that's what the USB host stack returns
+      in UsbDevice.vendorId / productId — and what we already compare against
+      in Protocol.kt (TACTRIX_VENDOR_ID = 1027, TACTRIX_PRODUCT_ID = 52301).
+    -->
+    <usb-device vendor-id="1027" product-id="52301" />
+</resources>

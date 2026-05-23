@@ -11,6 +11,7 @@ import com.protocol.app.openport2.TactrixCommandLog
  */
 sealed class SubPage {
     object Parameters : SubPage()
+    object LiveDataSettings : SubPage()
     object Settings : SubPage()
     object Flash : SubPage()
     object Diagnostics : SubPage()

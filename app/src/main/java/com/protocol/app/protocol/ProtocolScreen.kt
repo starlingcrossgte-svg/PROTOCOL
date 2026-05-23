@@ -75,6 +75,7 @@ fun ProtocolScreen(
 
     val subPageTitle: String? = when (uiState.activeSubPage) {
         SubPage.Parameters -> "Parameters"
+        SubPage.LiveDataSettings -> "Live Data Settings"
         SubPage.Settings -> "Settings"
         SubPage.Flash -> "Flash ECU"
         SubPage.Diagnostics -> "Diagnostics / CEL"
@@ -120,12 +121,14 @@ fun ProtocolScreen(
 
             ProtocolHeader(
                 subPageTitle = subPageTitle,
-                // Hamburger is only meaningful on Live Data (opens the
-                // Parameters menu for managing gauges). Home is the root
-                // and has no right-side action.
+                // Hamburger is only meaningful on Live Data — it drops a
+                // small popup menu with two destinations: Live Data
+                // Settings (live-only knobs) and Parameters (manage
+                // gauges). Home is the root and has no right-side action.
                 showHamburger = uiState.activeSubPage == null &&
                     pagerState.currentPage == 1,
-                onHamburger = { onOpenSubPage(SubPage.Parameters) },
+                onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
+                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
                 onClose = onCloseSubPage
             )
 
@@ -167,14 +170,17 @@ fun ProtocolScreen(
                         uiState = uiState,
                         onTogglePid = onToggleGaugeForPid
                     )
+                    SubPage.LiveDataSettings -> LiveDataSettingsBody(
+                        uiState = uiState,
+                        onPollIntervalChange = onPollIntervalChange,
+                        onSessionLogMaxChange = onSessionLogMaxChange,
+                        onResetLayout = onResetLayout
+                    )
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
-                        onPollIntervalChange = onPollIntervalChange,
-                        onSessionLogMaxChange = onSessionLogMaxChange,
-                        onDevModeChange = onDevModeChange,
-                        onResetLayout = onResetLayout
+                        onDevModeChange = onDevModeChange
                     )
                     SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)

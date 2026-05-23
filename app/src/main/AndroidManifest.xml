@@ -21,6 +21,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+              USB device-attached filter for the Tactrix OpenPort 2.0.
+              When the user checks "always open with PROTOCOL" on the first
+              plug-in, Android grants permission persistently — no permission
+              dialog on subsequent re-plugs.
+            -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </activity>
 
         <provider
