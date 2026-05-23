@@ -134,25 +134,36 @@ internal fun LiveDataPage(
     }
 }
 
-// Status + live polling-rate line, bright green and above the gauges.
-// Combines the textual status (or a tapped-param long name) with the
-// measured ms between the last two poll samples. Falls back to the
-// configured poll-interval setting when no samples have arrived yet.
+// Status + live polling-rate line, above the gauges. Color tracks the
+// connection stripe at the top of the screen (green/accent/red) so the
+// status text and the stripe always agree at a glance.
+//
+// The ms readout is the measured wall-clock delta between the last two
+// poll samples — what the adapter is actually doing on the K-line right
+// now. We do NOT fall back to the configured setting; if there's no
+// measured rate (not polling, or only one sample so far) the ms is
+// simply omitted.
 @Composable
 private fun StatusLine(uiState: ProtocolUiState) {
-    val rateMs = if (uiState.lastPollIntervalMs > 0L)
-        uiState.lastPollIntervalMs.toInt()
-    else
-        uiState.settings.pollIntervalMs
+    val rateMs = uiState.lastPollIntervalMs.toInt()
     val baseStatus = uiState.tappedParamLongName ?: uiState.statusMessage
-    val text = if (baseStatus.isBlank())
-        "${rateMs}ms"
-    else
-        "$baseStatus  ·  ${rateMs}ms"
+    val text = when {
+        rateMs > 0 && baseStatus.isNotBlank() -> "$baseStatus  ·  ${rateMs}ms"
+        rateMs > 0 -> "${rateMs}ms"
+        else -> baseStatus
+    }
+    if (text.isBlank()) return
+    val statusColor = when (uiState.connectionStatus) {
+        is ConnectionStatus.Connected -> PassGreen
+        is ConnectionStatus.Ready,
+        is ConnectionStatus.PermissionRequired -> Accent
+        is ConnectionStatus.Error,
+        ConnectionStatus.NoDevice -> FailRed
+    }
     Text(
         text = text,
-        color = BrightGreen,
-        style = MaterialTheme.typography.bodySmall,
+        color = statusColor,
+        style = MaterialTheme.typography.labelSmall,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.SemiBold
     )
