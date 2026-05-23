@@ -66,21 +66,32 @@ internal fun LiveDataPage(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Read button. Active orange only when reading WITHOUT logging — when
+            // logging is on, the Log button is the primary Stop control and this
+            // one shows "Logging" greyed out so it's clear which one to tap.
             ModeButton(
-                label = if (uiState.isReadingLive) "Stop" else "Read Live Data",
-                active = uiState.isReadingLive,
+                label = when {
+                    uiState.isLogging -> "Logging"
+                    uiState.isReadingLive -> "Stop"
+                    else -> "Read Live Data"
+                },
+                active = uiState.isReadingLive && !uiState.isLogging,
                 enabled = !uiState.isRunningProbe && !uiState.isLogging,
                 onClick = {
                     if (uiState.isReadingLive) onStopReadingLive() else onStartReadingLive()
                 },
                 modifier = Modifier.weight(1f)
             )
+            // Log button. Always tappable (modulo probe in-flight). Idle → start
+            // logging (which also starts reading). While reading-only → upgrade
+            // current poll job to also log. While logging → fully stop (cancels
+            // the poll job, clears gauges).
             ModeButton(
                 label = if (uiState.isLogging) "Stop" else "Log Live Data",
                 active = uiState.isLogging,
-                enabled = !uiState.isRunningProbe && !uiState.isReadingLive,
+                enabled = !uiState.isRunningProbe,
                 onClick = {
-                    if (uiState.isLogging) onStopLogging() else onStartLogging()
+                    if (uiState.isLogging) onStopReadingLive() else onStartLogging()
                 },
                 modifier = Modifier.weight(1f)
             )
