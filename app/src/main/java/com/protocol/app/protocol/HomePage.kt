@@ -85,8 +85,7 @@ internal fun HomePage(
                 disabledContentColor = Color.Black.copy(alpha = 0.7f)
             ),
             shape = y2kCornerShape(),
-            enabled = !uiState.isReadingLive && !uiState.isLogging &&
-                uiState.connectionStatus is ConnectionStatus.Connected,
+            enabled = !uiState.isReadingLive && !uiState.isLogging && !uiState.isRunningProbe,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(

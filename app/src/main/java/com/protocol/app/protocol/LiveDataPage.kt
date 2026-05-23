@@ -53,7 +53,6 @@ internal fun LiveDataPage(
     // bars rather than scrolling the page out from under them.
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
-    val connected = uiState.connectionStatus is ConnectionStatus.Connected
     val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
@@ -70,7 +69,7 @@ internal fun LiveDataPage(
             ModeButton(
                 label = if (uiState.isReadingLive) "Reading Live ●" else "Read Live Data",
                 active = uiState.isReadingLive,
-                enabled = connected && !uiState.isRunningProbe,
+                enabled = !uiState.isRunningProbe && !uiState.isLogging,
                 onClick = {
                     if (uiState.isReadingLive) onStopReadingLive() else onStartReadingLive()
                 },
@@ -79,7 +78,7 @@ internal fun LiveDataPage(
             ModeButton(
                 label = if (uiState.isLogging) "Logging ●" else "Log Live Data",
                 active = uiState.isLogging,
-                enabled = connected && !uiState.isRunningProbe,
+                enabled = !uiState.isRunningProbe && !uiState.isReadingLive,
                 onClick = {
                     if (uiState.isLogging) onStopLogging() else onStartLogging()
                 },
