@@ -207,6 +207,8 @@ object ProtocolLogFormatter {
         "load"    -> "%.2f".format(value)
         "flkc"    -> "%.2f".format(value)
         "iam"     -> "%.3f".format(value)
+        "speed"   -> "%.0f".format(value)
+        "kca"     -> "%.1f".format(value)
         else      -> "%.2f".format(value)
     }
 
@@ -231,6 +233,8 @@ object ProtocolLogFormatter {
         "load"    -> 5   // "9.99"
         "flkc"    -> 6
         "iam"     -> 5   // "1.000"
+        "speed"   -> 3   // up to "200"
+        "kca"     -> 6   // signed degrees, e.g., "-15.0"
         else      -> 6
     }
 
@@ -264,6 +268,8 @@ object ProtocolLogFormatter {
         "load"    -> "%.4f".format(value)
         "flkc"    -> "%.4f".format(value)
         "iam"     -> "%.4f".format(value)
+        "speed"   -> "%.1f".format(value)
+        "kca"     -> "%.2f".format(value)
         else      -> "%.3f".format(value)
     }
 

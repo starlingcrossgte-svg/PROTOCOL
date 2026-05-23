@@ -215,6 +215,24 @@ object Ssm2Pids {
         longName = "IAM (Ignition Advance Multiplier)"
     )
 
+    val VEHICLE_SPEED = Ssm2Pid(
+        id = "speed",
+        displayName = "Speed",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x10)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Vehicle Speed"
+    )
+
+    val KNOCK_CORRECTION_ADVANCE = Ssm2Pid(
+        id = "kca",
+        displayName = "Knock Adv",
+        unit = "°",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x22)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) / 2.0 },
+        longName = "Knock Correction Advance"
+    )
+
     // ────── TCM (5EAT) parameters ──────
     //
     // Addresses + conversions pulled from RomRaider's logger_IMP_EN_v370.xml
@@ -336,6 +354,8 @@ object Ssm2Pids {
         ENGINE_LOAD_CALC,
         FINE_LEARNING_KC,
         IAM,
+        VEHICLE_SPEED,
+        KNOCK_CORRECTION_ADVANCE,
         TCM_GEAR_POSITION,
         TCM_TURBINE_SPEED,
         TCM_ATF_TEMP,
