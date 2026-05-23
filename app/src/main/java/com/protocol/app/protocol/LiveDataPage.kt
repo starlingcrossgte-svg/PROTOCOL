@@ -66,32 +66,38 @@ internal fun LiveDataPage(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Read button. Active orange only when reading WITHOUT logging — when
-            // logging is on, the Log button is the primary Stop control and this
-            // one shows "Logging" greyed out so it's clear which one to tap.
+            // Read button. Always tappable (modulo probe in-flight).
+            //   idle             → "Read Live Data"             → start reading only
+            //   reading only     → "Stop Reading"               → stop reading
+            //   reading+logging  → "Stop Reading + Logging"     → stop both
             ModeButton(
                 label = when {
-                    uiState.isLogging -> "Logging"
-                    uiState.isReadingLive -> "Stop"
+                    uiState.isLogging -> "Stop Reading + Logging"
+                    uiState.isReadingLive -> "Stop Reading"
                     else -> "Read Live Data"
                 },
-                active = uiState.isReadingLive && !uiState.isLogging,
-                enabled = !uiState.isRunningProbe && !uiState.isLogging,
+                active = uiState.isReadingLive,
+                enabled = !uiState.isRunningProbe,
                 onClick = {
                     if (uiState.isReadingLive) onStopReadingLive() else onStartReadingLive()
                 },
                 modifier = Modifier.weight(1f)
             )
-            // Log button. Always tappable (modulo probe in-flight). Idle → start
-            // logging (which also starts reading). While reading-only → upgrade
-            // current poll job to also log. While logging → fully stop (cancels
-            // the poll job, clears gauges).
+            // Log button. Always tappable (modulo probe in-flight).
+            //   idle             → "Read + Log Live"            → start reading + logging
+            //   reading only     → "Log Live Data"              → add logging on top
+            //   logging (both)   → "Stop Logging"               → stop logging only,
+            //                                                     keep reading running
             ModeButton(
-                label = if (uiState.isLogging) "Stop" else "Log Live Data",
+                label = when {
+                    uiState.isLogging -> "Stop Logging"
+                    uiState.isReadingLive -> "Log Live Data"
+                    else -> "Read + Log Live"
+                },
                 active = uiState.isLogging,
                 enabled = !uiState.isRunningProbe,
                 onClick = {
-                    if (uiState.isLogging) onStopReadingLive() else onStartLogging()
+                    if (uiState.isLogging) onStopLogging() else onStartLogging()
                 },
                 modifier = Modifier.weight(1f)
             )

@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+private val DEFAULT_STARTER_PID_IDS = listOf("rpm", "coolant", "battery", "oil", "iat")
+
 class ProtocolViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProtocolUiState())
@@ -43,16 +45,19 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
-     * Wire the persistent gauge-layout store. First-launch behavior is an
-     * empty Live Data page — the user opts in to each parameter from the
-     * Parameters menu. Existing installs that already have a saved layout
-     * keep it.
+     * Wire the persistent gauge-layout store. First-launch behavior is a
+     * starter layout (RPM, Coolant, Battery, Oil Temp, IAT) so the user
+     * lands on a useful Live Data screen instead of a blank grid. Existing
+     * installs that already have a saved layout keep it untouched.
      */
     fun attachLayoutStore(store: GaugeLayoutStore) {
         layoutStore = store
-        val loaded = store.load() ?: GaugeLayout()
-        _uiState.value = _uiState.value.copy(gaugeLayout = loaded)
-        if (store.load() == null) store.save(loaded)
+        val existing = store.load()
+        val layout = existing ?: DEFAULT_STARTER_PID_IDS.fold(GaugeLayout()) { acc, id ->
+            acc.withAdded(id)
+        }
+        _uiState.value = _uiState.value.copy(gaugeLayout = layout)
+        if (existing == null) store.save(layout)
     }
 
     /**
