@@ -70,8 +70,11 @@ internal fun LiveDataPage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState, enabled = !uiState.editMode)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        // Tight global spacing — every Live Data px counts on split-screen
+        // and in-dash setups. Status line + gauges should sit as close to
+        // the top of the page as possible.
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         if (!splitScreen) {
             ModeButtonsRow(
