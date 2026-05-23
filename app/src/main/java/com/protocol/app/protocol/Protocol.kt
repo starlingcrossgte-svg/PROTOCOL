@@ -16,7 +16,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import java.io.File
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.collectAsState
@@ -43,7 +45,6 @@ class Protocol : ComponentActivity() {
     private lateinit var sessionManager: OpenPort2UsbSessionManager
 
     private var pendingExportText: String = ""
-    private var pendingCsvText: String = ""
 
     private val exportLogLauncher = registerForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
@@ -55,18 +56,6 @@ class Protocol : ComponentActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
         } finally { pendingExportText = "" }
-    }
-
-    private val exportCsvLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri: Uri? ->
-        if (uri == null) { Toast.makeText(this, "Export cancelled", Toast.LENGTH_SHORT).show(); return@registerForActivityResult }
-        try {
-            contentResolver.openOutputStream(uri)?.use { it.write(pendingCsvText.toByteArray(StandardCharsets.UTF_8)) }
-            Toast.makeText(this, "Session log exported", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Export failed: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-        } finally { pendingCsvText = "" }
     }
 
     // Settings → Choose Background. Android Photo Picker handles the
@@ -361,13 +350,34 @@ class Protocol : ComponentActivity() {
         Toast.makeText(this, "Session log copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
+    // Export session log via the system share chooser. Writes the CSV to
+    // app cache (exposed through FileProvider) and fires ACTION_SEND so the
+    // user can pick Files, Gmail, Drive, Bluetooth, etc. — anything that
+    // accepts a text/csv attachment. Previous behavior went straight to the
+    // Files save-as picker, which gave no email / share options.
     private fun launchExportSessionLog() {
         val csv = ProtocolLogFormatter.formatSessionLogCsv(viewModel.uiState.value)
         if (csv.isEmpty()) {
             Toast.makeText(this, "No session data to export", Toast.LENGTH_SHORT).show()
             return
         }
-        pendingCsvText = csv
-        exportCsvLauncher.launch(ProtocolLogFormatter.suggestedCsvFileName())
+        val fileName = ProtocolLogFormatter.suggestedCsvFileName()
+        val uri = try {
+            val exportsDir = File(cacheDir, "exports").apply { if (!exists()) mkdirs() }
+            val tempFile = File(exportsDir, fileName)
+            tempFile.writeText(csv, StandardCharsets.UTF_8)
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", tempFile)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export prep failed: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, fileName)
+            putExtra(Intent.EXTRA_TITLE, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(send, "Export session log"))
     }
 }
