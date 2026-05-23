@@ -952,9 +952,10 @@ object Ssm2Pids {
     val TCM_LU_PRESSURE = Ssm2Pid(
         id = "tcm_lu_press",
         displayName = "L/U Press",
-        unit = "bar",
+        unit = "psi",
         addresses = listOf(Ssm2Address(0x00, 0x01, 0x4D)),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.1 },
+        // logger.xml psi: x*1.450377 (raw byte directly to psi)
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
         longName = "L/U Solenoid Valve Pressure",
         category = Ssm2PidCategory.TCM
     )
@@ -962,9 +963,9 @@ object Ssm2Pids {
     val TCM_PL_PRESSURE = Ssm2Pid(
         id = "tcm_pl_press",
         displayName = "P/L Press",
-        unit = "bar",
+        unit = "psi",
         addresses = listOf(Ssm2Address(0x00, 0x01, 0x4C)),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.1 },
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
         longName = "P/L Solenoid Valve Pressure",
         category = Ssm2PidCategory.TCM
     )
@@ -992,6 +993,386 @@ object Ssm2Pids {
         addresses = listOf(Ssm2Address(0x00, 0x00, 0x29)),
         decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
         longName = "Accelerator Pedal Angle",
+        category = Ssm2PidCategory.TCM
+    )
+
+    // ───────────── TCM additions (5EAT logger.xml P-codes) ─────────────
+    // Pressures in psi, currents in A (small) or A (raw), voltages in V,
+    // speeds in mph. Conversions sourced from logger_IMP_EN_v370.xml.
+
+    val TCM_LINE_PRESSURE_DUTY = Ssm2Pid(
+        id = "tcm_lp_duty",
+        displayName = "LP Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x4B)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Line Pressure Duty Ratio",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_LU_DUTY = Ssm2Pid(
+        id = "tcm_lu_duty",
+        displayName = "L/U Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x4C)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Lock Up Duty Ratio",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_TRANSFER_DUTY = Ssm2Pid(
+        id = "tcm_xfer_duty",
+        displayName = "Xfer Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x4D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Transfer Duty Ratio (AWD)",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_BRAKE_CLUTCH_DUTY = Ssm2Pid(
+        id = "tcm_bc_duty",
+        displayName = "BrkCl Dty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x50)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Brake Clutch Duty Ratio",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_LATERAL_G_VOLTAGE = Ssm2Pid(
+        id = "tcm_latg_v",
+        displayName = "LatG V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x55)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Lateral G Sensor Voltage",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_LOW_CLUTCH_DUTY = Ssm2Pid(
+        id = "tcm_lc_duty",
+        displayName = "LowCl Dty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x57)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Low Clutch Duty",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_HIGH_CLUTCH_DUTY = Ssm2Pid(
+        id = "tcm_hc_duty",
+        displayName = "HiCl Dty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x58)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "High Clutch Duty",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_LRB_DUTY = Ssm2Pid(
+        id = "tcm_lrb_duty",
+        displayName = "L/RB Dty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x59)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Load and Reverse Brake Duty",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_CENTER_DIFF_SWITCH_V = Ssm2Pid(
+        id = "tcm_cd_sw_v",
+        displayName = "CD Sw V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x5B)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 51.0 },
+        longName = "Voltage Center Differential Switch",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_AT_TURBINE_1 = Ssm2Pid(
+        id = "tcm_atts1",
+        displayName = "AT Turb1",
+        unit = "rpm",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x5C)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "AT Turbine Speed 1",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_AT_TURBINE_2 = Ssm2Pid(
+        id = "tcm_atts2",
+        displayName = "AT Turb2",
+        unit = "rpm",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x5D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "AT Turbine Speed 2",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_CENTER_DIFF_REAL_I = Ssm2Pid(
+        id = "tcm_cd_real_i",
+        displayName = "CD I Real",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x5E)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 32.0 },
+        longName = "Center Differential Real Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_CENTER_DIFF_IND_I = Ssm2Pid(
+        id = "tcm_cd_ind_i",
+        displayName = "CD I Ind",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x5F)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 32.0 },
+        longName = "Center Differential Indicate Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_HLRC_CURRENT = Ssm2Pid(
+        id = "tcm_hlrc_i",
+        displayName = "H+LRC I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x40)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "H and LR/C Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_DC_CURRENT = Ssm2Pid(
+        id = "tcm_dc_i",
+        displayName = "D/C I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x41)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "D/C Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_FB_CURRENT = Ssm2Pid(
+        id = "tcm_fb_i",
+        displayName = "F/B I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x42)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "F/B Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_IC_CURRENT = Ssm2Pid(
+        id = "tcm_ic_i",
+        displayName = "I/C I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x43)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "I/C Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_PL_CURRENT = Ssm2Pid(
+        id = "tcm_pl_i",
+        displayName = "P/L I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x44)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "P/L Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_LU_CURRENT = Ssm2Pid(
+        id = "tcm_lu_i",
+        displayName = "L/U I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x45)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "L/U Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_AWD_CURRENT = Ssm2Pid(
+        id = "tcm_awd_i",
+        displayName = "AWD I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x46)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "AWD Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_YAW_RATE_VOLTAGE = Ssm2Pid(
+        id = "tcm_yaw_v",
+        displayName = "Yaw V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x47)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 51.0 },
+        longName = "Yaw Rate Sensor Voltage",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_HLRC_PRESSURE = Ssm2Pid(
+        id = "tcm_hlrc_p",
+        displayName = "H+LRC Pr",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x48)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
+        longName = "H and LR/C Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_DC_PRESSURE = Ssm2Pid(
+        id = "tcm_dc_p",
+        displayName = "D/C Pr",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x49)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
+        longName = "D/C Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_FB_PRESSURE = Ssm2Pid(
+        id = "tcm_fb_p",
+        displayName = "F/B Pr",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x4A)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
+        longName = "F/B Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_IC_PRESSURE = Ssm2Pid(
+        id = "tcm_ic_p",
+        displayName = "I/C Pr",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x4B)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
+        longName = "I/C Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_AWD_PRESSURE = Ssm2Pid(
+        id = "tcm_awd_p",
+        displayName = "AWD Pr",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x4E)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
+        longName = "AWD Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_YAW_G_REF_VOLTAGE = Ssm2Pid(
+        id = "tcm_yawg_ref",
+        displayName = "YawG Ref",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x4F)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 51.0 },
+        longName = "Yaw Rate and G Sensor Reference Voltage",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_WHEEL_FR = Ssm2Pid(
+        id = "tcm_whl_fr",
+        displayName = "Whl FR",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x3C)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Wheel Speed Front Right",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_WHEEL_FL = Ssm2Pid(
+        id = "tcm_whl_fl",
+        displayName = "Whl FL",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x3D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Wheel Speed Front Left",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_WHEEL_RR = Ssm2Pid(
+        id = "tcm_whl_rr",
+        displayName = "Whl RR",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x3E)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Wheel Speed Rear Right",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_WHEEL_RL = Ssm2Pid(
+        id = "tcm_whl_rl",
+        displayName = "Whl RL",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x3F)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Wheel Speed Rear Left",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_FWDB_CURRENT = Ssm2Pid(
+        id = "tcm_fwdb_i",
+        displayName = "FwdB I",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x85.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 },
+        longName = "Fwd/B Solenoid Valve Current",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_FWDB_TARGET_PRESSURE = Ssm2Pid(
+        id = "tcm_fwdb_p",
+        displayName = "FwdB TgtPr",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x86.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
+        longName = "Fwd/B Solenoid Valve Target Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_FR_WHEEL_RATIO = Ssm2Pid(
+        id = "tcm_fr_ratio",
+        displayName = "F/R Ratio",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x02, 0x93.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 128.0 },
+        longName = "Front-Rear Wheel Rotation Ratio",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_ABS_FRONT_MEAN = Ssm2Pid(
+        id = "tcm_abs_fm",
+        displayName = "ABS F Mn",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x02, 0x94.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 143.0 / 255.0 },
+        longName = "ABS/VDC Front Wheel Mean Speed",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_ABS_REAR_MEAN = Ssm2Pid(
+        id = "tcm_abs_rm",
+        displayName = "ABS R Mn",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x02, 0x95.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 143.0 / 255.0 },
+        longName = "ABS/VDC Rear Wheel Mean Speed",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_ATF_DETERIORATION = Ssm2Pid(
+        id = "tcm_atf_deg",
+        displayName = "ATF Deg",
+        unit = "%",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x02, 0x96.toByte()),
+            Ssm2Address(0x00, 0x02, 0x97.toByte())
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else ((raw[0] shl 8) or raw[1]) * 40.0 / 13107.0
+        },
+        longName = "ATF Deterioration Degree",
         category = Ssm2PidCategory.TCM
     )
 
@@ -1085,7 +1466,44 @@ object Ssm2Pids {
         TCM_LU_PRESSURE,
         TCM_PL_PRESSURE,
         TCM_ENGINE_SPEED,
-        TCM_PEDAL_ANGLE
+        TCM_PEDAL_ANGLE,
+        TCM_LINE_PRESSURE_DUTY,
+        TCM_LU_DUTY,
+        TCM_TRANSFER_DUTY,
+        TCM_BRAKE_CLUTCH_DUTY,
+        TCM_LATERAL_G_VOLTAGE,
+        TCM_LOW_CLUTCH_DUTY,
+        TCM_HIGH_CLUTCH_DUTY,
+        TCM_LRB_DUTY,
+        TCM_CENTER_DIFF_SWITCH_V,
+        TCM_AT_TURBINE_1,
+        TCM_AT_TURBINE_2,
+        TCM_CENTER_DIFF_REAL_I,
+        TCM_CENTER_DIFF_IND_I,
+        TCM_HLRC_CURRENT,
+        TCM_DC_CURRENT,
+        TCM_FB_CURRENT,
+        TCM_IC_CURRENT,
+        TCM_PL_CURRENT,
+        TCM_LU_CURRENT,
+        TCM_AWD_CURRENT,
+        TCM_YAW_RATE_VOLTAGE,
+        TCM_HLRC_PRESSURE,
+        TCM_DC_PRESSURE,
+        TCM_FB_PRESSURE,
+        TCM_IC_PRESSURE,
+        TCM_AWD_PRESSURE,
+        TCM_YAW_G_REF_VOLTAGE,
+        TCM_WHEEL_FR,
+        TCM_WHEEL_FL,
+        TCM_WHEEL_RR,
+        TCM_WHEEL_RL,
+        TCM_FWDB_CURRENT,
+        TCM_FWDB_TARGET_PRESSURE,
+        TCM_FR_WHEEL_RATIO,
+        TCM_ABS_FRONT_MEAN,
+        TCM_ABS_REAR_MEAN,
+        TCM_ATF_DETERIORATION
     )
 
     private fun decodeFloatBE(raw: IntArray): Double {

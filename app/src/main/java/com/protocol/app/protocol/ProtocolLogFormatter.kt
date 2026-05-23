@@ -237,6 +237,26 @@ object ProtocolLogFormatter {
         "overspd_vh", "overspd_h" -> "%.0f".format(value)
         "idc"             -> "%.1f".format(value)
         "mpg"             -> "%.1f".format(value)
+        // TCM
+        "tcm_gear"        -> "%.0f".format(value)
+        "tcm_turbine", "tcm_atts1", "tcm_atts2", "tcm_rpm" -> "%.0f".format(value)
+        "tcm_atf"         -> "%.0f".format(value)
+        "tcm_fws", "tcm_rws", "tcm_whl_fr", "tcm_whl_fl",
+        "tcm_whl_rr", "tcm_whl_rl",
+        "tcm_abs_fm", "tcm_abs_rm" -> "%.1f".format(value)
+        "tcm_pedal"       -> "%.1f".format(value)
+        "tcm_lu_press", "tcm_pl_press",
+        "tcm_hlrc_p", "tcm_dc_p", "tcm_fb_p",
+        "tcm_ic_p", "tcm_awd_p", "tcm_fwdb_p" -> "%.1f".format(value)
+        "tcm_lp_duty", "tcm_lu_duty", "tcm_xfer_duty",
+        "tcm_bc_duty", "tcm_lc_duty", "tcm_hc_duty",
+        "tcm_lrb_duty"    -> "%.1f".format(value)
+        "tcm_latg_v", "tcm_cd_sw_v", "tcm_yaw_v",
+        "tcm_yawg_ref"    -> "%.2f".format(value)
+        "tcm_cd_real_i", "tcm_cd_ind_i" -> "%.2f".format(value)
+        "tcm_hlrc_i", "tcm_dc_i", "tcm_fb_i", "tcm_ic_i",
+        "tcm_pl_i", "tcm_lu_i", "tcm_awd_i", "tcm_fwdb_i" -> "%.3f".format(value)
+        "tcm_fr_ratio", "tcm_atf_deg" -> "%.2f".format(value)
         else              -> "%.2f".format(value)
     }
 
@@ -290,6 +310,26 @@ object ProtocolLogFormatter {
         "overspd_vh", "overspd_h" -> 4
         "idc"             -> 5   // "100.0"
         "mpg"             -> 5   // "99.9"
+        // TCM
+        "tcm_gear"        -> 2
+        "tcm_turbine", "tcm_atts1", "tcm_atts2", "tcm_rpm" -> 5
+        "tcm_atf"         -> 3
+        "tcm_fws", "tcm_rws", "tcm_whl_fr", "tcm_whl_fl",
+        "tcm_whl_rr", "tcm_whl_rl",
+        "tcm_abs_fm", "tcm_abs_rm" -> 5
+        "tcm_pedal"       -> 5
+        "tcm_lu_press", "tcm_pl_press",
+        "tcm_hlrc_p", "tcm_dc_p", "tcm_fb_p",
+        "tcm_ic_p", "tcm_awd_p", "tcm_fwdb_p" -> 5
+        "tcm_lp_duty", "tcm_lu_duty", "tcm_xfer_duty",
+        "tcm_bc_duty", "tcm_lc_duty", "tcm_hc_duty",
+        "tcm_lrb_duty"    -> 5
+        "tcm_latg_v", "tcm_cd_sw_v", "tcm_yaw_v",
+        "tcm_yawg_ref"    -> 4
+        "tcm_cd_real_i", "tcm_cd_ind_i" -> 5
+        "tcm_hlrc_i", "tcm_dc_i", "tcm_fb_i", "tcm_ic_i",
+        "tcm_pl_i", "tcm_lu_i", "tcm_awd_i", "tcm_fwdb_i" -> 5
+        "tcm_fr_ratio", "tcm_atf_deg" -> 5
         else              -> 6
     }
 
@@ -353,6 +393,26 @@ object ProtocolLogFormatter {
         "overspd_vh", "overspd_h" -> "%.0f".format(value)
         "idc"             -> "%.2f".format(value)
         "mpg"             -> "%.2f".format(value)
+        // TCM
+        "tcm_gear"        -> "%.0f".format(value)
+        "tcm_turbine", "tcm_atts1", "tcm_atts2", "tcm_rpm" -> "%.1f".format(value)
+        "tcm_atf"         -> "%.1f".format(value)
+        "tcm_fws", "tcm_rws", "tcm_whl_fr", "tcm_whl_fl",
+        "tcm_whl_rr", "tcm_whl_rl",
+        "tcm_abs_fm", "tcm_abs_rm" -> "%.2f".format(value)
+        "tcm_pedal"       -> "%.2f".format(value)
+        "tcm_lu_press", "tcm_pl_press",
+        "tcm_hlrc_p", "tcm_dc_p", "tcm_fb_p",
+        "tcm_ic_p", "tcm_awd_p", "tcm_fwdb_p" -> "%.2f".format(value)
+        "tcm_lp_duty", "tcm_lu_duty", "tcm_xfer_duty",
+        "tcm_bc_duty", "tcm_lc_duty", "tcm_hc_duty",
+        "tcm_lrb_duty"    -> "%.2f".format(value)
+        "tcm_latg_v", "tcm_cd_sw_v", "tcm_yaw_v",
+        "tcm_yawg_ref"    -> "%.3f".format(value)
+        "tcm_cd_real_i", "tcm_cd_ind_i" -> "%.3f".format(value)
+        "tcm_hlrc_i", "tcm_dc_i", "tcm_fb_i", "tcm_ic_i",
+        "tcm_pl_i", "tcm_lu_i", "tcm_awd_i", "tcm_fwdb_i" -> "%.4f".format(value)
+        "tcm_fr_ratio", "tcm_atf_deg" -> "%.3f".format(value)
         else              -> "%.3f".format(value)
     }
 
