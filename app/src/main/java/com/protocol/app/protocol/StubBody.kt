@@ -39,7 +39,7 @@ internal fun StubBody(page: SubPage) {
             "Live RAM-resident tunables: rev limiter, fuel cutoff, idle target, etc. Reads via SSM2 0xA8, writes via 0xB8. Addresses come from the per-ECU calibration definitions (EcuFlash/RomRaider XML).",
             "Few weeks once we settle on which parameters are in scope and pull the EZ30R definitions in."
         )
-        SubPage.Parameters -> Pair("", "")
+        SubPage.Parameters, SubPage.LiveDataSettings -> Pair("", "")
     }
 
     Column(
