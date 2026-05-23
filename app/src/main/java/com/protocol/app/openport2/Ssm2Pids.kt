@@ -174,9 +174,14 @@ object Ssm2Pids {
         ),
         decode = { raw ->
             if (raw.size < 4) 0.0 else {
+                // g/rev = MAF (g/s) * 60 (s/min) / RPM (rev/min).
+                // Previous formula used *120, which actually computes g/cycle
+                // (= g/2 revs on a 4-stroke). Reported value was 2× RR's at
+                // idle (0.90 vs 0.41 g/rev). Verified 2026-05-23 by side-by-
+                // side comparison with RomRaider logger CSV.
                 val rpm = ((raw[0] shl 8) or raw[1]) * 0.25
                 val maf = ((raw[2] shl 8) or raw[3]) * 0.01
-                if (rpm > 0.0) maf * 120.0 / rpm else 0.0
+                if (rpm > 0.0) maf * 60.0 / rpm else 0.0
             }
         },
         longName = "Engine Load (Calculated)"
