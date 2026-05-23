@@ -40,6 +40,8 @@ data class ProtocolUiState(
     val attStepDurationMs: Long? = null,
     val liveValues: Map<String, Double> = emptyMap(),
     val lastSampleTimestampMs: Long = 0L,
+    /** Measured ms between the last two poll samples — drives the on-page polling-rate readout. 0 until at least two samples have arrived. */
+    val lastPollIntervalMs: Long = 0L,
     val sessionLog: List<PollSample> = emptyList(),
     val gaugeLayout: GaugeLayout = GaugeLayout(),
     val tappedParamLongName: String? = null,

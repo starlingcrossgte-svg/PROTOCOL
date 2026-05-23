@@ -70,9 +70,11 @@ internal fun ConnectionStatusStripe(status: ConnectionStatus) {
 internal fun ProtocolHeader(
     subPageTitle: String?,
     showHamburger: Boolean,
+    splitScreenMode: Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
+    onToggleSplitScreen: () -> Unit,
     onClose: () -> Unit
 ) {
     Box(
@@ -106,9 +108,11 @@ internal fun ProtocolHeader(
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
             showHamburger -> HamburgerMenu(
+                splitScreenMode = splitScreenMode,
                 onOpenParameters = onOpenParameters,
                 onOpenTcmParameters = onOpenTcmParameters,
                 onOpenLiveDataSettings = onOpenLiveDataSettings,
+                onToggleSplitScreen = onToggleSplitScreen,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
@@ -116,15 +120,16 @@ internal fun ProtocolHeader(
     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
 }
 
-// Hamburger now opens a tiny dropdown with two destinations rather than
-// jumping straight to the full Parameters page. The dropdown is anchored
-// to the icon — selecting an item triggers the matching sub-page nav and
-// dismisses the menu.
+// Hamburger opens a small dropdown with sub-page destinations plus the
+// Split Screen toggle. Made internal so LiveDataPage can drop the same
+// icon inline next to its mode buttons when the shared header is hidden.
 @Composable
-private fun HamburgerMenu(
+internal fun HamburgerMenu(
+    splitScreenMode: Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
+    onToggleSplitScreen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -191,6 +196,35 @@ private fun HamburgerMenu(
                 onClick = {
                     expanded = false
                     onOpenTcmParameters()
+                }
+            )
+            // Toggle item — shows ON/OFF state at the right so the user can
+            // tell at a glance whether split screen is active. Tap closes
+            // the menu and flips the setting.
+            DropdownMenuItem(
+                text = {
+                    androidx.compose.foundation.layout.Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Split Screen",
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            if (splitScreenMode) "ON" else "OFF",
+                            color = if (splitScreenMode) PassGreen else NeutralGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                onClick = {
+                    expanded = false
+                    onToggleSplitScreen()
                 }
             )
         }

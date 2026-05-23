@@ -26,6 +26,7 @@ internal val BorderGray  = Color(0xFF3A3C42)
 // gauge border, drag-bar visuals, button outlines.
 internal val Accent      = Color(0xFFB85419)
 internal val PassGreen   = Color(0xFF22C55E)
+internal val BrightGreen = Color(0xFF22FF66)
 internal val FailRed     = Color(0xFFEF4444)
 internal val NeutralGray = Color(0xFFB8B8C0)
 internal val SectionGray = Color(0xFFB8B8C0)

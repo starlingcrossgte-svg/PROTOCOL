@@ -10,7 +10,8 @@ import android.content.Context
 data class AppSettings(
     val pollIntervalMs: Int = DEFAULT_POLL_INTERVAL_MS,
     val sessionLogMaxSize: Int = DEFAULT_SESSION_LOG_MAX,
-    val devMode: Boolean = false
+    val devMode: Boolean = false,
+    val splitScreenMode: Boolean = false
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -30,7 +31,8 @@ class SettingsStore(context: Context) {
     fun load(): AppSettings = AppSettings(
         pollIntervalMs = prefs.getInt(KEY_POLL_INTERVAL, AppSettings.DEFAULT_POLL_INTERVAL_MS),
         sessionLogMaxSize = prefs.getInt(KEY_LOG_MAX, AppSettings.DEFAULT_SESSION_LOG_MAX),
-        devMode = prefs.getBoolean(KEY_DEV_MODE, false)
+        devMode = prefs.getBoolean(KEY_DEV_MODE, false),
+        splitScreenMode = prefs.getBoolean(KEY_SPLIT_SCREEN, false)
     )
 
     fun save(s: AppSettings) {
@@ -38,6 +40,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_POLL_INTERVAL, s.pollIntervalMs)
             .putInt(KEY_LOG_MAX, s.sessionLogMaxSize)
             .putBoolean(KEY_DEV_MODE, s.devMode)
+            .putBoolean(KEY_SPLIT_SCREEN, s.splitScreenMode)
             .apply()
     }
 
@@ -46,5 +49,6 @@ class SettingsStore(context: Context) {
         private const val KEY_POLL_INTERVAL = "poll_interval_ms"
         private const val KEY_LOG_MAX = "session_log_max"
         private const val KEY_DEV_MODE = "dev_mode"
+        private const val KEY_SPLIT_SCREEN = "split_screen_mode"
     }
 }

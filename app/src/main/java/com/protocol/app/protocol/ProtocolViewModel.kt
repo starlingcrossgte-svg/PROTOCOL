@@ -102,6 +102,8 @@ class ProtocolViewModel : ViewModel() {
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
+    fun setSplitScreenMode(on: Boolean) = updateSettings { it.copy(splitScreenMode = on) }
+
     /**
      * Clear all gauges from the Live Data page. Persists immediately.
      * Surfaced from Settings → Reset Gauge Layout.
@@ -233,6 +235,7 @@ class ProtocolViewModel : ViewModel() {
             isLogging = false,
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
+            lastPollIntervalMs = 0L,
             log = if (wasRunning) _uiState.value.log else emptyList(),
             lastOutcome = if (wasRunning) Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED else null,
             ssm2DecodeBundle = if (wasRunning) _uiState.value.ssm2DecodeBundle else null,
@@ -339,9 +342,17 @@ class ProtocolViewModel : ViewModel() {
                     } else {
                         current.sessionLog
                     }
+                    // Live poll-rate readout — delta between this sample and
+                    // the previous one. First sample emits 0 (no prior point
+                    // of reference), subsequent samples carry the actual
+                    // measured cadence.
+                    val deltaMs = if (current.lastSampleTimestampMs > 0L)
+                        sample.timestampMs - current.lastSampleTimestampMs
+                    else 0L
                     _uiState.value = current.copy(
                         liveValues = sample.values,
                         lastSampleTimestampMs = sample.timestampMs,
+                        lastPollIntervalMs = deltaMs,
                         sessionLog = nextSessionLog
                     )
                 }
@@ -351,6 +362,7 @@ class ProtocolViewModel : ViewModel() {
                     isLogging = false,
                     liveValues = emptyMap(),
                     lastSampleTimestampMs = 0L,
+                    lastPollIntervalMs = 0L,
                     statusMessage = "USB device disconnected"
                 )
                 return@launch
@@ -364,7 +376,8 @@ class ProtocolViewModel : ViewModel() {
                     isReadingLive = false,
                     isLogging = false,
                     liveValues = emptyMap(),
-                    lastSampleTimestampMs = 0L
+                    lastSampleTimestampMs = 0L,
+                    lastPollIntervalMs = 0L
                 )
             }
         }
@@ -396,6 +409,7 @@ class ProtocolViewModel : ViewModel() {
             isLogging = false,
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
+            lastPollIntervalMs = 0L,
             statusMessage = "Reading stopped"
         )
     }

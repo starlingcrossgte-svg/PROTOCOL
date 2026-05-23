@@ -66,6 +66,7 @@ fun ProtocolScreen(
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
+    onSplitScreenChange: (Boolean) -> Unit,
     onResetLayout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -120,20 +121,24 @@ fun ProtocolScreen(
             // the old AdapterPill without occupying meaningful real estate.
             ConnectionStatusStripe(uiState.connectionStatus)
 
-            ProtocolHeader(
-                subPageTitle = subPageTitle,
-                // Hamburger is only meaningful on Live Data — drops a
-                // small popup menu with three destinations: Live Data
-                // Settings (live-only knobs), ECU Parameters, TCM
-                // Parameters. Home is the root and has no right-side
-                // action.
-                showHamburger = uiState.activeSubPage == null &&
-                    pagerState.currentPage == 1,
-                onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
-                onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
-                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
-                onClose = onCloseSubPage
-            )
+            // Hide the shared header (logo + chrome) on Live Data. That
+            // page renders its own compact top row with mode buttons and
+            // an inline hamburger so the gauges get more vertical real
+            // estate — important on split-screen and in-dash setups.
+            val onLiveDataRoot = uiState.activeSubPage == null &&
+                pagerState.currentPage == 1
+            if (!onLiveDataRoot) {
+                ProtocolHeader(
+                    subPageTitle = subPageTitle,
+                    showHamburger = false,
+                    splitScreenMode = uiState.settings.splitScreenMode,
+                    onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
+                    onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
+                    onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
+                    onToggleSplitScreen = { onSplitScreenChange(!uiState.settings.splitScreenMode) },
+                    onClose = onCloseSubPage
+                )
+            }
 
             // Body — main pager or sub-page content. Adapter pill is gone
             // from the chrome; discovery now triggers off the action
@@ -165,7 +170,11 @@ fun ProtocolScreen(
                                 onEnterEditMode = onEnterEditMode,
                                 onExitEditMode = onExitEditMode,
                                 onRemoveGauge = onRemoveGauge,
-                                onResizeGauge = onResizeGauge
+                                onResizeGauge = onResizeGauge,
+                                onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
+                                onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
+                                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
+                                onToggleSplitScreen = { onSplitScreenChange(!uiState.settings.splitScreenMode) }
                             )
                         }
                     }

@@ -163,6 +163,7 @@ class Protocol : ComponentActivity() {
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
+                    onSplitScreenChange = { on -> viewModel.setSplitScreenMode(on) },
                     onResetLayout = { viewModel.resetLayout() }
                 )
             }
