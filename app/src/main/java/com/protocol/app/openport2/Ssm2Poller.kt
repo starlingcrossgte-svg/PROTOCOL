@@ -63,18 +63,27 @@ sealed class PollResult {
  */
 class Ssm2Poller(
     private val client: TactrixClient,
-    private val pids: List<Ssm2Pid>
+    pids: List<Ssm2Pid>
 ) {
     private companion object {
         private const val ATT_TIMEOUT_MICROS = 400_000L
         private const val DEFAULT_MAX_CONSECUTIVE_MISSES = 5
     }
 
-    private val allAddresses: List<Ssm2Address> = pids.flatMap { it.addresses }
-    private val addressCount: Int = allAddresses.size
+    // PIDs split by module so we can issue per-module A8 queries. ECM and
+    // TCM have separate SSM2 address spaces — a single batched query has to
+    // target one or the other. Order: ECM PIDs first, then TCM PIDs. The
+    // raw-byte stream and the decode loop both use this ordering so slices
+    // align by position.
+    private val ecmPids: List<Ssm2Pid> = pids.filter { it.category == Ssm2PidCategory.ECU }
+    private val tcmPids: List<Ssm2Pid> = pids.filter { it.category == Ssm2PidCategory.TCM }
+    private val orderedPids: List<Ssm2Pid> = ecmPids + tcmPids
+    private val ecmAddresses: List<Ssm2Address> = ecmPids.flatMap { it.addresses }
+    private val tcmAddresses: List<Ssm2Address> = tcmPids.flatMap { it.addresses }
 
     /**
-     * Sends one batched A8 query and classifies the response.
+     * Sends one (single-module) or two (mixed ECM+TCM) batched A8 queries
+     * and classifies the response.
      *
      * Returns [PollResult.Sample] on a clean decode. Returns [PollResult.BadFrame]
      * when bytes arrived but the SSM2 frame is truncated, fails checksum, or
@@ -84,38 +93,30 @@ class Ssm2Poller(
      * @throws UsbDisconnectedException if the underlying bulk transfer fails.
      */
     fun pollOnce(): PollResult {
-        if (allAddresses.isEmpty()) return PollResult.Transport("no addresses configured")
-        val queryBytes = Ssm2AddressQuery.buildA8Query(allAddresses)
-        val outcome = client.sendAsciiPlusBinary(
-            asciiBodyWithoutReqId = "att3 ${queryBytes.size} 0 $ATT_TIMEOUT_MICROS",
-            binaryTail = queryBytes,
-            appendReqId = true,
-            expectVehicleFrameOnChannel = K_LINE_CHANNEL,
-            readTimeoutMs = 1000L
-        )
-        if (!outcome.matched) return PollResult.Transport("att3 read timed out before ar3 frame")
-
-        val raw = TactrixHex.parseHexPayload(outcome.responseHex.replace(" ", ""))
-        val vehicleFrame = client.extractVehicleFrame(raw, K_LINE_CHANNEL)
-            ?: return PollResult.Transport("no ar3 wrapper found in adapter response")
-        val parsed = Ssm2FrameParser.parseSsm2Frame(vehicleFrame)
-            ?: return PollResult.BadFrame("ssm2 reply too short to parse header (${vehicleFrame.size} bytes)")
-        if (parsed.truncated) {
-            return PollResult.BadFrame(
-                "ssm2 reply truncated (got ${parsed.rawBytes.size} of ${parsed.length + 5} bytes)"
-            )
+        if (ecmAddresses.isEmpty() && tcmAddresses.isEmpty()) {
+            return PollResult.Transport("no addresses configured")
         }
-        if (!parsed.checksumValid) {
-            return PollResult.BadFrame(
-                "ssm2 checksum mismatch (rx=0x%02X)".format(parsed.checksum)
-            )
-        }
-        val rawValues = Ssm2AddressQuery.parseA8Response(parsed, addressCount)
-            ?: return PollResult.BadFrame("A8 response payload invalid (code or length mismatch)")
 
+        val ecmBytes = if (ecmAddresses.isNotEmpty()) {
+            when (val r = queryModule(ecmAddresses, Ssm2AddressQuery.DEST_ECM)) {
+                is ModuleQueryResult.Ok -> r.bytes
+                is ModuleQueryResult.BadFrame -> return PollResult.BadFrame("ECM: ${r.reason}")
+                is ModuleQueryResult.Transport -> return PollResult.Transport("ECM: ${r.reason}")
+            }
+        } else IntArray(0)
+
+        val tcmBytes = if (tcmAddresses.isNotEmpty()) {
+            when (val r = queryModule(tcmAddresses, Ssm2AddressQuery.DEST_TCM)) {
+                is ModuleQueryResult.Ok -> r.bytes
+                is ModuleQueryResult.BadFrame -> return PollResult.BadFrame("TCM: ${r.reason}")
+                is ModuleQueryResult.Transport -> return PollResult.Transport("TCM: ${r.reason}")
+            }
+        } else IntArray(0)
+
+        val rawValues = ecmBytes + tcmBytes
         val values = mutableMapOf<String, Double>()
         var offset = 0
-        for (pid in pids) {
+        for (pid in orderedPids) {
             val slice = rawValues.copyOfRange(offset, offset + pid.addresses.size)
             values[pid.id] = pid.decode(slice)
             offset += pid.addresses.size
@@ -128,6 +129,44 @@ class Ssm2Poller(
                 rawValues = rawValues
             )
         )
+    }
+
+    private sealed class ModuleQueryResult {
+        data class Ok(val bytes: IntArray) : ModuleQueryResult()
+        data class BadFrame(val reason: String) : ModuleQueryResult()
+        data class Transport(val reason: String) : ModuleQueryResult()
+    }
+
+    private fun queryModule(addresses: List<Ssm2Address>, destination: Byte): ModuleQueryResult {
+        val queryBytes = Ssm2AddressQuery.buildA8Query(addresses, destination)
+        val outcome = client.sendAsciiPlusBinary(
+            asciiBodyWithoutReqId = "att3 ${queryBytes.size} 0 $ATT_TIMEOUT_MICROS",
+            binaryTail = queryBytes,
+            appendReqId = true,
+            expectVehicleFrameOnChannel = K_LINE_CHANNEL,
+            readTimeoutMs = 1000L
+        )
+        if (!outcome.matched) {
+            return ModuleQueryResult.Transport("att3 read timed out before ar3 frame")
+        }
+        val raw = TactrixHex.parseHexPayload(outcome.responseHex.replace(" ", ""))
+        val vehicleFrame = client.extractVehicleFrame(raw, K_LINE_CHANNEL)
+            ?: return ModuleQueryResult.Transport("no ar3 wrapper found in adapter response")
+        val parsed = Ssm2FrameParser.parseSsm2Frame(vehicleFrame)
+            ?: return ModuleQueryResult.BadFrame("ssm2 reply too short to parse header (${vehicleFrame.size} bytes)")
+        if (parsed.truncated) {
+            return ModuleQueryResult.BadFrame(
+                "ssm2 reply truncated (got ${parsed.rawBytes.size} of ${parsed.length + 5} bytes)"
+            )
+        }
+        if (!parsed.checksumValid) {
+            return ModuleQueryResult.BadFrame(
+                "ssm2 checksum mismatch (rx=0x%02X)".format(parsed.checksum)
+            )
+        }
+        val rawValues = Ssm2AddressQuery.parseA8Response(parsed, addresses.size)
+            ?: return ModuleQueryResult.BadFrame("A8 response payload invalid (code or length mismatch)")
+        return ModuleQueryResult.Ok(rawValues)
     }
 
     /**

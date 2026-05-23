@@ -29,16 +29,20 @@ import com.protocol.app.openport2.Ssm2Pid
 import com.protocol.app.openport2.Ssm2PidCategory
 import com.protocol.app.openport2.Ssm2Pids
 
-// Parameters sub-page. Full-page list (not a drawer). Tapping a
-// parameter toggles whether its gauge is on the Live Data page; a
-// checkmark marks parameters that already have a gauge present. The
-// parameter never disappears from the list — that is intentional, so
-// re-tapping puts the gauge back. Hardware back is handled by the
-// ProtocolScreen-level BackHandler.
+// Parameters sub-page. Full-page list (not a drawer). Tapping a parameter
+// toggles whether its gauge is on the Live Data page; a checkmark marks
+// parameters that already have a gauge present. The parameter never
+// disappears from the list — that is intentional, so re-tapping puts the
+// gauge back. Hardware back is handled by the ProtocolScreen-level
+// BackHandler.
+//
+// One body, two sub-pages: ECU Parameters and TCM Parameters. The page
+// title in the shared header tells the user which list they're looking at.
 
 @Composable
 internal fun ParametersBody(
     uiState: ProtocolUiState,
+    category: Ssm2PidCategory,
     onTogglePid: (String) -> Unit
 ) {
     Column(
@@ -49,29 +53,17 @@ internal fun ParametersBody(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         val onLiveData = uiState.pidIdsOnLiveData
-        val grouped = Ssm2Pids.DEFAULT_DEMO_PIDS.groupBy { it.category }
+        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == category }
 
-        CategoryHeader("ECU")
-        val ecuPids = grouped[Ssm2PidCategory.ECU].orEmpty()
-        if (ecuPids.isEmpty()) {
-            EmptyCategoryRow("No ECU parameters available.")
+        if (pids.isEmpty()) {
+            EmptyCategoryRow(
+                when (category) {
+                    Ssm2PidCategory.ECU -> "No ECU parameters available."
+                    Ssm2PidCategory.TCM -> "No TCM parameters available yet."
+                }
+            )
         } else {
-            for (pid in ecuPids) {
-                ParameterRow(
-                    pid = pid,
-                    checked = pid.id in onLiveData,
-                    onClick = { onTogglePid(pid.id) }
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        CategoryHeader("TCM")
-        val tcmPids = grouped[Ssm2PidCategory.TCM].orEmpty()
-        if (tcmPids.isEmpty()) {
-            EmptyCategoryRow("No TCM parameters available yet.")
-        } else {
-            for (pid in tcmPids) {
+            for (pid in pids) {
                 ParameterRow(
                     pid = pid,
                     checked = pid.id in onLiveData,

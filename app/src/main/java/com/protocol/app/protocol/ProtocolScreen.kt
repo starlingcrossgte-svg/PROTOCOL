@@ -74,7 +74,8 @@ fun ProtocolScreen(
     val pagerState = rememberPagerState(pageCount = { 2 })
 
     val subPageTitle: String? = when (uiState.activeSubPage) {
-        SubPage.Parameters -> "Parameters"
+        SubPage.Parameters -> "ECU Parameters"
+        SubPage.TcmParameters -> "TCM Parameters"
         SubPage.LiveDataSettings -> "Live Data Settings"
         SubPage.Settings -> "Settings"
         SubPage.Flash -> "Flash ECU"
@@ -121,13 +122,15 @@ fun ProtocolScreen(
 
             ProtocolHeader(
                 subPageTitle = subPageTitle,
-                // Hamburger is only meaningful on Live Data — it drops a
-                // small popup menu with two destinations: Live Data
-                // Settings (live-only knobs) and Parameters (manage
-                // gauges). Home is the root and has no right-side action.
+                // Hamburger is only meaningful on Live Data — drops a
+                // small popup menu with three destinations: Live Data
+                // Settings (live-only knobs), ECU Parameters, TCM
+                // Parameters. Home is the root and has no right-side
+                // action.
                 showHamburger = uiState.activeSubPage == null &&
                     pagerState.currentPage == 1,
                 onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
+                onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
                 onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
                 onClose = onCloseSubPage
             )
@@ -168,6 +171,12 @@ fun ProtocolScreen(
                     }
                     SubPage.Parameters -> ParametersBody(
                         uiState = uiState,
+                        category = com.protocol.app.openport2.Ssm2PidCategory.ECU,
+                        onTogglePid = onToggleGaugeForPid
+                    )
+                    SubPage.TcmParameters -> ParametersBody(
+                        uiState = uiState,
+                        category = com.protocol.app.openport2.Ssm2PidCategory.TCM,
                         onTogglePid = onToggleGaugeForPid
                     )
                     SubPage.LiveDataSettings -> LiveDataSettingsBody(

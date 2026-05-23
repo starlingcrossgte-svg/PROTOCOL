@@ -71,6 +71,7 @@ internal fun ProtocolHeader(
     subPageTitle: String?,
     showHamburger: Boolean,
     onOpenParameters: () -> Unit,
+    onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -106,6 +107,7 @@ internal fun ProtocolHeader(
             )
             showHamburger -> HamburgerMenu(
                 onOpenParameters = onOpenParameters,
+                onOpenTcmParameters = onOpenTcmParameters,
                 onOpenLiveDataSettings = onOpenLiveDataSettings,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
@@ -121,6 +123,7 @@ internal fun ProtocolHeader(
 @Composable
 private fun HamburgerMenu(
     onOpenParameters: () -> Unit,
+    onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -165,7 +168,7 @@ private fun HamburgerMenu(
             DropdownMenuItem(
                 text = {
                     Text(
-                        "Parameters",
+                        "ECU Parameters",
                         color = Color.White,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold
@@ -174,6 +177,20 @@ private fun HamburgerMenu(
                 onClick = {
                     expanded = false
                     onOpenParameters()
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "TCM Parameters",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onOpenTcmParameters()
                 }
             )
         }

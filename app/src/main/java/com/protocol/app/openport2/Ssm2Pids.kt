@@ -56,7 +56,12 @@ object Ssm2Pids {
         id = "coolant",
         displayName = "Coolant",
         unit = "°F",
-        addresses = listOf(Ssm2Address(0x00, 0x00, 0x0C)),
+        // Address corrected 2026-05-23: previous value 0x00000C reads A/F
+        // Learning #2 (P6 in RomRaider's logger.xml), not coolant temp — it
+        // sat near 128 in closed-loop and our F formula gave a constant
+        // ~190 °F. Coolant Temperature is P2 at 0x000008, conversion (x-40)
+        // in °C → (x-40)*9/5+32 °F.
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x08)),
         decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0].toDouble() - 40.0) * 9.0 / 5.0 + 32.0 },
         longName = "Coolant Temperature"
     )
@@ -205,6 +210,112 @@ object Ssm2Pids {
         longName = "IAM (Ignition Advance Multiplier)"
     )
 
+    // ────── TCM (5EAT) parameters ──────
+    //
+    // Addresses + conversions pulled from RomRaider's logger_IMP_EN_v370.xml
+    // for the 5EAT transmission. Verified on-car 2026-05-23 against a
+    // captured TCM reply at idle in Park (frame 138 of rrecucharkbetter.pcap):
+    // raw bytes for gear=0, line=53, ATF=74, RPM=0x0D94 etc. all sense-check
+    // against expected idle conditions.
+
+    val TCM_GEAR_POSITION = Ssm2Pid(
+        id = "tcm_gear",
+        displayName = "Gear",
+        unit = "gear",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x4A)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] + 1).toDouble() },
+        longName = "Gear Position",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_TURBINE_SPEED = Ssm2Pid(
+        id = "tcm_turbine",
+        displayName = "Turbine",
+        unit = "rpm",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x4F)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "Turbine Revolution Speed",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_ATF_TEMP = Ssm2Pid(
+        id = "tcm_atf",
+        displayName = "ATF Temp",
+        unit = "°F",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x56)),
+        // logger.xml gives °C as (x-50); convert to °F to match the other
+        // temperature gauges in the app.
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0].toDouble() - 50.0) * 9.0 / 5.0 + 32.0 },
+        longName = "ATF Temperature",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_FRONT_WHEEL_SPEED = Ssm2Pid(
+        id = "tcm_fws",
+        displayName = "Frt Whl",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x48)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Front Wheel Speed",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_REAR_WHEEL_SPEED = Ssm2Pid(
+        id = "tcm_rws",
+        displayName = "Rr Whl",
+        unit = "mph",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x51)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.621371192 },
+        longName = "Rear Wheel Speed",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_LU_PRESSURE = Ssm2Pid(
+        id = "tcm_lu_press",
+        displayName = "L/U Press",
+        unit = "bar",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x4D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.1 },
+        longName = "L/U Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_PL_PRESSURE = Ssm2Pid(
+        id = "tcm_pl_press",
+        displayName = "P/L Press",
+        unit = "bar",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x4C)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.1 },
+        longName = "P/L Solenoid Valve Pressure",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_ENGINE_SPEED = Ssm2Pid(
+        id = "tcm_rpm",
+        displayName = "TCM RPM",
+        unit = "rpm",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x0E),
+            Ssm2Address(0x00, 0x00, 0x0F)
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else ((raw[0] shl 8) or raw[1]) * 0.25
+        },
+        longName = "Engine Speed (via TCM)",
+        category = Ssm2PidCategory.TCM
+    )
+
+    val TCM_PEDAL_ANGLE = Ssm2Pid(
+        id = "tcm_pedal",
+        displayName = "Pedal",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x29)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Accelerator Pedal Angle",
+        category = Ssm2PidCategory.TCM
+    )
+
     val DEFAULT_DEMO_PIDS: List<Ssm2Pid> = listOf(
         RPM,
         COOLANT_TEMP,
@@ -219,7 +330,16 @@ object Ssm2Pids {
         FEEDBACK_KNOCK_CORRECTION,
         ENGINE_LOAD_CALC,
         FINE_LEARNING_KC,
-        IAM
+        IAM,
+        TCM_GEAR_POSITION,
+        TCM_TURBINE_SPEED,
+        TCM_ATF_TEMP,
+        TCM_FRONT_WHEEL_SPEED,
+        TCM_REAR_WHEEL_SPEED,
+        TCM_LU_PRESSURE,
+        TCM_PL_PRESSURE,
+        TCM_ENGINE_SPEED,
+        TCM_PEDAL_ANGLE
     )
 
     private fun decodeFloatBE(raw: IntArray): Double {
