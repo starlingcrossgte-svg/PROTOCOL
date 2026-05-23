@@ -193,23 +193,51 @@ object ProtocolLogFormatter {
     }
 
     fun formatPidValueText(pidId: String, value: Double): String = when (pidId) {
-        "rpm"     -> "%.0f".format(value)
-        "coolant" -> "%.0f".format(value)
-        "battery" -> "%.1f".format(value)
-        "afc1"    -> "%.1f".format(value)
-        "afl1"    -> "%.1f".format(value)
-        "afs1"    -> "%.2f".format(value)
-        "ign"     -> "%.1f".format(value)
-        "maf"     -> "%.2f".format(value)
-        "oil"     -> "%.0f".format(value)
-        "iat"     -> "%.0f".format(value)
-        "fbkc"    -> "%.2f".format(value)
-        "load"    -> "%.2f".format(value)
-        "flkc"    -> "%.2f".format(value)
-        "iam"     -> "%.3f".format(value)
-        "speed"   -> "%.0f".format(value)
-        "kca"     -> "%.1f".format(value)
-        else      -> "%.2f".format(value)
+        "rpm"             -> "%.0f".format(value)
+        "coolant"         -> "%.0f".format(value)
+        "battery"         -> "%.1f".format(value)
+        "afc1", "afc2"    -> "%.1f".format(value)
+        "afl1", "afl2"    -> "%.1f".format(value)
+        "afs1", "afs2"    -> "%.2f".format(value)
+        "ign"             -> "%.1f".format(value)
+        "maf"             -> "%.2f".format(value)
+        "oil"             -> "%.0f".format(value)
+        "iat"             -> "%.0f".format(value)
+        "fbkc"            -> "%.2f".format(value)
+        "load"            -> "%.2f".format(value)
+        "flkc"            -> "%.2f".format(value)
+        "iam"             -> "%.3f".format(value)
+        "speed"           -> "%.0f".format(value)
+        "kca"             -> "%.1f".format(value)
+        // ECM additions
+        "load_rel"        -> "%.1f".format(value)
+        "map", "atm"      -> "%.2f".format(value)
+        "mrp", "mrp_corr" -> "%.2f".format(value)
+        "throttle"        -> "%.1f".format(value)
+        "fo2_1", "fo2_2", "ro2" -> "%.3f".format(value)
+        "maf_v", "tps_v", "tps_sub", "tps_main",
+        "pedal_sub", "pedal_main", "tumble_r", "tumble_l",
+        "tm_v", "tps_closed" -> "%.2f".format(value)
+        "inj1_pw", "inj2_pw" -> "%.2f".format(value)
+        "learn_ign", "learn_ign_corr" -> "%.1f".format(value)
+        "fuel_t"          -> "%.0f".format(value)
+        "fan_ctrl", "cpc_duty", "iscv_duty", "af_lean",
+        "af_heater", "alt_duty", "fp_duty",
+        "ocv_dr", "ocv_dl", "tm_duty", "osv_dr", "osv_dl" -> "%.1f".format(value)
+        "iscv_step"       -> "%.0f".format(value)
+        "avcs_r", "avcs_l" -> "%.0f".format(value)
+        "ocv_cr", "ocv_cl", "osv_cr", "osv_cl" -> "%.0f".format(value)
+        "afs1_curr", "afs2_curr" -> "%.2f".format(value)
+        "afs1_res", "afs2_res" -> "%.0f".format(value)
+        "afs1_htr", "afs2_htr" -> "%.2f".format(value)
+        "cyl1_rough", "cyl2_rough", "cyl3_rough",
+        "cyl4_rough", "cyl5_rough", "cyl6_rough" -> "%.0f".format(value)
+        "egt", "egt2"     -> "%.0f".format(value)
+        "odom"            -> "%.0f".format(value)
+        "overspd_vh", "overspd_h" -> "%.0f".format(value)
+        "idc"             -> "%.1f".format(value)
+        "mpg"             -> "%.1f".format(value)
+        else              -> "%.2f".format(value)
     }
 
     private fun pidHeaderText(pid: com.protocol.app.openport2.Ssm2Pid): String {
@@ -219,23 +247,50 @@ object ProtocolLogFormatter {
     }
 
     private fun maxValueWidth(pidId: String): Int = when (pidId) {
-        "rpm"     -> 5   // up to "8000"
-        "coolant" -> 3   // up to "240"
-        "battery" -> 4   // "14.5"
-        "afc1"    -> 6   // "-99.9" / " 99.9"
-        "afl1"    -> 6
-        "afs1"    -> 5   // "14.70"
-        "ign"     -> 5   // "-30.0" / " 60.0"
-        "maf"     -> 6   // up to "300.00"
-        "oil"     -> 3   // up to "260"
-        "iat"     -> 3
-        "fbkc"    -> 6   // signed degrees, e.g., "-9.99" / " 9.99"
-        "load"    -> 5   // "9.99"
-        "flkc"    -> 6
-        "iam"     -> 5   // "1.000"
-        "speed"   -> 3   // up to "200"
-        "kca"     -> 6   // signed degrees, e.g., "-15.0"
-        else      -> 6
+        "rpm"             -> 5   // up to "8000"
+        "coolant"         -> 3   // up to "240"
+        "battery"         -> 4   // "14.5"
+        "afc1", "afc2"    -> 6   // "-99.9" / " 99.9"
+        "afl1", "afl2"    -> 6
+        "afs1", "afs2"    -> 5   // "14.70"
+        "ign"             -> 5   // "-30.0" / " 60.0"
+        "maf"             -> 6   // up to "300.00"
+        "oil"             -> 3   // up to "260"
+        "iat"             -> 3
+        "fbkc"            -> 6   // signed degrees
+        "load"            -> 5   // "9.99"
+        "flkc"            -> 6
+        "iam"             -> 5   // "1.000"
+        "speed"           -> 3   // up to "200"
+        "kca"             -> 6   // signed degrees
+        // ECM additions
+        "load_rel", "throttle", "fan_ctrl", "cpc_duty", "iscv_duty",
+        "af_lean", "af_heater", "alt_duty", "fp_duty",
+        "ocv_dr", "ocv_dl", "osv_dr", "osv_dl",
+        "tm_duty"         -> 5   // "100.0" or signed pct
+        "map", "atm"      -> 5   // "14.50" psi
+        "mrp", "mrp_corr" -> 6   // signed psi "-12.34"
+        "fo2_1", "fo2_2", "ro2" -> 5  // "1.234"
+        "maf_v", "tps_v", "tps_sub", "tps_main",
+        "pedal_sub", "pedal_main", "tumble_r", "tumble_l",
+        "tm_v", "tps_closed" -> 4  // "5.00"
+        "inj1_pw", "inj2_pw" -> 5  // "12.34"
+        "learn_ign", "learn_ign_corr" -> 5
+        "fuel_t"          -> 3   // up to "240"
+        "iscv_step"       -> 4   // up to "500"
+        "avcs_r", "avcs_l" -> 3  // "0..50"
+        "ocv_cr", "ocv_cl", "osv_cr", "osv_cl" -> 5  // mA up to 8160
+        "afs1_curr", "afs2_curr" -> 6  // signed mA
+        "afs1_res", "afs2_res" -> 3
+        "afs1_htr", "afs2_htr" -> 5
+        "cyl1_rough", "cyl2_rough", "cyl3_rough",
+        "cyl4_rough", "cyl5_rough", "cyl6_rough" -> 3
+        "egt", "egt2"     -> 4   // up to "2800"
+        "odom"            -> 6   // up to "300000"
+        "overspd_vh", "overspd_h" -> 4
+        "idc"             -> 5   // "100.0"
+        "mpg"             -> 5   // "99.9"
+        else              -> 6
     }
 
     private val logTimeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
@@ -254,23 +309,51 @@ object ProtocolLogFormatter {
     private fun kv(label: String, value: String): String = "${label.padEnd(16)}: $value\n"
 
     private fun formatPidValueCsv(pidId: String, value: Double): String = when (pidId) {
-        "rpm"     -> "%.1f".format(value)
-        "coolant" -> "%.1f".format(value)
-        "battery" -> "%.2f".format(value)
-        "afc1"    -> "%.2f".format(value)
-        "afl1"    -> "%.2f".format(value)
-        "afs1"    -> "%.3f".format(value)
-        "ign"     -> "%.2f".format(value)
-        "maf"     -> "%.3f".format(value)
-        "oil"     -> "%.1f".format(value)
-        "iat"     -> "%.1f".format(value)
-        "fbkc"    -> "%.4f".format(value)
-        "load"    -> "%.4f".format(value)
-        "flkc"    -> "%.4f".format(value)
-        "iam"     -> "%.4f".format(value)
-        "speed"   -> "%.1f".format(value)
-        "kca"     -> "%.2f".format(value)
-        else      -> "%.3f".format(value)
+        "rpm"             -> "%.1f".format(value)
+        "coolant"         -> "%.1f".format(value)
+        "battery"         -> "%.2f".format(value)
+        "afc1", "afc2"    -> "%.2f".format(value)
+        "afl1", "afl2"    -> "%.2f".format(value)
+        "afs1", "afs2"    -> "%.3f".format(value)
+        "ign"             -> "%.2f".format(value)
+        "maf"             -> "%.3f".format(value)
+        "oil"             -> "%.1f".format(value)
+        "iat"             -> "%.1f".format(value)
+        "fbkc"            -> "%.4f".format(value)
+        "load"            -> "%.4f".format(value)
+        "flkc"            -> "%.4f".format(value)
+        "iam"             -> "%.4f".format(value)
+        "speed"           -> "%.1f".format(value)
+        "kca"             -> "%.2f".format(value)
+        // ECM additions
+        "load_rel"        -> "%.2f".format(value)
+        "map", "atm"      -> "%.3f".format(value)
+        "mrp", "mrp_corr" -> "%.3f".format(value)
+        "throttle"        -> "%.2f".format(value)
+        "fo2_1", "fo2_2", "ro2" -> "%.4f".format(value)
+        "maf_v", "tps_v", "tps_sub", "tps_main",
+        "pedal_sub", "pedal_main", "tumble_r", "tumble_l",
+        "tm_v", "tps_closed" -> "%.3f".format(value)
+        "inj1_pw", "inj2_pw" -> "%.3f".format(value)
+        "learn_ign", "learn_ign_corr" -> "%.2f".format(value)
+        "fuel_t"          -> "%.1f".format(value)
+        "fan_ctrl", "cpc_duty", "iscv_duty", "af_lean",
+        "af_heater", "alt_duty", "fp_duty",
+        "ocv_dr", "ocv_dl", "tm_duty", "osv_dr", "osv_dl" -> "%.2f".format(value)
+        "iscv_step"       -> "%.0f".format(value)
+        "avcs_r", "avcs_l" -> "%.1f".format(value)
+        "ocv_cr", "ocv_cl", "osv_cr", "osv_cl" -> "%.1f".format(value)
+        "afs1_curr", "afs2_curr" -> "%.3f".format(value)
+        "afs1_res", "afs2_res" -> "%.1f".format(value)
+        "afs1_htr", "afs2_htr" -> "%.3f".format(value)
+        "cyl1_rough", "cyl2_rough", "cyl3_rough",
+        "cyl4_rough", "cyl5_rough", "cyl6_rough" -> "%.0f".format(value)
+        "egt", "egt2"     -> "%.1f".format(value)
+        "odom"            -> "%.1f".format(value)
+        "overspd_vh", "overspd_h" -> "%.0f".format(value)
+        "idc"             -> "%.2f".format(value)
+        "mpg"             -> "%.2f".format(value)
+        else              -> "%.3f".format(value)
     }
 
     private fun appendStepBlock(sb: StringBuilder, entry: com.protocol.app.openport2.TactrixCommandLog) {

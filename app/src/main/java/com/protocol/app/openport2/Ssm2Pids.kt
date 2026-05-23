@@ -233,6 +233,662 @@ object Ssm2Pids {
         longName = "Knock Correction Advance"
     )
 
+    // ───────────── ECM additions (logger.xml P-codes) ─────────────
+    // Each PID's address + conversion is sourced directly from
+    // logger_IMP_EN_v370.xml. Where the def offers both metric and
+    // imperial units, the imperial conversion is used (°F, psi, mph).
+    // Multi-byte addresses are listed in MSB → LSB order.
+
+    val ENGINE_LOAD_RELATIVE = Ssm2Pid(
+        id = "load_rel",
+        displayName = "Load Rel",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x07)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Engine Load (Relative)"
+    )
+
+    val AF_CORRECTION_2 = Ssm2Pid(
+        id = "afc2",
+        displayName = "A/F Corr2",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x0B)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) * 100.0 / 128.0 },
+        longName = "A/F Correction #2"
+    )
+
+    val AF_LEARNING_2 = Ssm2Pid(
+        id = "afl2",
+        displayName = "A/F Learn2",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x0C)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) * 100.0 / 128.0 },
+        longName = "A/F Learning #2"
+    )
+
+    val MAP = Ssm2Pid(
+        id = "map",
+        displayName = "MAP",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x0D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 37.0 / 255.0 },
+        longName = "Manifold Absolute Pressure"
+    )
+
+    val THROTTLE_OPENING_ANGLE = Ssm2Pid(
+        id = "throttle",
+        displayName = "Throttle",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x15)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Throttle Opening Angle"
+    )
+
+    val FRONT_O2_1 = Ssm2Pid(
+        id = "fo2_1",
+        displayName = "F O2 #1",
+        unit = "V",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x16),
+            Ssm2Address(0x00, 0x00, 0x17)
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else ((raw[0] shl 8) or raw[1]) / 200.0
+        },
+        longName = "Front O2 Sensor #1"
+    )
+
+    val REAR_O2 = Ssm2Pid(
+        id = "ro2",
+        displayName = "Rear O2",
+        unit = "V",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x18),
+            Ssm2Address(0x00, 0x00, 0x19)
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else ((raw[0] shl 8) or raw[1]) / 200.0
+        },
+        longName = "Rear O2 Sensor"
+    )
+
+    val FRONT_O2_2 = Ssm2Pid(
+        id = "fo2_2",
+        displayName = "F O2 #2",
+        unit = "V",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x1A),
+            Ssm2Address(0x00, 0x00, 0x1B)
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else ((raw[0] shl 8) or raw[1]) / 200.0
+        },
+        longName = "Front O2 Sensor #2"
+    )
+
+    val MAF_VOLTAGE = Ssm2Pid(
+        id = "maf_v",
+        displayName = "MAF V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x1D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "MAF Sensor Voltage"
+    )
+
+    val TPS_VOLTAGE = Ssm2Pid(
+        id = "tps_v",
+        displayName = "TPS V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x1E)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Throttle Sensor Voltage"
+    )
+
+    val INJ1_PULSE_WIDTH = Ssm2Pid(
+        id = "inj1_pw",
+        displayName = "Inj1 PW",
+        unit = "ms",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x20)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 256.0 / 1000.0 },
+        longName = "Fuel Injector #1 Pulse Width"
+    )
+
+    val INJ2_PULSE_WIDTH = Ssm2Pid(
+        id = "inj2_pw",
+        displayName = "Inj2 PW",
+        unit = "ms",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x21)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 256.0 / 1000.0 },
+        longName = "Fuel Injector #2 Pulse Width"
+    )
+
+    val ATMOSPHERIC_PRESSURE = Ssm2Pid(
+        id = "atm",
+        displayName = "Atm",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x23)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 37.0 / 255.0 },
+        longName = "Atmospheric Pressure"
+    )
+
+    val MANIFOLD_RELATIVE_PRESSURE = Ssm2Pid(
+        id = "mrp",
+        displayName = "Manif Rel",
+        unit = "psi",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x24)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) * 37.0 / 255.0 },
+        longName = "Manifold Relative Pressure"
+    )
+
+    val LEARNED_IGNITION_TIMING = Ssm2Pid(
+        id = "learn_ign",
+        displayName = "Learn Ign",
+        unit = "°",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x28)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) / 2.0 },
+        longName = "Learned Ignition Timing"
+    )
+
+    val FUEL_TEMPERATURE = Ssm2Pid(
+        id = "fuel_t",
+        displayName = "Fuel T",
+        unit = "°F",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x2A)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0].toDouble() - 40.0) * 9.0 / 5.0 + 32.0 },
+        longName = "Fuel Temperature"
+    )
+
+    val RADIATOR_FAN_CONTROL = Ssm2Pid(
+        id = "fan_ctrl",
+        displayName = "Fan Ctrl",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x2F)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Radiator Fan Control"
+    )
+
+    val CPC_VALVE_DUTY = Ssm2Pid(
+        id = "cpc_duty",
+        displayName = "CPC Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x32)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Canister Purge Control Valve Duty"
+    )
+
+    val TUMBLE_VALVE_R = Ssm2Pid(
+        id = "tumble_r",
+        displayName = "Tumble R",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x33)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Tumble Valve Position Sensor Right"
+    )
+
+    val TUMBLE_VALVE_L = Ssm2Pid(
+        id = "tumble_l",
+        displayName = "Tumble L",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x34)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Tumble Valve Position Sensor Left"
+    )
+
+    val ISC_VALVE_DUTY = Ssm2Pid(
+        id = "iscv_duty",
+        displayName = "ISCV Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x35)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 2.0 },
+        longName = "Idle Speed Control Valve Duty Ratio"
+    )
+
+    val AF_LEAN_CORRECTION = Ssm2Pid(
+        id = "af_lean",
+        displayName = "A/F Lean",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x36)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "A/F Lean Correction"
+    )
+
+    val AF_HEATER_DUTY = Ssm2Pid(
+        id = "af_heater",
+        displayName = "A/F Htr",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x37)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "A/F Heater Duty"
+    )
+
+    val ISC_VALVE_STEP = Ssm2Pid(
+        id = "iscv_step",
+        displayName = "ISCV Step",
+        unit = "steps",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x38)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Idle Speed Control Valve Step"
+    )
+
+    val ALTERNATOR_DUTY = Ssm2Pid(
+        id = "alt_duty",
+        displayName = "Alt Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x3A)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Alternator Duty"
+    )
+
+    val FUEL_PUMP_DUTY = Ssm2Pid(
+        id = "fp_duty",
+        displayName = "FP Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x3B)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Fuel Pump Duty"
+    )
+
+    val AVCS_INTAKE_R = Ssm2Pid(
+        id = "avcs_r",
+        displayName = "AVCS R",
+        unit = "°",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x3C)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 50).toDouble() },
+        longName = "Intake VVT Advance Angle Right"
+    )
+
+    val AVCS_INTAKE_L = Ssm2Pid(
+        id = "avcs_l",
+        displayName = "AVCS L",
+        unit = "°",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x3D)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 50).toDouble() },
+        longName = "Intake VVT Advance Angle Left"
+    )
+
+    val OCV_DUTY_R = Ssm2Pid(
+        id = "ocv_dr",
+        displayName = "OCV D-R",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x3E)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Intake OCV Duty Right"
+    )
+
+    val OCV_DUTY_L = Ssm2Pid(
+        id = "ocv_dl",
+        displayName = "OCV D-L",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x3F)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 100.0 / 255.0 },
+        longName = "Intake OCV Duty Left"
+    )
+
+    val OCV_CURRENT_R = Ssm2Pid(
+        id = "ocv_cr",
+        displayName = "OCV I-R",
+        unit = "mA",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x40)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "Intake OCV Current Right"
+    )
+
+    val OCV_CURRENT_L = Ssm2Pid(
+        id = "ocv_cl",
+        displayName = "OCV I-L",
+        unit = "mA",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x41)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "Intake OCV Current Left"
+    )
+
+    val AFS1_CURRENT = Ssm2Pid(
+        id = "afs1_curr",
+        displayName = "AFS1 I",
+        unit = "mA",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x42)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) / 8.0 },
+        longName = "A/F Sensor #1 Current"
+    )
+
+    val AFS2_CURRENT = Ssm2Pid(
+        id = "afs2_curr",
+        displayName = "AFS2 I",
+        unit = "mA",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x43)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) / 8.0 },
+        longName = "A/F Sensor #2 Current"
+    )
+
+    val AFS1_RESISTANCE = Ssm2Pid(
+        id = "afs1_res",
+        displayName = "AFS1 R",
+        unit = "Ω",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x44)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "A/F Sensor #1 Resistance"
+    )
+
+    val AFS2_RESISTANCE = Ssm2Pid(
+        id = "afs2_res",
+        displayName = "AFS2 R",
+        unit = "Ω",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x45)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "A/F Sensor #2 Resistance"
+    )
+
+    val AF_SENSOR_2 = Ssm2Pid(
+        id = "afs2",
+        displayName = "A/F Sens2",
+        unit = "AFR",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x47)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 14.7 / 128.0 },
+        longName = "A/F Sensor #2"
+    )
+
+    val AFS1_HEATER_CURRENT = Ssm2Pid(
+        id = "afs1_htr",
+        displayName = "AFS1 Htr",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x53)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 10.0 },
+        longName = "A/F Sensor #1 Heater Current"
+    )
+
+    val AFS2_HEATER_CURRENT = Ssm2Pid(
+        id = "afs2_htr",
+        displayName = "AFS2 Htr",
+        unit = "A",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0x54)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 10.0 },
+        longName = "A/F Sensor #2 Heater Current"
+    )
+
+    val CYL1_ROUGHNESS = Ssm2Pid(
+        id = "cyl1_rough",
+        displayName = "C1 Rough",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xCE.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Roughness Monitor Cylinder #1"
+    )
+
+    val CYL2_ROUGHNESS = Ssm2Pid(
+        id = "cyl2_rough",
+        displayName = "C2 Rough",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xCF.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Roughness Monitor Cylinder #2"
+    )
+
+    val CYL3_ROUGHNESS = Ssm2Pid(
+        id = "cyl3_rough",
+        displayName = "C3 Rough",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xD8.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Roughness Monitor Cylinder #3"
+    )
+
+    val CYL4_ROUGHNESS = Ssm2Pid(
+        id = "cyl4_rough",
+        displayName = "C4 Rough",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xD9.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Roughness Monitor Cylinder #4"
+    )
+
+    val CYL5_ROUGHNESS = Ssm2Pid(
+        id = "cyl5_rough",
+        displayName = "C5 Rough",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xEF.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Roughness Monitor Cylinder #5"
+    )
+
+    val CYL6_ROUGHNESS = Ssm2Pid(
+        id = "cyl6_rough",
+        displayName = "C6 Rough",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xF8.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Roughness Monitor Cylinder #6"
+    )
+
+    val LEARNED_IGN_TIMING_CORR = Ssm2Pid(
+        id = "learn_ign_corr",
+        displayName = "Learn IgnC",
+        unit = "°",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xF9.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 16.0 },
+        longName = "Learned Ignition Timing Correction"
+    )
+
+    val THROTTLE_MOTOR_DUTY = Ssm2Pid(
+        id = "tm_duty",
+        displayName = "TM Duty",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xFA.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) * 100.0 / 128.0 },
+        longName = "Throttle Motor Duty"
+    )
+
+    val THROTTLE_MOTOR_VOLTAGE = Ssm2Pid(
+        id = "tm_v",
+        displayName = "TM V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xFB.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 0.08 },
+        longName = "Throttle Motor Voltage"
+    )
+
+    val TPS_SUB = Ssm2Pid(
+        id = "tps_sub",
+        displayName = "TPS Sub",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x00)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Sub Throttle Sensor"
+    )
+
+    val TPS_MAIN = Ssm2Pid(
+        id = "tps_main",
+        displayName = "TPS Main",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x01)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Main Throttle Sensor"
+    )
+
+    val PEDAL_SUB = Ssm2Pid(
+        id = "pedal_sub",
+        displayName = "Pedal Sub",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x02)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Sub Accelerator Sensor"
+    )
+
+    val PEDAL_MAIN = Ssm2Pid(
+        id = "pedal_main",
+        displayName = "Pedal Main",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x03)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Main Accelerator Sensor"
+    )
+
+    val EGT_1 = Ssm2Pid(
+        id = "egt",
+        displayName = "EGT",
+        unit = "°F",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x06)),
+        // logger.xml: °F expr = 32 + 9*(x+40) — direct conversion, no /5.
+        decode = { raw -> if (raw.isEmpty()) 0.0 else 32.0 + 9.0 * (raw[0] + 40) },
+        longName = "Exhaust Gas Temperature"
+    )
+
+    val EGT_2 = Ssm2Pid(
+        id = "egt2",
+        displayName = "EGT 2",
+        unit = "°F",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x07)),
+        // logger.xml: °F expr = 32 + 9*(x*5+200)/5
+        decode = { raw -> if (raw.isEmpty()) 0.0 else 32.0 + 9.0 * (raw[0] * 5.0 + 200.0) / 5.0 },
+        longName = "Exhaust Gas Temperature 2"
+    )
+
+    val ODOMETER = Ssm2Pid(
+        id = "odom",
+        displayName = "Odometer",
+        unit = "mi",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x01, 0x0E),
+            Ssm2Address(0x00, 0x01, 0x0F)
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else ((raw[0] shl 8) or raw[1]) * 1.242742384
+        },
+        longName = "Estimated Odometer"
+    )
+
+    val OSV_DUTY_R = Ssm2Pid(
+        id = "osv_dr",
+        displayName = "OSV D-R",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x14)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 * 100.0 },
+        longName = "Oil Switching Solenoid Valve Duty (Right)"
+    )
+
+    val OSV_DUTY_L = Ssm2Pid(
+        id = "osv_dl",
+        displayName = "OSV D-L",
+        unit = "%",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x15)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 255.0 * 100.0 },
+        longName = "Oil Switching Solenoid Valve Duty (Left)"
+    )
+
+    val OSV_CURRENT_R = Ssm2Pid(
+        id = "osv_cr",
+        displayName = "OSV I-R",
+        unit = "mA",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x16)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "Oil Switching Solenoid Valve Current (Right)"
+    )
+
+    val OSV_CURRENT_L = Ssm2Pid(
+        id = "osv_cl",
+        displayName = "OSV I-L",
+        unit = "mA",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x17)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
+        longName = "Oil Switching Solenoid Valve Current (Left)"
+    )
+
+    val TPS_CLOSED_VOLTAGE = Ssm2Pid(
+        id = "tps_closed",
+        displayName = "TPS Cls V",
+        unit = "V",
+        addresses = listOf(Ssm2Address(0x00, 0x01, 0x6B)),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
+        longName = "Throttle Sensor Closed Voltage"
+    )
+
+    val OVERSPEED_VERY_HIGH = Ssm2Pid(
+        id = "overspd_vh",
+        displayName = "Ovr Spd VH",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x02, 0x98.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Overspeed Count (Very High RPM)"
+    )
+
+    val OVERSPEED_HIGH = Ssm2Pid(
+        id = "overspd_h",
+        displayName = "Ovr Spd H",
+        unit = "ct",
+        addresses = listOf(Ssm2Address(0x00, 0x02, 0x99.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
+        longName = "Overspeed Count (High RPM)"
+    )
+
+    // ───── Calculated PIDs (mirror RomRaider's P201, P202, P203) ─────
+    // These read raw bytes from other PIDs' addresses and compute on top.
+    // Listed alongside the underlying address group so the poller fetches
+    // them in the same A8 query — no separate round trip.
+
+    // P201 Injector Duty Cycle = (RPM × Inj1_PW_ms) / 1200
+    // Reads RPM hi/lo + Inj1 PW.
+    val INJECTOR_DUTY_CYCLE = Ssm2Pid(
+        id = "idc",
+        displayName = "Inj Duty",
+        unit = "%",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x0E),
+            Ssm2Address(0x00, 0x00, 0x0F),
+            Ssm2Address(0x00, 0x00, 0x20)
+        ),
+        decode = { raw ->
+            if (raw.size < 3) 0.0 else {
+                val rpm = ((raw[0] shl 8) or raw[1]) * 0.25
+                val pwMs = raw[2] * 256.0 / 1000.0
+                if (rpm > 0.0) (rpm * pwMs) / 1200.0 else 0.0
+            }
+        },
+        longName = "Injector Duty Cycle (Calculated)"
+    )
+
+    // P202 Manifold Relative Pressure (Corrected) = MAP_psi - Atm_psi.
+    // Reads MAP + Atm.
+    val MRP_CORRECTED = Ssm2Pid(
+        id = "mrp_corr",
+        displayName = "Manif RelC",
+        unit = "psi",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x0D),
+            Ssm2Address(0x00, 0x00, 0x23)
+        ),
+        decode = { raw ->
+            if (raw.size < 2) 0.0
+            else (raw[0] - raw[1]) * 37.0 / 255.0
+        },
+        longName = "Manifold Relative Pressure (Corrected)"
+    )
+
+    // P203 Fuel Consumption (mpg US) = (VS_mph × AFR) / (1.25 × MAF).
+    // Reads Vehicle Speed + MAF hi/lo + A/F Sensor #1.
+    val FUEL_CONSUMPTION = Ssm2Pid(
+        id = "mpg",
+        displayName = "MPG Est",
+        unit = "mpg",
+        addresses = listOf(
+            Ssm2Address(0x00, 0x00, 0x10),
+            Ssm2Address(0x00, 0x00, 0x13),
+            Ssm2Address(0x00, 0x00, 0x14),
+            Ssm2Address(0x00, 0x00, 0x46)
+        ),
+        decode = { raw ->
+            if (raw.size < 4) 0.0 else {
+                val vsMph = raw[0] * 0.621371192
+                val maf = ((raw[1] shl 8) or raw[2]) * 0.01
+                val afr = raw[3] * 14.7 / 128.0
+                if (maf > 0.001) vsMph * afr / (1.25 * maf) else 0.0
+            }
+        },
+        longName = "Fuel Consumption (Estimated)"
+    )
+
     // ────── TCM (5EAT) parameters ──────
     //
     // Addresses + conversions pulled from RomRaider's logger_IMP_EN_v370.xml
@@ -356,6 +1012,71 @@ object Ssm2Pids {
         IAM,
         VEHICLE_SPEED,
         KNOCK_CORRECTION_ADVANCE,
+        ENGINE_LOAD_RELATIVE,
+        AF_CORRECTION_2,
+        AF_LEARNING_2,
+        MAP,
+        THROTTLE_OPENING_ANGLE,
+        FRONT_O2_1,
+        REAR_O2,
+        FRONT_O2_2,
+        MAF_VOLTAGE,
+        TPS_VOLTAGE,
+        INJ1_PULSE_WIDTH,
+        INJ2_PULSE_WIDTH,
+        ATMOSPHERIC_PRESSURE,
+        MANIFOLD_RELATIVE_PRESSURE,
+        LEARNED_IGNITION_TIMING,
+        FUEL_TEMPERATURE,
+        RADIATOR_FAN_CONTROL,
+        CPC_VALVE_DUTY,
+        TUMBLE_VALVE_R,
+        TUMBLE_VALVE_L,
+        ISC_VALVE_DUTY,
+        AF_LEAN_CORRECTION,
+        AF_HEATER_DUTY,
+        ISC_VALVE_STEP,
+        ALTERNATOR_DUTY,
+        FUEL_PUMP_DUTY,
+        AVCS_INTAKE_R,
+        AVCS_INTAKE_L,
+        OCV_DUTY_R,
+        OCV_DUTY_L,
+        OCV_CURRENT_R,
+        OCV_CURRENT_L,
+        AFS1_CURRENT,
+        AFS2_CURRENT,
+        AFS1_RESISTANCE,
+        AFS2_RESISTANCE,
+        AF_SENSOR_2,
+        AFS1_HEATER_CURRENT,
+        AFS2_HEATER_CURRENT,
+        CYL1_ROUGHNESS,
+        CYL2_ROUGHNESS,
+        CYL3_ROUGHNESS,
+        CYL4_ROUGHNESS,
+        CYL5_ROUGHNESS,
+        CYL6_ROUGHNESS,
+        LEARNED_IGN_TIMING_CORR,
+        THROTTLE_MOTOR_DUTY,
+        THROTTLE_MOTOR_VOLTAGE,
+        TPS_SUB,
+        TPS_MAIN,
+        PEDAL_SUB,
+        PEDAL_MAIN,
+        EGT_1,
+        EGT_2,
+        ODOMETER,
+        OSV_DUTY_R,
+        OSV_DUTY_L,
+        OSV_CURRENT_R,
+        OSV_CURRENT_L,
+        TPS_CLOSED_VOLTAGE,
+        OVERSPEED_VERY_HIGH,
+        OVERSPEED_HIGH,
+        INJECTOR_DUTY_CYCLE,
+        MRP_CORRECTED,
+        FUEL_CONSUMPTION,
         TCM_GEAR_POSITION,
         TCM_TURBINE_SPEED,
         TCM_ATF_TEMP,
