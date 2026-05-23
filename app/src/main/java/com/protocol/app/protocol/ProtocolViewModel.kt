@@ -217,15 +217,23 @@ class ProtocolViewModel : ViewModel() {
         if (session != null) {
             sessionManager?.closeSession(session)
         }
-        if (wasRunning || wasReading || wasLogging) {
-            _uiState.value = _uiState.value.copy(
-                isRunningProbe = false,
-                isReadingLive = false,
-                isLogging = false,
-                lastOutcome = if (wasRunning) Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED else _uiState.value.lastOutcome,
-                statusMessage = "USB device detached — run aborted"
-            )
-        }
+        // Wipe the probe outcome card whenever the adapter goes away — a stale
+        // "ECU REPLIED" sitting on screen after detach is misleading. If a run
+        // was mid-flight, mark it as USB-disconnected; otherwise just clear.
+        _uiState.value = _uiState.value.copy(
+            isRunningProbe = false,
+            isReadingLive = false,
+            isLogging = false,
+            log = if (wasRunning) _uiState.value.log else emptyList(),
+            lastOutcome = if (wasRunning) Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED else null,
+            ssm2DecodeBundle = if (wasRunning) _uiState.value.ssm2DecodeBundle else null,
+            ssm2ResponseHex = if (wasRunning) _uiState.value.ssm2ResponseHex else "",
+            attStepDurationMs = if (wasRunning) _uiState.value.attStepDurationMs else null,
+            statusMessage = if (wasRunning || wasReading || wasLogging)
+                "USB device detached — run aborted"
+            else
+                "USB device detached"
+        )
     }
 
     /**
@@ -389,6 +397,11 @@ class ProtocolViewModel : ViewModel() {
             return
         }
 
+        // Test SSM2 Probe is a connection-verification action — always re-run
+        // the full ATI→ATV init so the result reflects the wire right now, not
+        // a cached "channel still open" assumption from a previous press.
+        client.channelInitialized = false
+
         _uiState.value = _uiState.value.copy(
             isRunningProbe = true,
             log = emptyList(),
@@ -396,10 +409,7 @@ class ProtocolViewModel : ViewModel() {
             ssm2DecodeBundle = null,
             ssm2ResponseHex = "",
             attStepDurationMs = null,
-            statusMessage = if (client.channelInitialized)
-                "Running SSM2 ECM probe (channel reused)..."
-            else
-                "Running SSM2 ECM probe..."
+            statusMessage = "Running SSM2 ECM probe..."
         )
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
