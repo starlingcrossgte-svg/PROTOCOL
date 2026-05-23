@@ -68,6 +68,9 @@ fun ProtocolScreen(
     onDevModeChange: (Boolean) -> Unit,
     onSplitScreenChange: (Boolean) -> Unit,
     onResetLayout: () -> Unit,
+    onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
+    onSelectVehicle: (id: String) -> Unit,
+    onDeleteVehicle: (id: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -79,6 +82,7 @@ fun ProtocolScreen(
         SubPage.TcmParameters -> "TCM Parameters"
         SubPage.LiveDataSettings -> "Live Data Settings"
         SubPage.Settings -> "Settings"
+        SubPage.Garage -> "Garage"
         SubPage.Flash -> "Flash ECU"
         SubPage.Diagnostics -> "Diagnostics / CEL"
         SubPage.Tuning -> "Minor Tuning"
@@ -199,6 +203,12 @@ fun ProtocolScreen(
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onDevModeChange = onDevModeChange
+                    )
+                    SubPage.Garage -> GarageBody(
+                        uiState = uiState,
+                        onSaveVehicle = onSaveVehicle,
+                        onSelectVehicle = onSelectVehicle,
+                        onDeleteVehicle = onDeleteVehicle
                     )
                     SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)

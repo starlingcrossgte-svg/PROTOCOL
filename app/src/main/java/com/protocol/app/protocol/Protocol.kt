@@ -116,6 +116,7 @@ class Protocol : ComponentActivity() {
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
         viewModel.attachSettingsStore(SettingsStore(applicationContext))
+        viewModel.attachGarageStore(GarageStore(applicationContext))
 
         refreshConnectionStatus()
 
@@ -164,7 +165,10 @@ class Protocol : ComponentActivity() {
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSplitScreenChange = { on -> viewModel.setSplitScreenMode(on) },
-                    onResetLayout = { viewModel.resetLayout() }
+                    onResetLayout = { viewModel.resetLayout() },
+                    onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
+                    onSelectVehicle = { id -> viewModel.selectVehicle(id) },
+                    onDeleteVehicle = { id -> viewModel.deleteVehicle(id) }
                 )
             }
         }

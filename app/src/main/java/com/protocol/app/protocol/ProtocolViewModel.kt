@@ -33,6 +33,7 @@ class ProtocolViewModel : ViewModel() {
     private var layoutStore: GaugeLayoutStore? = null
     private var backgroundStore: BackgroundStore? = null
     private var settingsStore: SettingsStore? = null
+    private var garageStore: GarageStore? = null
 
     // Action the user requested while the adapter wasn't yet connected.
     // setOpenSession replays this once a session is open so the user
@@ -103,6 +104,67 @@ class ProtocolViewModel : ViewModel() {
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
     fun setSplitScreenMode(on: Boolean) = updateSettings { it.copy(splitScreenMode = on) }
+
+    /**
+     * Wire the persistent garage store. Loads existing vehicles + selection
+     * into UiState on first composition.
+     */
+    fun attachGarageStore(store: GarageStore) {
+        garageStore = store
+        _uiState.value = _uiState.value.copy(garage = store.load())
+    }
+
+    private fun updateGarage(transform: (GarageState) -> GarageState) {
+        val next = transform(_uiState.value.garage)
+        if (next == _uiState.value.garage) return
+        _uiState.value = _uiState.value.copy(garage = next)
+        garageStore?.save(next)
+    }
+
+    /**
+     * Create + persist a new vehicle. All four fields are stored as
+     * passed in (the UI uppercases them at the input layer). At least
+     * one of year/make/model must be non-blank or the call is a no-op
+     * — blank-everywhere vehicles aren't useful and clutter the list.
+     */
+    fun addVehicle(year: String, make: String, model: String, subModel: String) {
+        val y = year.trim(); val mk = make.trim(); val md = model.trim(); val sm = subModel.trim()
+        if (y.isBlank() && mk.isBlank() && md.isBlank()) return
+        val vehicle = Vehicle(
+            id = java.util.UUID.randomUUID().toString(),
+            year = y, make = mk, model = md, subModel = sm
+        )
+        updateGarage { it.copy(vehicles = it.vehicles + vehicle) }
+    }
+
+    /**
+     * Toggle the active vehicle. Passing the currently-selected id
+     * deselects (only one vehicle can be active at a time). Passing
+     * null also deselects. Unknown ids are no-ops.
+     */
+    fun selectVehicle(id: String?) {
+        updateGarage { current ->
+            val next = when {
+                id == null -> null
+                id == current.selectedVehicleId -> null
+                current.vehicles.any { it.id == id } -> id
+                else -> current.selectedVehicleId
+            }
+            current.copy(selectedVehicleId = next)
+        }
+    }
+
+    /**
+     * Remove a vehicle by id. If it was the selected one, selection
+     * is cleared. Unknown ids are no-ops.
+     */
+    fun deleteVehicle(id: String) {
+        updateGarage { current ->
+            val remaining = current.vehicles.filterNot { it.id == id }
+            val newSelected = if (current.selectedVehicleId == id) null else current.selectedVehicleId
+            current.copy(vehicles = remaining, selectedVehicleId = newSelected)
+        }
+    }
 
     /**
      * Clear all gauges from the Live Data page. Persists immediately.

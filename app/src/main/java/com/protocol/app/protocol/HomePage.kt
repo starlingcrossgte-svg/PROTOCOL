@@ -66,6 +66,7 @@ internal fun HomePage(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
+            HomeMenuButton(label = "Garage") { onOpenSubPage(SubPage.Garage) }
             HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Diagnostics / CEL") { onOpenSubPage(SubPage.Diagnostics) }

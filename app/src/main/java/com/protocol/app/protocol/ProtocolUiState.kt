@@ -14,6 +14,7 @@ sealed class SubPage {
     object TcmParameters : SubPage()
     object LiveDataSettings : SubPage()
     object Settings : SubPage()
+    object Garage : SubPage()
     object Flash : SubPage()
     object Diagnostics : SubPage()
     object Tuning : SubPage()
@@ -51,7 +52,9 @@ data class ProtocolUiState(
     /** URI of the user-chosen background image. Null = default Y2K dark surface. */
     val backgroundUri: String? = null,
     /** Tunable preferences from the Settings sub-page. */
-    val settings: AppSettings = AppSettings()
+    val settings: AppSettings = AppSettings(),
+    /** User's saved vehicles + currently selected one. Drives future vehicle-specific PID profiles, diagnostic codes, flash recipes. */
+    val garage: GarageState = GarageState()
 ) {
     /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
     val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds
