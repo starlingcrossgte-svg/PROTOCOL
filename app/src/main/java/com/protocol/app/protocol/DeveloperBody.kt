@@ -118,7 +118,7 @@ internal fun DeveloperBody(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
-            DevSmallButton("Clear Traffic") { UsbTrafficLog.clear() }
+            DevSmallButton(text = "Clear Traffic", onClick = { UsbTrafficLog.clear() })
         }
         TrafficLogCard(trafficEvents)
     }
