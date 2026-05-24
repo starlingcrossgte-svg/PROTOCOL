@@ -21,6 +21,28 @@ import kotlinx.coroutines.launch
 
 private val DEFAULT_STARTER_PID_IDS = listOf("rpm", "coolant", "battery", "oil", "iat")
 
+/**
+ * Fold a new batch of values into a running min-or-max map. [shouldReplace]
+ * returns true when the incoming value should overwrite the previous one
+ * (min: v < prev; max: v > prev). Pids without a prior entry get seeded
+ * with the first observed value.
+ */
+private inline fun updateExtreme(
+    current: Map<String, Double>,
+    incoming: Map<String, Double>,
+    shouldReplace: (newVal: Double, prev: Double) -> Boolean
+): Map<String, Double> {
+    if (incoming.isEmpty()) return current
+    var acc = current
+    for ((k, v) in incoming) {
+        val prev = acc[k]
+        if (prev == null || shouldReplace(v, prev)) {
+            acc = acc + (k to v)
+        }
+    }
+    return acc
+}
+
 class ProtocolViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProtocolUiState())
@@ -184,12 +206,16 @@ class ProtocolViewModel : ViewModel() {
         val current = _uiState.value.gaugeLayout
         val next = transform(current)
         if (next === current) return
-        // Drop liveValues for PIDs no longer on the page — keeping stale
-        // entries would just bloat the map across many toggles.
+        // Drop liveValues / min / max for PIDs no longer on the page —
+        // keeping stale entries would just bloat the maps over time.
         val keptValues = _uiState.value.liveValues.filterKeys { it in next.pidIds }
+        val keptMin = _uiState.value.liveValuesMin.filterKeys { it in next.pidIds }
+        val keptMax = _uiState.value.liveValuesMax.filterKeys { it in next.pidIds }
         _uiState.value = _uiState.value.copy(
             gaugeLayout = next,
-            liveValues = keptValues
+            liveValues = keptValues,
+            liveValuesMin = keptMin,
+            liveValuesMax = keptMax
         )
         layoutStore?.save(next)
         // If a poll flow is running, hand it the new PID set without
@@ -312,6 +338,8 @@ class ProtocolViewModel : ViewModel() {
             isReadingLive = false,
             isLogging = false,
             liveValues = emptyMap(),
+            liveValuesMin = emptyMap(),
+            liveValuesMax = emptyMap(),
             lastSampleTimestampMs = 0L,
             lastPollWireMs = 0L,
             log = if (wasRunning) _uiState.value.log else emptyList(),
@@ -426,8 +454,15 @@ class ProtocolViewModel : ViewModel() {
                     // current liveValues so a missing module's gauges hold
                     // their last reading instead of going --.
                     val mergedValues = current.liveValues + sample.values
+                    // Track per-PID min/max across the current Read Live Data
+                    // session. The bottom row of each gauge tile shows these,
+                    // cleared on stop / detach / layout removal.
+                    val newMin = updateExtreme(current.liveValuesMin, sample.values) { v, prev -> v < prev }
+                    val newMax = updateExtreme(current.liveValuesMax, sample.values) { v, prev -> v > prev }
                     _uiState.value = current.copy(
                         liveValues = mergedValues,
+                        liveValuesMin = newMin,
+                        liveValuesMax = newMax,
                         lastSampleTimestampMs = sample.timestampMs,
                         lastPollWireMs = sample.wireMs,
                         ecmReplying = sample.ecmOk,
@@ -440,6 +475,8 @@ class ProtocolViewModel : ViewModel() {
                     isReadingLive = false,
                     isLogging = false,
                     liveValues = emptyMap(),
+                    liveValuesMin = emptyMap(),
+                    liveValuesMax = emptyMap(),
                     lastSampleTimestampMs = 0L,
                     lastPollWireMs = 0L,
                     statusMessage = "USB device disconnected"
@@ -451,11 +488,14 @@ class ProtocolViewModel : ViewModel() {
                 runningPoller = null
                 // Drop the last-known values so gauges revert to "--" when
                 // polling stops for any reason. Showing stale numbers after
-                // a stop is misleading.
+                // a stop is misleading. Min/max also reset so the next
+                // session starts with a clean range.
                 _uiState.value = _uiState.value.copy(
                     isReadingLive = false,
                     isLogging = false,
                     liveValues = emptyMap(),
+                    liveValuesMin = emptyMap(),
+                    liveValuesMax = emptyMap(),
                     lastSampleTimestampMs = 0L,
                     lastPollWireMs = 0L
                 )
@@ -488,6 +528,8 @@ class ProtocolViewModel : ViewModel() {
             isReadingLive = false,
             isLogging = false,
             liveValues = emptyMap(),
+            liveValuesMin = emptyMap(),
+            liveValuesMax = emptyMap(),
             lastSampleTimestampMs = 0L,
             lastPollWireMs = 0L,
             statusMessage = "Reading stopped"

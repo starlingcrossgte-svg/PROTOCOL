@@ -40,6 +40,10 @@ data class ProtocolUiState(
     val ssm2ResponseHex: String = "",
     val attStepDurationMs: Long? = null,
     val liveValues: Map<String, Double> = emptyMap(),
+    /** Lowest value seen for each PID since the current Read Live Data session started. Cleared on stop / detach / layout removal. */
+    val liveValuesMin: Map<String, Double> = emptyMap(),
+    /** Highest value seen for each PID since the current Read Live Data session started. Cleared on stop / detach / layout removal. */
+    val liveValuesMax: Map<String, Double> = emptyMap(),
     val lastSampleTimestampMs: Long = 0L,
     /** Wire-time of the most recent poll: ms the K-line was actively transmitting/receiving (queries + responses + parse). Excludes the inter-cycle [AppSettings.pollIntervalMs] delay so the displayed number reflects what the ECU/TCM is really taking to answer. 0 when no poll has completed. */
     val lastPollWireMs: Long = 0L,

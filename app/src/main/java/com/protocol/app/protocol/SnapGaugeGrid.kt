@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -131,6 +132,8 @@ internal fun SnapGaugeGrid(
                     entry = entry,
                     pid = pid,
                     rawValue = live[entry.pidId],
+                    minValue = uiState.liveValuesMin[entry.pidId],
+                    maxValue = uiState.liveValuesMax[entry.pidId],
                     active = active,
                     editMode = editMode,
                     cellUnitWidthPx = cellUnitWidthPx,
@@ -152,6 +155,8 @@ private fun GaugeTile(
     entry: GaugeLayoutEntry,
     pid: Ssm2Pid,
     rawValue: Double?,
+    minValue: Double?,
+    maxValue: Double?,
     active: Boolean,
     editMode: Boolean,
     cellUnitWidthPx: Float,
@@ -253,34 +258,81 @@ private fun GaugeTile(
             }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            // Three rows: title (with module suffix) — value+unit — min/max.
+            // Title is small and top-aligned; value dominates the middle and
+            // is right-padded by the unit; min/max row sits at the bottom.
+            val moduleSuffix = when (pid.category) {
+                com.protocol.app.openport2.Ssm2PidCategory.ECU -> "\\E"
+                com.protocol.app.openport2.Ssm2PidCategory.TCM -> "\\T"
+            }
+            val formattedValue = rawValue?.let {
+                ProtocolLogFormatter.formatPidValueText(pid.id, it)
+            } ?: "--"
+            val formattedMin = minValue?.let {
+                ProtocolLogFormatter.formatPidValueText(pid.id, it)
+            } ?: "--"
+            val formattedMax = maxValue?.let {
+                ProtocolLogFormatter.formatPidValueText(pid.id, it)
+            } ?: "--"
             Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.Start
             ) {
+                // Title row — display name + module suffix (E for ECU, T for TCM)
                 Text(
-                    pid.displayName,
+                    "${pid.displayName} $moduleSuffix",
                     color = Color.White,
                     style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    text = rawValue?.let {
-                        ProtocolLogFormatter.formatPidValueText(pid.id, it)
-                    } ?: "--",
-                    color = Color.White,
                     fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = valueFontSize,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     softWrap = false
                 )
-                Text(
-                    pid.unit,
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace
-                )
+                // Value + unit row — value left, unit right.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = formattedValue,
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = valueFontSize,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        pid.unit,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                // Min/max row at the bottom of the tile.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "min $formattedMin",
+                        color = NeutralGray,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Text(
+                        "max $formattedMax",
+                        color = NeutralGray,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
 
             if (editMode) {
