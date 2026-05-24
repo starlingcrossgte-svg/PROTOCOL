@@ -22,7 +22,8 @@ internal fun LiveDataSettingsBody(
     uiState: ProtocolUiState,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
-    onResetLayout: () -> Unit
+    onResetLayout: () -> Unit,
+    onShareSavedSession: () -> Unit
 ) {
     val s = uiState.settings
     Column(
@@ -57,5 +58,9 @@ internal fun LiveDataSettingsBody(
         CategoryHeader("LAYOUT")
         SettingsButton(label = "Reset Gauge Layout", onClick = onResetLayout)
         SettingsHelp("Clears all gauges from Live Data. Add new ones from the Parameters menu.")
+
+        CategoryHeader("CRASH RECOVERY")
+        SettingsButton(label = "Share Saved Session", onClick = onShareSavedSession)
+        SettingsHelp("PROTOCOL auto-saves your in-progress session log to internal cache every ~1 second while logging. If the app gets killed mid-session, tap this to recover the last saved CSV via the system share sheet (Files, Gmail, Drive, etc.).")
     }
 }

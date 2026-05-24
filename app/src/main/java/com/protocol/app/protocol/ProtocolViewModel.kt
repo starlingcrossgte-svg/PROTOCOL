@@ -45,6 +45,15 @@ private inline fun updateExtreme(
 
 class ProtocolViewModel : ViewModel() {
 
+    private companion object {
+        // Rewrite the autosaved session-log file every N poll samples.
+        // At default 200 ms poll interval that's ~one disk write per
+        // second — frequent enough to survive a crash without losing
+        // more than ~1 second of data, infrequent enough to be gentle
+        // on cache storage on long logs.
+        private const val AUTOSAVE_EVERY_N_SAMPLES = 5
+    }
+
     private val _uiState = MutableStateFlow(ProtocolUiState())
     val uiState: StateFlow<ProtocolUiState> = _uiState.asStateFlow()
 
@@ -60,6 +69,11 @@ class ProtocolViewModel : ViewModel() {
     private var backgroundStore: BackgroundStore? = null
     private var settingsStore: SettingsStore? = null
     private var garageStore: GarageStore? = null
+    private var sessionLogStore: SessionLogStore? = null
+    // Saved-sample counter — used to throttle disk autosaves to every
+    // AUTOSAVE_EVERY_N_SAMPLES poll cycles so we don't hammer cache
+    // storage at 5 Hz on long-running logs.
+    private var samplesSinceLastAutosave: Int = 0
 
     // Action the user requested while the adapter wasn't yet connected.
     // setOpenSession replays this once a session is open so the user
@@ -130,6 +144,10 @@ class ProtocolViewModel : ViewModel() {
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
     fun setSplitScreenMode(on: Boolean) = updateSettings { it.copy(splitScreenMode = on) }
+
+    fun attachSessionLogStore(store: SessionLogStore) {
+        sessionLogStore = store
+    }
 
     /**
      * Wire the persistent garage store. Loads existing vehicles + selection
@@ -469,6 +487,17 @@ class ProtocolViewModel : ViewModel() {
                         tcmReplying = sample.tcmOk,
                         sessionLog = nextSessionLog
                     )
+                    // Autosave the session log to disk while actively
+                    // logging so a process kill doesn't lose the data.
+                    // Throttled — see AUTOSAVE_EVERY_N_SAMPLES.
+                    if (current.isLogging) {
+                        samplesSinceLastAutosave += 1
+                        if (samplesSinceLastAutosave >= AUTOSAVE_EVERY_N_SAMPLES) {
+                            samplesSinceLastAutosave = 0
+                            val csv = ProtocolLogFormatter.formatSessionLogCsv(_uiState.value)
+                            sessionLogStore?.save(csv)
+                        }
+                    }
                 }
             } catch (_: UsbDisconnectedException) {
                 _uiState.value = _uiState.value.copy(
@@ -503,7 +532,12 @@ class ProtocolViewModel : ViewModel() {
         }
     }
 
-    fun startLogging() = startReadingLive(recordToLog = true)
+    fun startLogging() {
+        // Fresh logging run — reset the autosave throttle counter so the
+        // first sample's save triggers promptly after the first batch.
+        samplesSinceLastAutosave = 0
+        startReadingLive(recordToLog = true)
+    }
 
     /**
      * Stop appending to the session log. Polling continues; gauges keep

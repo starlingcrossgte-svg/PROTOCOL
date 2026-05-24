@@ -71,6 +71,7 @@ fun ProtocolScreen(
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
     onSelectVehicle: (id: String) -> Unit,
     onDeleteVehicle: (id: String) -> Unit,
+    onShareSavedSession: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -193,7 +194,8 @@ fun ProtocolScreen(
                         uiState = uiState,
                         onPollIntervalChange = onPollIntervalChange,
                         onSessionLogMaxChange = onSessionLogMaxChange,
-                        onResetLayout = onResetLayout
+                        onResetLayout = onResetLayout,
+                        onShareSavedSession = onShareSavedSession
                     )
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,

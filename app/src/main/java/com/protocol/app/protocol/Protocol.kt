@@ -43,6 +43,7 @@ class Protocol : ComponentActivity() {
     private lateinit var usbManager: UsbManager
     private lateinit var usbPermissionHelper: UsbPermissionHelper
     private lateinit var sessionManager: OpenPort2UsbSessionManager
+    private lateinit var sessionLogStore: SessionLogStore
 
     private var pendingExportText: String = ""
 
@@ -117,6 +118,8 @@ class Protocol : ComponentActivity() {
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
         viewModel.attachSettingsStore(SettingsStore(applicationContext))
         viewModel.attachGarageStore(GarageStore(applicationContext))
+        sessionLogStore = SessionLogStore(applicationContext)
+        viewModel.attachSessionLogStore(sessionLogStore)
 
         refreshConnectionStatus()
 
@@ -168,7 +171,8 @@ class Protocol : ComponentActivity() {
                     onResetLayout = { viewModel.resetLayout() },
                     onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
                     onSelectVehicle = { id -> viewModel.selectVehicle(id) },
-                    onDeleteVehicle = { id -> viewModel.deleteVehicle(id) }
+                    onDeleteVehicle = { id -> viewModel.deleteVehicle(id) },
+                    onShareSavedSession = { launchShareSavedSession() }
                 )
             }
         }
@@ -360,6 +364,31 @@ class Protocol : ComponentActivity() {
     // user can pick Files, Gmail, Drive, Bluetooth, etc. — anything that
     // accepts a text/csv attachment. Previous behavior went straight to the
     // Files save-as picker, which gave no email / share options.
+    // Share the most recent autosaved session log via the system share
+    // chooser. Used by the "Share Saved Session" button in Live Data
+    // Settings — gives the user a way to recover their session log after
+    // a crash / process kill without needing a file-browser workaround.
+    private fun launchShareSavedSession() {
+        if (!sessionLogStore.exists()) {
+            Toast.makeText(this, "No saved session log on disk", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = try {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", sessionLogStore.file)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Share prep failed: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, sessionLogStore.file.name)
+            putExtra(Intent.EXTRA_TITLE, sessionLogStore.file.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(send, "Share saved session"))
+    }
+
     private fun launchExportSessionLog() {
         val csv = ProtocolLogFormatter.formatSessionLogCsv(viewModel.uiState.value)
         if (csv.isEmpty()) {
