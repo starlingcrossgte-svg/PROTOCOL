@@ -14,7 +14,13 @@ import kotlinx.coroutines.flow.flow
 data class PollSample(
     val timestampMs: Long,
     val values: Map<String, Double>,
-    val rawValues: IntArray
+    val rawValues: IntArray,
+    /** Wall-clock ms spent on the wire this cycle (queries + responses + parse, excludes the inter-cycle delay). */
+    val wireMs: Long = 0L,
+    /** True if the ECM query succeeded this cycle. False when the module didn't respond / returned a bad frame. */
+    val ecmOk: Boolean = true,
+    /** True if the TCM query succeeded this cycle. */
+    val tcmOk: Boolean = true
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -22,6 +28,9 @@ data class PollSample(
         if (timestampMs != other.timestampMs) return false
         if (values != other.values) return false
         if (!rawValues.contentEquals(other.rawValues)) return false
+        if (wireMs != other.wireMs) return false
+        if (ecmOk != other.ecmOk) return false
+        if (tcmOk != other.tcmOk) return false
         return true
     }
 
@@ -29,6 +38,9 @@ data class PollSample(
         var result = timestampMs.hashCode()
         result = 31 * result + values.hashCode()
         result = 31 * result + rawValues.contentHashCode()
+        result = 31 * result + wireMs.hashCode()
+        result = 31 * result + ecmOk.hashCode()
+        result = 31 * result + tcmOk.hashCode()
         return result
     }
 }
@@ -75,11 +87,43 @@ class Ssm2Poller(
     // target one or the other. Order: ECM PIDs first, then TCM PIDs. The
     // raw-byte stream and the decode loop both use this ordering so slices
     // align by position.
-    private val ecmPids: List<Ssm2Pid> = pids.filter { it.category == Ssm2PidCategory.ECU }
-    private val tcmPids: List<Ssm2Pid> = pids.filter { it.category == Ssm2PidCategory.TCM }
-    private val orderedPids: List<Ssm2Pid> = ecmPids + tcmPids
-    private val ecmAddresses: List<Ssm2Address> = ecmPids.flatMap { it.addresses }
-    private val tcmAddresses: List<Ssm2Address> = tcmPids.flatMap { it.addresses }
+    //
+    // The config is volatile so updatePids() can swap it from a different
+    // thread while pollOnce is running. Each pollOnce captures the config
+    // at the top of the cycle and uses that snapshot throughout, so the
+    // query and the decode always agree even if updatePids fires mid-cycle.
+    private data class PidConfig(
+        val ecmPids: List<Ssm2Pid>,
+        val tcmPids: List<Ssm2Pid>,
+        val orderedPids: List<Ssm2Pid>,
+        val ecmAddresses: List<Ssm2Address>,
+        val tcmAddresses: List<Ssm2Address>
+    )
+
+    private fun buildConfig(pids: List<Ssm2Pid>): PidConfig {
+        val ecm = pids.filter { it.category == Ssm2PidCategory.ECU }
+        val tcm = pids.filter { it.category == Ssm2PidCategory.TCM }
+        return PidConfig(
+            ecmPids = ecm,
+            tcmPids = tcm,
+            orderedPids = ecm + tcm,
+            ecmAddresses = ecm.flatMap { it.addresses },
+            tcmAddresses = tcm.flatMap { it.addresses }
+        )
+    }
+
+    @Volatile
+    private var config: PidConfig = buildConfig(pids)
+
+    /**
+     * Swap the polled PID set without restarting the flow. Safe to call
+     * from any thread; the running [pollOnce] picks up the new config on
+     * its next cycle (this cycle finishes with the old config it captured
+     * at entry).
+     */
+    fun updatePids(newPids: List<Ssm2Pid>) {
+        config = buildConfig(newPids)
+    }
 
     /**
      * Sends one (single-module) or two (mixed ECM+TCM) batched A8 queries
@@ -93,40 +137,122 @@ class Ssm2Poller(
      * @throws UsbDisconnectedException if the underlying bulk transfer fails.
      */
     fun pollOnce(): PollResult {
+        // Snapshot the config so this cycle's query + decode use a
+        // consistent PID set even if updatePids fires mid-cycle.
+        val cfg = config
+        val ecmAddresses = cfg.ecmAddresses
+        val tcmAddresses = cfg.tcmAddresses
+        val ecmPids = cfg.ecmPids
+        val tcmPids = cfg.tcmPids
+
         if (ecmAddresses.isEmpty() && tcmAddresses.isEmpty()) {
             return PollResult.Transport("no addresses configured")
         }
 
-        val ecmBytes = if (ecmAddresses.isNotEmpty()) {
+        val wireStart = System.currentTimeMillis()
+
+        // Per-module result tracking. A failure in one module no longer
+        // aborts the whole cycle — the other module's data still flows.
+        // The ViewModel merges the partial values map onto the previous
+        // sample's so gauges for the failed module hold their last value.
+        var ecmBytes: IntArray? = null
+        var tcmBytes: IntArray? = null
+        var ecmFailureReason: String? = null
+        var tcmFailureReason: String? = null
+        var ecmFailureBadFrame = false
+        var tcmFailureBadFrame = false
+
+        if (ecmAddresses.isNotEmpty()) {
             when (val r = queryModule(ecmAddresses, Ssm2AddressQuery.DEST_ECM)) {
-                is ModuleQueryResult.Ok -> r.bytes
-                is ModuleQueryResult.BadFrame -> return PollResult.BadFrame("ECM: ${r.reason}")
-                is ModuleQueryResult.Transport -> return PollResult.Transport("ECM: ${r.reason}")
+                is ModuleQueryResult.Ok -> ecmBytes = r.bytes
+                is ModuleQueryResult.BadFrame -> {
+                    ecmFailureReason = "ECM: ${r.reason}"
+                    ecmFailureBadFrame = true
+                }
+                is ModuleQueryResult.Transport -> ecmFailureReason = "ECM: ${r.reason}"
             }
-        } else IntArray(0)
-
-        val tcmBytes = if (tcmAddresses.isNotEmpty()) {
+        }
+        if (tcmAddresses.isNotEmpty()) {
             when (val r = queryModule(tcmAddresses, Ssm2AddressQuery.DEST_TCM)) {
-                is ModuleQueryResult.Ok -> r.bytes
-                is ModuleQueryResult.BadFrame -> return PollResult.BadFrame("TCM: ${r.reason}")
-                is ModuleQueryResult.Transport -> return PollResult.Transport("TCM: ${r.reason}")
+                is ModuleQueryResult.Ok -> tcmBytes = r.bytes
+                is ModuleQueryResult.BadFrame -> {
+                    tcmFailureReason = "TCM: ${r.reason}"
+                    tcmFailureBadFrame = true
+                }
+                is ModuleQueryResult.Transport -> tcmFailureReason = "TCM: ${r.reason}"
             }
-        } else IntArray(0)
+        }
 
-        val rawValues = ecmBytes + tcmBytes
+        val wireMs = System.currentTimeMillis() - wireStart
+
+        // Both required modules failed → escalate as a real miss so the
+        // consecutive-misses counter trips and the loop bails after N
+        // dead cycles (UsbDisconnect handles real disconnects elsewhere).
+        val ecmRequired = ecmAddresses.isNotEmpty()
+        val tcmRequired = tcmAddresses.isNotEmpty()
+        val ecmFailed = ecmRequired && ecmBytes == null
+        val tcmFailed = tcmRequired && tcmBytes == null
+        if (ecmFailed && (tcmFailed || !tcmRequired) && (ecmFailureBadFrame)) {
+            return PollResult.BadFrame(ecmFailureReason ?: "ECM failed")
+        }
+        if (ecmRequired && tcmRequired && ecmFailed && tcmFailed) {
+            // Both modules dead this cycle.
+            val combined = listOfNotNull(ecmFailureReason, tcmFailureReason).joinToString(" / ")
+            return if (ecmFailureBadFrame || tcmFailureBadFrame)
+                PollResult.BadFrame(combined)
+            else
+                PollResult.Transport(combined)
+        }
+        if (!ecmRequired && tcmFailed) {
+            return if (tcmFailureBadFrame)
+                PollResult.BadFrame(tcmFailureReason ?: "TCM failed")
+            else
+                PollResult.Transport(tcmFailureReason ?: "TCM failed")
+        }
+        if (!tcmRequired && ecmFailed) {
+            return if (ecmFailureBadFrame)
+                PollResult.BadFrame(ecmFailureReason ?: "ECM failed")
+            else
+                PollResult.Transport(ecmFailureReason ?: "ECM failed")
+        }
+
+        // Partial / full success. Decode only the slots whose module
+        // responded. Missing slots simply don't appear in the values map;
+        // the ViewModel merges on top of the previous sample so the
+        // affected gauges hold their last reading rather than going --.
         val values = mutableMapOf<String, Double>()
-        var offset = 0
-        for (pid in orderedPids) {
-            val slice = rawValues.copyOfRange(offset, offset + pid.addresses.size)
-            values[pid.id] = pid.decode(slice)
-            offset += pid.addresses.size
+        val rawValuesList = mutableListOf<Int>()
+        var ecmOffset = 0
+        for (pid in ecmPids) {
+            if (ecmBytes != null) {
+                val slice = ecmBytes.copyOfRange(ecmOffset, ecmOffset + pid.addresses.size)
+                values[pid.id] = pid.decode(slice)
+                rawValuesList.addAll(slice.toList())
+            } else {
+                repeat(pid.addresses.size) { rawValuesList.add(0) }
+            }
+            ecmOffset += pid.addresses.size
+        }
+        var tcmOffset = 0
+        for (pid in tcmPids) {
+            if (tcmBytes != null) {
+                val slice = tcmBytes.copyOfRange(tcmOffset, tcmOffset + pid.addresses.size)
+                values[pid.id] = pid.decode(slice)
+                rawValuesList.addAll(slice.toList())
+            } else {
+                repeat(pid.addresses.size) { rawValuesList.add(0) }
+            }
+            tcmOffset += pid.addresses.size
         }
 
         return PollResult.Sample(
             PollSample(
                 timestampMs = System.currentTimeMillis(),
                 values = values,
-                rawValues = rawValues
+                rawValues = rawValuesList.toIntArray(),
+                wireMs = wireMs,
+                ecmOk = !ecmFailed,
+                tcmOk = !tcmFailed
             )
         )
     }

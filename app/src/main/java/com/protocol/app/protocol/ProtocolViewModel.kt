@@ -30,6 +30,10 @@ class ProtocolViewModel : ViewModel() {
     private var openSession: OpenPort2UsbSession? = null
     private var tactrixClient: TactrixClient? = null
     private var runJob: Job? = null
+    // Reference to the currently-active poller, kept here so updateLayout
+    // can hand it a fresh PID set without restarting the flow (so gauges
+    // don't flicker when the user toggles a parameter while reading live).
+    private var runningPoller: Ssm2Poller? = null
     private var layoutStore: GaugeLayoutStore? = null
     private var backgroundStore: BackgroundStore? = null
     private var settingsStore: SettingsStore? = null
@@ -180,8 +184,20 @@ class ProtocolViewModel : ViewModel() {
         val current = _uiState.value.gaugeLayout
         val next = transform(current)
         if (next === current) return
-        _uiState.value = _uiState.value.copy(gaugeLayout = next)
+        // Drop liveValues for PIDs no longer on the page — keeping stale
+        // entries would just bloat the map across many toggles.
+        val keptValues = _uiState.value.liveValues.filterKeys { it in next.pidIds }
+        _uiState.value = _uiState.value.copy(
+            gaugeLayout = next,
+            liveValues = keptValues
+        )
         layoutStore?.save(next)
+        // If a poll flow is running, hand it the new PID set without
+        // tearing down — the next cycle picks it up automatically.
+        runningPoller?.let { poller ->
+            val newPids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in next.pidIds }
+            poller.updatePids(newPids)
+        }
     }
 
     /** Add a gauge for [pidId] to the Live Data page if not already present. */
@@ -297,7 +313,7 @@ class ProtocolViewModel : ViewModel() {
             isLogging = false,
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
-            lastPollIntervalMs = 0L,
+            lastPollWireMs = 0L,
             log = if (wasRunning) _uiState.value.log else emptyList(),
             lastOutcome = if (wasRunning) Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED else null,
             ssm2DecodeBundle = if (wasRunning) _uiState.value.ssm2DecodeBundle else null,
@@ -391,6 +407,7 @@ class ProtocolViewModel : ViewModel() {
             )
 
             val poller = Ssm2Poller(client, pidsOnPage)
+            runningPoller = poller
             try {
                 poller.startFlow(pollIntervalMs).collect { sample ->
                     val current = _uiState.value
@@ -404,17 +421,17 @@ class ProtocolViewModel : ViewModel() {
                     } else {
                         current.sessionLog
                     }
-                    // Live poll-rate readout — delta between this sample and
-                    // the previous one. First sample emits 0 (no prior point
-                    // of reference), subsequent samples carry the actual
-                    // measured cadence.
-                    val deltaMs = if (current.lastSampleTimestampMs > 0L)
-                        sample.timestampMs - current.lastSampleTimestampMs
-                    else 0L
+                    // Partial-cycle merge: sample.values only contains entries
+                    // for modules that responded this cycle. Merge onto the
+                    // current liveValues so a missing module's gauges hold
+                    // their last reading instead of going --.
+                    val mergedValues = current.liveValues + sample.values
                     _uiState.value = current.copy(
-                        liveValues = sample.values,
+                        liveValues = mergedValues,
                         lastSampleTimestampMs = sample.timestampMs,
-                        lastPollIntervalMs = deltaMs,
+                        lastPollWireMs = sample.wireMs,
+                        ecmReplying = sample.ecmOk,
+                        tcmReplying = sample.tcmOk,
                         sessionLog = nextSessionLog
                     )
                 }
@@ -424,13 +441,14 @@ class ProtocolViewModel : ViewModel() {
                     isLogging = false,
                     liveValues = emptyMap(),
                     lastSampleTimestampMs = 0L,
-                    lastPollIntervalMs = 0L,
+                    lastPollWireMs = 0L,
                     statusMessage = "USB device disconnected"
                 )
                 return@launch
             } catch (_: Exception) {
                 // Coroutine cancelled — fall through to finally
             } finally {
+                runningPoller = null
                 // Drop the last-known values so gauges revert to "--" when
                 // polling stops for any reason. Showing stale numbers after
                 // a stop is misleading.
@@ -439,7 +457,7 @@ class ProtocolViewModel : ViewModel() {
                     isLogging = false,
                     liveValues = emptyMap(),
                     lastSampleTimestampMs = 0L,
-                    lastPollIntervalMs = 0L
+                    lastPollWireMs = 0L
                 )
             }
         }
@@ -471,7 +489,7 @@ class ProtocolViewModel : ViewModel() {
             isLogging = false,
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
-            lastPollIntervalMs = 0L,
+            lastPollWireMs = 0L,
             statusMessage = "Reading stopped"
         )
     }

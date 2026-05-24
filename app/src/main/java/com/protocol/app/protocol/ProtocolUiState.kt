@@ -41,11 +41,14 @@ data class ProtocolUiState(
     val attStepDurationMs: Long? = null,
     val liveValues: Map<String, Double> = emptyMap(),
     val lastSampleTimestampMs: Long = 0L,
-    /** Measured ms between the last two poll samples — drives the on-page polling-rate readout. 0 until at least two samples have arrived. */
-    val lastPollIntervalMs: Long = 0L,
+    /** Wire-time of the most recent poll: ms the K-line was actively transmitting/receiving (queries + responses + parse). Excludes the inter-cycle [AppSettings.pollIntervalMs] delay so the displayed number reflects what the ECU/TCM is really taking to answer. 0 when no poll has completed. */
+    val lastPollWireMs: Long = 0L,
+    /** True if the most recent poll's ECM query succeeded. Stays true when there are no ECM PIDs on the page. */
+    val ecmReplying: Boolean = true,
+    /** True if the most recent poll's TCM query succeeded. Stays true when there are no TCM PIDs on the page. */
+    val tcmReplying: Boolean = true,
     val sessionLog: List<PollSample> = emptyList(),
     val gaugeLayout: GaugeLayout = GaugeLayout(),
-    val tappedParamLongName: String? = null,
     val activeSubPage: SubPage? = null,
     /** True while the user is moving/resizing/removing gauges. Transient — not persisted. */
     val editMode: Boolean = false,

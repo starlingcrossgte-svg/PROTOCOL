@@ -148,8 +148,8 @@ internal fun LiveDataPage(
 // simply omitted.
 @Composable
 private fun StatusLine(uiState: ProtocolUiState) {
-    val rateMs = uiState.lastPollIntervalMs.toInt()
-    val baseStatus = uiState.tappedParamLongName ?: uiState.statusMessage
+    val rateMs = uiState.lastPollWireMs.toInt()
+    val baseStatus = uiState.statusMessage
     val text = when {
         rateMs > 0 && baseStatus.isNotBlank() -> "$baseStatus  ·  ${rateMs}ms"
         rateMs > 0 -> "${rateMs}ms"
@@ -282,6 +282,19 @@ private fun SmallLogButton(text: String, onClick: () -> Unit) {
 
 @Composable
 private fun SessionLogCard(uiState: ProtocolUiState) {
+    // Reformat the entire session log only when the row count or the PID
+    // set actually changes. Without this, every 200ms poll sample
+    // triggered a full ~1000-row × ~10-PID reformat — wasteful even on
+    // fast phones. The new sample appended each cycle is enough of an
+    // identity change to bypass the cache (sessionLog.size differs).
+    val sessionLog = uiState.sessionLog
+    val pidIds = uiState.pidIdsOnLiveData
+    val formattedText = androidx.compose.runtime.remember(
+        sessionLog.size,
+        pidIds
+    ) {
+        ProtocolLogFormatter.formatSessionLogCleanText(sessionLog, pidIds)
+    }
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
@@ -297,10 +310,7 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
         ) {
             Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 Text(
-                    text = ProtocolLogFormatter.formatSessionLogCleanText(
-                        uiState.sessionLog,
-                        uiState.pidIdsOnLiveData
-                    ),
+                    text = formattedText,
                     color = Color.White,
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
