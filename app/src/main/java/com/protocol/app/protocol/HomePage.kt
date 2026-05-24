@@ -27,21 +27,18 @@ import androidx.compose.ui.unit.sp
 
 // Page 0 — Home / main menu. Layout (top to bottom):
 //   - One-line app subtitle + version
-//   - Four menu buttons (Settings, Flash, Diagnostics, Tuning)
-//   - Test SSM2 Probe button (runs the probe; auto-discover wraps it
-//     in the Activity when no adapter is connected)
-//   - OutcomeCard (shown after any probe run)
-//   - Dev panel — Clear/Copy/Export Log + RunLogCard. Visible only when
-//     settings.devMode is on (toggled from Settings → Developer Mode).
+//   - Menu buttons: Garage, Settings, Flash, Diagnostics, Tuning,
+//     and Developer (only when devMode is on)
 //   - Swipe hint at the bottom
+//
+// The probe button, outcome card, and run log moved to the Developer
+// sub-page when this commit landed. Reading Live Data still triggers
+// auto-discover on the Live Data page, so non-dev users still have a
+// straightforward path to connect.
 
 @Composable
 internal fun HomePage(
     uiState: ProtocolUiState,
-    onRunProbe: () -> Unit,
-    onClearLog: () -> Unit,
-    onCopyLog: () -> Unit,
-    onExportLog: () -> Unit,
     onOpenSubPage: (SubPage) -> Unit
 ) {
     Column(
@@ -60,8 +57,7 @@ internal fun HomePage(
             modifier = Modifier.padding(bottom = 4.dp)
         )
 
-        // Main menu — four destinations. Each opens a sub-page.
-        // Wide tappable rows so they're glove-friendly under the dash.
+        // Main menu — destinations open as sub-pages.
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
@@ -71,47 +67,11 @@ internal fun HomePage(
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Diagnostics / CEL") { onOpenSubPage(SubPage.Diagnostics) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Test SSM2 Probe. The Activity wraps onRunProbe so taps while
-        // disconnected trigger discoverAndConnect — see Protocol.kt.
-        Button(
-            onClick = onRunProbe,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFFF6A00),
-                contentColor = Color.Black,
-                disabledContainerColor = Color(0xFFFF6A00).copy(alpha = 0.5f),
-                disabledContentColor = Color.Black.copy(alpha = 0.7f)
-            ),
-            shape = y2kCornerShape(),
-            enabled = !uiState.isReadingLive && !uiState.isLogging && !uiState.isRunningProbe,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = if (uiState.isRunningProbe) "Probing..." else "Test SSM2 Probe",
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Outcome stays visible after any probe so the user can see the
-        // last result without flipping into the dev panel.
-        OutcomeCard(uiState)
-
-        // Dev panel — Clear/Copy/Export Log + RunLogCard. Gated on
-        // settings.devMode. Toggle in Settings → Developer Mode.
-        if (uiState.settings.devMode) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SmallActionButton("Clear Log", onClearLog, Modifier.weight(1f))
-                SmallActionButton("Copy Log", onCopyLog, Modifier.weight(1f))
-                SmallActionButton("Export Log", onExportLog, Modifier.weight(1f))
+            // Developer Mode — gated on the settings toggle so it stays
+            // out of the way for non-debug use.
+            if (uiState.settings.devMode) {
+                HomeMenuButton(label = "Developer") { onOpenSubPage(SubPage.Developer) }
             }
-            RunLogCard(uiState.log)
         }
 
         SwipeHintRow()

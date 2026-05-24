@@ -15,6 +15,7 @@ sealed class SubPage {
     object LiveDataSettings : SubPage()
     object Settings : SubPage()
     object Garage : SubPage()
+    object Developer : SubPage()
     object Flash : SubPage()
     object Diagnostics : SubPage()
     object Tuning : SubPage()

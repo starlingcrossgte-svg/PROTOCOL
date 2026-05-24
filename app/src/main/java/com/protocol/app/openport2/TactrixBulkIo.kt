@@ -36,6 +36,10 @@ class TactrixBulkIo(private val session: OpenPort2UsbSession) {
             WRITE_TIMEOUT_MS
         )
         if (result < 0) throw UsbDisconnectedException("write failed (bulkTransfer=$result)")
+        // Diagnostic recording — Developer Mode page reads this ring buffer
+        // to show live USB activity. Cheap (one append, no allocation past
+        // the event itself), no-op when nobody's looking at the log.
+        UsbTrafficLog.recordWrite(packet)
         return result
     }
 
@@ -102,6 +106,10 @@ class TactrixBulkIo(private val session: OpenPort2UsbSession) {
             )
 
             if (received > 0) {
+                // Record just this chunk (not the whole accumulated buffer)
+                // so the Developer Mode traffic log shows each USB bulk-in
+                // packet as a distinct event with its real timestamp.
+                UsbTrafficLog.recordRead(buffer.copyOfRange(0, received))
                 for (i in 0 until received) {
                     accumulated.add(buffer[i])
                 }

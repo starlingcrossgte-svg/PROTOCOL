@@ -83,6 +83,7 @@ fun ProtocolScreen(
         SubPage.LiveDataSettings -> "Live Data Settings"
         SubPage.Settings -> "Settings"
         SubPage.Garage -> "Garage"
+        SubPage.Developer -> "Developer"
         SubPage.Flash -> "Flash ECU"
         SubPage.Diagnostics -> "Diagnostics / CEL"
         SubPage.Tuning -> "Minor Tuning"
@@ -156,10 +157,6 @@ fun ProtocolScreen(
                         when (page) {
                             0 -> HomePage(
                                 uiState = uiState,
-                                onRunProbe = onRunProbe,
-                                onClearLog = onClearLog,
-                                onCopyLog = onCopyLog,
-                                onExportLog = onExportLog,
                                 onOpenSubPage = onOpenSubPage
                             )
                             else -> LiveDataPage(
@@ -209,6 +206,13 @@ fun ProtocolScreen(
                         onSaveVehicle = onSaveVehicle,
                         onSelectVehicle = onSelectVehicle,
                         onDeleteVehicle = onDeleteVehicle
+                    )
+                    SubPage.Developer -> DeveloperBody(
+                        uiState = uiState,
+                        onRunProbe = onRunProbe,
+                        onClearProbeLog = onClearLog,
+                        onCopyProbeLog = onCopyLog,
+                        onExportProbeLog = onExportLog
                     )
                     SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)

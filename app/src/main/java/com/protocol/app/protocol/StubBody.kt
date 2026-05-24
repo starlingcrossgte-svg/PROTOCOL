@@ -40,7 +40,8 @@ internal fun StubBody(page: SubPage) {
             "Few weeks once we settle on which parameters are in scope and pull the EZ30R definitions in."
         )
         SubPage.Parameters, SubPage.TcmParameters,
-        SubPage.LiveDataSettings, SubPage.Garage -> Pair("", "")
+        SubPage.LiveDataSettings, SubPage.Garage,
+        SubPage.Developer -> Pair("", "")
     }
 
     Column(
