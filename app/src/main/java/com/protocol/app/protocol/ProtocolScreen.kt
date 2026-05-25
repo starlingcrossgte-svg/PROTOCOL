@@ -69,6 +69,7 @@ fun ProtocolScreen(
     onSessionLogMaxChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
     onSplitScreenChange: (Boolean) -> Unit,
+    onObdLinkChange: (Boolean) -> Unit,
     onResetLayout: () -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
     onSelectVehicle: (id: String) -> Unit,
@@ -151,10 +152,12 @@ fun ProtocolScreen(
                     subPageTitle = subPageTitle,
                     showHamburger = false,
                     splitScreenMode = uiState.settings.splitScreenMode,
+                    obdLinkEnabled = uiState.settings.obdLinkEnabled,
                     onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
                     onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
                     onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
                     onToggleSplitScreen = { onSplitScreenChange(!uiState.settings.splitScreenMode) },
+                    onToggleObdLink = { onObdLinkChange(!uiState.settings.obdLinkEnabled) },
                     onClose = onCloseSubPage
                 )
             }
@@ -189,7 +192,8 @@ fun ProtocolScreen(
                                 onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
                                 onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
                                 onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
-                                onToggleSplitScreen = { onSplitScreenChange(!uiState.settings.splitScreenMode) }
+                                onToggleSplitScreen = { onSplitScreenChange(!uiState.settings.splitScreenMode) },
+                                onToggleObdLink = { onObdLinkChange(!uiState.settings.obdLinkEnabled) }
                             )
                         }
                     }

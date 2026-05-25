@@ -11,7 +11,10 @@ data class AppSettings(
     val pollIntervalMs: Int = DEFAULT_POLL_INTERVAL_MS,
     val sessionLogMaxSize: Int = DEFAULT_SESSION_LOG_MAX,
     val devMode: Boolean = false,
-    val splitScreenMode: Boolean = false
+    val splitScreenMode: Boolean = false,
+    /** When true, the OBDLink (Bluetooth) live-data path may connect. Default
+     *  OFF — while false, no Bluetooth object is created and nothing connects. */
+    val obdLinkEnabled: Boolean = false
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -32,7 +35,8 @@ class SettingsStore(context: Context) {
         pollIntervalMs = prefs.getInt(KEY_POLL_INTERVAL, AppSettings.DEFAULT_POLL_INTERVAL_MS),
         sessionLogMaxSize = prefs.getInt(KEY_LOG_MAX, AppSettings.DEFAULT_SESSION_LOG_MAX),
         devMode = prefs.getBoolean(KEY_DEV_MODE, false),
-        splitScreenMode = prefs.getBoolean(KEY_SPLIT_SCREEN, false)
+        splitScreenMode = prefs.getBoolean(KEY_SPLIT_SCREEN, false),
+        obdLinkEnabled = prefs.getBoolean(KEY_OBDLINK_ENABLED, false)
     )
 
     fun save(s: AppSettings) {
@@ -41,6 +45,7 @@ class SettingsStore(context: Context) {
             .putInt(KEY_LOG_MAX, s.sessionLogMaxSize)
             .putBoolean(KEY_DEV_MODE, s.devMode)
             .putBoolean(KEY_SPLIT_SCREEN, s.splitScreenMode)
+            .putBoolean(KEY_OBDLINK_ENABLED, s.obdLinkEnabled)
             .apply()
     }
 
@@ -50,5 +55,6 @@ class SettingsStore(context: Context) {
         private const val KEY_LOG_MAX = "session_log_max"
         private const val KEY_DEV_MODE = "dev_mode"
         private const val KEY_SPLIT_SCREEN = "split_screen_mode"
+        private const val KEY_OBDLINK_ENABLED = "obdlink_enabled"
     }
 }

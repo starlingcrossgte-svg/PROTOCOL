@@ -145,6 +145,14 @@ class ProtocolViewModel : ViewModel() {
 
     fun setSplitScreenMode(on: Boolean) = updateSettings { it.copy(splitScreenMode = on) }
 
+    /**
+     * Toggle the OBDLink (Bluetooth) live-data path on/off. Persisted via
+     * settings. Default is OFF; while OFF, the Bluetooth transport is never
+     * instantiated and no connection of any kind is attempted. Stage 2 wires
+     * the actual BT source behind this flag.
+     */
+    fun setObdLinkEnabled(on: Boolean) = updateSettings { it.copy(obdLinkEnabled = on) }
+
     fun attachSessionLogStore(store: SessionLogStore) {
         sessionLogStore = store
     }

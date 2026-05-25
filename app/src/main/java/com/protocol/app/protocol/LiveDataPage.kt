@@ -59,7 +59,8 @@ internal fun LiveDataPage(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
-    onToggleSplitScreen: () -> Unit
+    onToggleSplitScreen: () -> Unit,
+    onToggleObdLink: () -> Unit
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
@@ -87,7 +88,8 @@ internal fun LiveDataPage(
                 onOpenParameters = onOpenParameters,
                 onOpenTcmParameters = onOpenTcmParameters,
                 onOpenLiveDataSettings = onOpenLiveDataSettings,
-                onToggleSplitScreen = onToggleSplitScreen
+                onToggleSplitScreen = onToggleSplitScreen,
+                onToggleObdLink = onToggleObdLink
             )
         }
 
@@ -112,7 +114,8 @@ internal fun LiveDataPage(
                 onOpenParameters = onOpenParameters,
                 onOpenTcmParameters = onOpenTcmParameters,
                 onOpenLiveDataSettings = onOpenLiveDataSettings,
-                onToggleSplitScreen = onToggleSplitScreen
+                onToggleSplitScreen = onToggleSplitScreen,
+                onToggleObdLink = onToggleObdLink
             )
         }
 
@@ -186,7 +189,8 @@ private fun ModeButtonsRow(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
-    onToggleSplitScreen: () -> Unit
+    onToggleSplitScreen: () -> Unit,
+    onToggleObdLink: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -230,10 +234,12 @@ private fun ModeButtonsRow(
         )
         HamburgerMenu(
             splitScreenMode = splitScreenMode,
+            obdLinkEnabled = uiState.settings.obdLinkEnabled,
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenLiveDataSettings = onOpenLiveDataSettings,
-            onToggleSplitScreen = onToggleSplitScreen
+            onToggleSplitScreen = onToggleSplitScreen,
+            onToggleObdLink = onToggleObdLink
         )
     }
 }

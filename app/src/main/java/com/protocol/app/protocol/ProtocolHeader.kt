@@ -71,10 +71,12 @@ internal fun ProtocolHeader(
     subPageTitle: String?,
     showHamburger: Boolean,
     splitScreenMode: Boolean,
+    obdLinkEnabled: Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     onToggleSplitScreen: () -> Unit,
+    onToggleObdLink: () -> Unit,
     onClose: () -> Unit
 ) {
     Box(
@@ -109,10 +111,12 @@ internal fun ProtocolHeader(
             )
             showHamburger -> HamburgerMenu(
                 splitScreenMode = splitScreenMode,
+                obdLinkEnabled = obdLinkEnabled,
                 onOpenParameters = onOpenParameters,
                 onOpenTcmParameters = onOpenTcmParameters,
                 onOpenLiveDataSettings = onOpenLiveDataSettings,
                 onToggleSplitScreen = onToggleSplitScreen,
+                onToggleObdLink = onToggleObdLink,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
         }
@@ -126,10 +130,12 @@ internal fun ProtocolHeader(
 @Composable
 internal fun HamburgerMenu(
     splitScreenMode: Boolean,
+    obdLinkEnabled: Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     onToggleSplitScreen: () -> Unit,
+    onToggleObdLink: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -225,6 +231,35 @@ internal fun HamburgerMenu(
                 onClick = {
                     expanded = false
                     onToggleSplitScreen()
+                }
+            )
+            // Bluetooth (OBDLink) toggle — same ON/OFF pattern as Split Screen.
+            // OFF (default) means the OBDLink BT path is never engaged at all:
+            // no scan, no socket, no connection. Wired to the backend in Stage 2.
+            DropdownMenuItem(
+                text = {
+                    androidx.compose.foundation.layout.Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "Bluetooth (OBDLink)",
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            if (obdLinkEnabled) "ON" else "OFF",
+                            color = if (obdLinkEnabled) PassGreen else NeutralGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                onClick = {
+                    expanded = false
+                    onToggleObdLink()
                 }
             )
         }
