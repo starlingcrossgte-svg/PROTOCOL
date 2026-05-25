@@ -1,6 +1,10 @@
 package com.protocol.app.flash
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +29,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,9 +43,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.protocol.app.flash.engine.FlashTrafficEvent
@@ -56,24 +65,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Flash ECU page (Phase 0), rendered as a body inside ProtocolScreen. Per the
-// user's direction the shared header + logo are hidden for this page, so the
-// only chrome is a minimal Close control. Styling reuses the app palette and
-// the same card/button patterns as the Developer + Live Data logs.
-
-/**
- * Flash ECU page. First view is a confirmation gate; after acknowledging, the
- * read-only connection-test UI appears: Test Connection, identity (selectable
- * for copy/paste), the live USB byte traffic, the device-health log, and the
- * run log. Traffic + device logs export as CSV. Nothing here can write/erase.
- */
 @Composable
 internal fun FlashPage(
     state: FlashUiState,
     onTestConnection: () -> Unit,
     onClose: () -> Unit,
-    onCopyCsv: (String) -> Unit,
-    onExportCsv: (String, String) -> Unit
+    onExportCsv: (String, String) -> Unit,
+    onToggleTrafficRecording: () -> Unit,
+    onClearTrafficLog: () -> Unit,
+    onToggleDeviceRecording: () -> Unit,
+    onClearDeviceLog: () -> Unit,
+    onToggleRunLogRecording: () -> Unit,
+    onClearRunLog: () -> Unit
 ) {
     var acknowledged by rememberSaveable { mutableStateOf(false) }
     if (!acknowledged) {
@@ -91,10 +94,12 @@ internal fun FlashPage(
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Minimal top: Close + status (no header, no logo).
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FlashSmallButton("Close", onClose)
-            Spacer(modifier = Modifier.width(10.dp))
+        // Top row: X close (left) | status (center) | hamburger (right)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FlashCloseButton(onClose)
             val statusColor = when (state.phase) {
                 FlashUiState.Phase.Done -> PassGreen
                 FlashUiState.Phase.Failed -> FailRed
@@ -107,13 +112,18 @@ internal fun FlashPage(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f).padding(start = 6.dp)
+                modifier = Modifier.weight(1f).padding(horizontal = 6.dp)
             )
+            FlashHamburgerMenu()
         }
 
-        FlashButton(if (state.busy) "Testing..." else "Test Connection", onTestConnection, enabled = !state.busy)
+        FlashButton(
+            text = if (state.busy) "Testing..." else "Test Connection",
+            onClick = onTestConnection,
+            enabled = !state.busy
+        )
 
-        // Identity - selectable so values can be long-pressed and copied.
+        // Identity — selectable so values can be long-pressed and copied.
         state.identity?.let { id ->
             CategoryHeader("IDENTITY")
             SelectionContainer {
@@ -127,7 +137,7 @@ internal fun FlashPage(
             }
         }
 
-        // Live USB byte traffic - every write out and read in, as it happens.
+        // USB TRAFFIC
         CategoryHeader("USB TRAFFIC")
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -141,13 +151,13 @@ internal fun FlashPage(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
-            FlashSmallButton("Clear") { FlashTrafficLog.clear() }
-            FlashSmallButton("Copy") { onCopyCsv(trafficCsv(traffic)) }
+            FlashSmallButton(if (state.trafficRecording) "Stop" else "Start", onToggleTrafficRecording)
+            FlashSmallButton("Clear", onClearTrafficLog)
             FlashSmallButton("Export CSV") { onExportCsv("protocol-flash-traffic.csv", trafficCsv(traffic)) }
         }
         FlashTrafficCard(traffic)
 
-        // Device-health log over time - watch how the phone reacts under load.
+        // DEVICE — compact current-value rows + accumulated log below
         CategoryHeader("DEVICE")
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -161,12 +171,42 @@ internal fun FlashPage(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
-            FlashSmallButton("Copy") { onCopyCsv(deviceCsv(state.deviceLog)) }
+            FlashSmallButton(if (state.deviceRecording) "Stop" else "Start", onToggleDeviceRecording)
+            FlashSmallButton("Clear", onClearDeviceLog)
             FlashSmallButton("Export CSV") { onExportCsv("protocol-flash-device.csv", deviceCsv(state.deviceLog)) }
+        }
+        state.health?.let { h ->
+            SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    InfoRow("Battery", "${h.batteryPercent}%${if (h.charging) " CHG" else ""}")
+                    InfoRow("Draw", "${h.currentMilliAmps} mA")
+                    InfoRow("Thermal", h.thermalStatus)
+                    InfoRow("Airplane", if (h.airplaneMode) "ON" else "OFF")
+                    InfoRow("CPU", h.cpuPercent?.let { "%.0f%%".format(it) } ?: "-")
+                    InfoRow("Memory", "${h.appUsedMb} MB app / ${h.systemAvailMb} MB free")
+                }
+            }
         }
         FlashTextCard(deviceText, "No device samples yet.")
 
+        // RUN LOG
         CategoryHeader("RUN LOG")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Lines (${state.runLog.size})",
+                color = InkPrimary,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            FlashSmallButton(if (state.runLogRecording) "Stop" else "Start", onToggleRunLogRecording)
+            FlashSmallButton("Clear", onClearRunLog)
+            FlashSmallButton("Export CSV") { onExportCsv("protocol-flash-runlog.txt", state.runLog.joinToString("\n")) }
+        }
         FlashTextCard(state.runLog.joinToString("\n"), "No run log yet.")
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -183,7 +223,7 @@ private fun FlashGate(onContinue: () -> Unit, onClose: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FlashSmallButton("Close", onClose)
+            FlashCloseButton(onClose)
         }
         CategoryHeader("FLASH TOOLS")
         Text(
@@ -193,6 +233,89 @@ private fun FlashGate(onContinue: () -> Unit, onClose: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium
         )
         FlashButton("Continue", onContinue)
+    }
+}
+
+// Canvas X close button — matches CloseButton in ProtocolHeader.
+@Composable
+private fun FlashCloseButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .size(width = 44.dp, height = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.size(22.dp)) {
+            val stroke = 2.5f.dp.toPx()
+            drawLine(
+                color = Accent,
+                start = Offset(size.width * 0.18f, size.height * 0.18f),
+                end = Offset(size.width * 0.82f, size.height * 0.82f),
+                strokeWidth = stroke
+            )
+            drawLine(
+                color = Accent,
+                start = Offset(size.width * 0.82f, size.height * 0.18f),
+                end = Offset(size.width * 0.18f, size.height * 0.82f),
+                strokeWidth = stroke
+            )
+        }
+    }
+}
+
+// Hamburger menu — same bar style as ProtocolHeader, flash-specific items (all unwired).
+@Composable
+private fun FlashHamburgerMenu() {
+    var expanded by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .clickable { expanded = true }
+            .size(width = 44.dp, height = 32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .width(22.dp)
+                        .height(2.dp)
+                        .background(Accent)
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(SurfaceBg)
+                .border(BorderStroke(1.dp, Accent))
+        ) {
+            listOf("Airplane Mode", "Wake Lock", "Developer Mode").forEach { label ->
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "OFF",
+                                color = NeutralGray,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    onClick = { expanded = false }
+                )
+            }
+        }
     }
 }
 
@@ -210,7 +333,7 @@ private fun FlashTrafficCard(events: List<FlashTrafficEvent>) {
         }
         if (events.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(320.dp).padding(12.dp),
+                modifier = Modifier.fillMaxWidth().height(380.dp).padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -224,7 +347,7 @@ private fun FlashTrafficCard(events: List<FlashTrafficEvent>) {
         }
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth().height(320.dp).padding(8.dp)
+            modifier = Modifier.fillMaxWidth().height(380.dp).padding(8.dp)
         ) {
             items(events) { e -> FlashTrafficEventRow(e) }
         }
@@ -250,7 +373,7 @@ private fun FlashTrafficEventRow(event: FlashTrafficEvent) {
 }
 
 @Composable
-private fun FlashTextCard(text: String, emptyMsg: String) {
+private fun FlashTextCard(text: String, emptyMsg: String, height: Dp = 380.dp) {
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
@@ -260,7 +383,7 @@ private fun FlashTextCard(text: String, emptyMsg: String) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
+                .height(height)
                 .padding(10.dp)
                 .verticalScroll(rememberScrollState())
         ) {
@@ -311,7 +434,7 @@ private fun FlashSmallButton(text: String, onClick: () -> Unit) {
         colors = ButtonDefaults.buttonColors(containerColor = SurfaceBg, contentColor = Color.White),
         shape = y2kCornerShape(),
         border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
     }

@@ -32,6 +32,8 @@ object FlashTrafficLog {
     private val _events = MutableStateFlow<List<FlashTrafficEvent>>(emptyList())
     val events: StateFlow<List<FlashTrafficEvent>> = _events.asStateFlow()
 
+    @Volatile var recording: Boolean = true
+
     fun recordWrite(bytes: ByteArray) = record(FlashTrafficEvent.Direction.OUT, bytes)
     fun recordRead(bytes: ByteArray) = record(FlashTrafficEvent.Direction.IN, bytes)
 
@@ -40,6 +42,7 @@ object FlashTrafficLog {
     }
 
     private fun record(direction: FlashTrafficEvent.Direction, bytes: ByteArray) {
+        if (!recording) return
         if (bytes.isEmpty()) return
         val event = FlashTrafficEvent(
             timestampMs = System.currentTimeMillis(),

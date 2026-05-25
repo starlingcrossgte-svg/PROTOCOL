@@ -76,8 +76,13 @@ fun ProtocolScreen(
     onShareSavedSession: () -> Unit,
     flashState: FlashUiState,
     onFlashTestConnection: () -> Unit,
-    onFlashCopyCsv: (String) -> Unit,
     onFlashExportCsv: (String, String) -> Unit,
+    onFlashToggleTrafficRecording: () -> Unit,
+    onFlashClearTrafficLog: () -> Unit,
+    onFlashToggleDeviceRecording: () -> Unit,
+    onFlashClearDeviceLog: () -> Unit,
+    onFlashToggleRunLogRecording: () -> Unit,
+    onFlashClearRunLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -228,8 +233,13 @@ fun ProtocolScreen(
                         state = flashState,
                         onTestConnection = onFlashTestConnection,
                         onClose = onCloseSubPage,
-                        onCopyCsv = onFlashCopyCsv,
-                        onExportCsv = onFlashExportCsv
+                        onExportCsv = onFlashExportCsv,
+                        onToggleTrafficRecording = onFlashToggleTrafficRecording,
+                        onClearTrafficLog = onFlashClearTrafficLog,
+                        onToggleDeviceRecording = onFlashToggleDeviceRecording,
+                        onClearDeviceLog = onFlashClearDeviceLog,
+                        onToggleRunLogRecording = onFlashToggleRunLogRecording,
+                        onClearRunLog = onFlashClearRunLog
                     )
                     SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)

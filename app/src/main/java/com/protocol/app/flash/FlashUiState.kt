@@ -14,7 +14,10 @@ data class FlashUiState(
     val identity: FlashIdentify.Identity? = null,
     val health: FlashSafety.DeviceHealth? = null,
     val deviceLog: List<DeviceSample> = emptyList(),
-    val runLog: List<String> = emptyList()
+    val runLog: List<String> = emptyList(),
+    val trafficRecording: Boolean = true,
+    val deviceRecording: Boolean = true,
+    val runLogRecording: Boolean = true
 ) {
     enum class Phase { Idle, Connecting, Identifying, Done, Failed }
 }

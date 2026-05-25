@@ -179,8 +179,13 @@ class Protocol : ComponentActivity() {
                     onShareSavedSession = { launchShareSavedSession() },
                     flashState = flashState,
                     onFlashTestConnection = { flashViewModel.testConnection() },
-                    onFlashCopyCsv = { text -> copyFlashCsv(text) },
-                    onFlashExportCsv = { name, text -> exportFlashCsv(name, text) }
+                    onFlashExportCsv = { name, text -> exportFlashCsv(name, text) },
+                    onFlashToggleTrafficRecording = { flashViewModel.toggleTrafficRecording() },
+                    onFlashClearTrafficLog = { flashViewModel.clearTrafficLog() },
+                    onFlashToggleDeviceRecording = { flashViewModel.toggleDeviceRecording() },
+                    onFlashClearDeviceLog = { flashViewModel.clearDeviceLog() },
+                    onFlashToggleRunLogRecording = { flashViewModel.toggleRunLogRecording() },
+                    onFlashClearRunLog = { flashViewModel.clearRunLog() }
                 )
             }
         }
@@ -349,14 +354,6 @@ class Protocol : ComponentActivity() {
     private fun launchExportLog() {
         pendingExportText = ProtocolLogFormatter.formatForExport(viewModel.uiState.value)
         exportLogLauncher.launch(ProtocolLogFormatter.suggestedExportFileName())
-    }
-
-    // Flash silo CSV: copy to clipboard (paste anywhere) or export to a file
-    // (move to laptop). Reuses the same clipboard + CreateDocument plumbing.
-    private fun copyFlashCsv(text: String) {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("PROTOCOL Flash CSV", text))
-        Toast.makeText(this, "Copied CSV to clipboard", Toast.LENGTH_SHORT).show()
     }
 
     private fun exportFlashCsv(filename: String, text: String) {

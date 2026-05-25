@@ -50,12 +50,10 @@ class FlashViewModel(app: Application) : AndroidViewModel(app) {
         healthJob = viewModelScope.launch {
             while (isActive) {
                 val h = withContext(Dispatchers.IO) { safety.readHealth() }
-                _uiState.update {
+                _uiState.update { s ->
                     val sample = DeviceSample(System.currentTimeMillis(), h)
-                    it.copy(
-                        health = h,
-                        deviceLog = (it.deviceLog + sample).takeLast(MAX_DEVICE_LOG)
-                    )
+                    val newLog = if (s.deviceRecording) (s.deviceLog + sample).takeLast(MAX_DEVICE_LOG) else s.deviceLog
+                    s.copy(health = h, deviceLog = newLog)
                 }
                 delay(HEALTH_POLL_MS)
             }
@@ -88,6 +86,26 @@ class FlashViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    fun toggleTrafficRecording() {
+        val next = !FlashTrafficLog.recording
+        FlashTrafficLog.recording = next
+        _uiState.update { it.copy(trafficRecording = next) }
+    }
+
+    fun clearTrafficLog() = FlashTrafficLog.clear()
+
+    fun toggleDeviceRecording() =
+        _uiState.update { it.copy(deviceRecording = !it.deviceRecording) }
+
+    fun clearDeviceLog() =
+        _uiState.update { it.copy(deviceLog = emptyList()) }
+
+    fun toggleRunLogRecording() =
+        _uiState.update { it.copy(runLogRecording = !it.runLogRecording) }
+
+    fun clearRunLog() =
+        _uiState.update { it.copy(runLog = emptyList()) }
 
     override fun onCleared() {
         healthJob?.cancel()
@@ -144,8 +162,10 @@ class FlashViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun setState(reducer: (FlashUiState) -> FlashUiState) = _uiState.update(reducer)
 
-    private fun log(line: String) =
+    private fun log(line: String) {
+        if (!_uiState.value.runLogRecording) return
         _uiState.update { it.copy(runLog = (it.runLog + line).takeLast(MAX_LOG)) }
+    }
 
     private fun logIdentity(id: FlashIdentify.Identity) {
         log("ECU responding: ${if (id.ecuResponding) "YES" else "no"}")
