@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModelProvider
 import com.protocol.app.UsbPermissionHelper
+import com.protocol.app.flash.FlashViewModel
 import com.protocol.app.openport2.OpenPort2SessionResult
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import java.nio.charset.StandardCharsets
@@ -40,6 +41,7 @@ class Protocol : ComponentActivity() {
     }
 
     private lateinit var viewModel: ProtocolViewModel
+    private lateinit var flashViewModel: FlashViewModel
     private lateinit var usbManager: UsbManager
     private lateinit var usbPermissionHelper: UsbPermissionHelper
     private lateinit var sessionManager: OpenPort2UsbSessionManager
@@ -113,6 +115,7 @@ class Protocol : ComponentActivity() {
         )
 
         viewModel = ViewModelProvider(this)[ProtocolViewModel::class.java]
+        flashViewModel = ViewModelProvider(this)[FlashViewModel::class.java]
         viewModel.attachSessionManager(sessionManager)
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
@@ -125,6 +128,7 @@ class Protocol : ComponentActivity() {
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
+            val flashState by flashViewModel.uiState.collectAsState()
 
             val colors = darkColorScheme(
                 primary = Color(0xFFFF6A00),
@@ -172,7 +176,10 @@ class Protocol : ComponentActivity() {
                     onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
                     onSelectVehicle = { id -> viewModel.selectVehicle(id) },
                     onDeleteVehicle = { id -> viewModel.deleteVehicle(id) },
-                    onShareSavedSession = { launchShareSavedSession() }
+                    onShareSavedSession = { launchShareSavedSession() },
+                    flashState = flashState,
+                    onFlashTestConnection = { flashViewModel.testConnection() },
+                    onFlashRefreshHealth = { flashViewModel.refreshHealth() }
                 )
             }
         }

@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import com.protocol.app.flash.FlashPage
+import com.protocol.app.flash.FlashUiState
 
 /**
  * Top-level composable for the PROTOCOL app. Lays out the three-layer
@@ -72,6 +74,9 @@ fun ProtocolScreen(
     onSelectVehicle: (id: String) -> Unit,
     onDeleteVehicle: (id: String) -> Unit,
     onShareSavedSession: () -> Unit,
+    flashState: FlashUiState,
+    onFlashTestConnection: () -> Unit,
+    onFlashRefreshHealth: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -216,7 +221,12 @@ fun ProtocolScreen(
                         onCopyProbeLog = onCopyLog,
                         onExportProbeLog = onExportLog
                     )
-                    SubPage.Flash, SubPage.Diagnostics, SubPage.Tuning ->
+                    SubPage.Flash -> FlashPage(
+                        state = flashState,
+                        onTestConnection = onFlashTestConnection,
+                        onRefreshHealth = onFlashRefreshHealth
+                    )
+                    SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)
                 }
             }
