@@ -50,7 +50,13 @@ class FlashViewModel(app: Application) : AndroidViewModel(app) {
         healthJob = viewModelScope.launch {
             while (isActive) {
                 val h = withContext(Dispatchers.IO) { safety.readHealth() }
-                _uiState.update { it.copy(health = h) }
+                _uiState.update {
+                    val sample = DeviceSample(System.currentTimeMillis(), h)
+                    it.copy(
+                        health = h,
+                        deviceLog = (it.deviceLog + sample).takeLast(MAX_DEVICE_LOG)
+                    )
+                }
                 delay(HEALTH_POLL_MS)
             }
         }
@@ -80,14 +86,6 @@ class FlashViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 setBusy(false)
             }
-        }
-    }
-
-    /** Re-read device health immediately (e.g. a manual refresh tap). */
-    fun refreshHealth() {
-        viewModelScope.launch {
-            val h = withContext(Dispatchers.IO) { safety.readHealth() }
-            _uiState.update { it.copy(health = h) }
         }
     }
 
@@ -160,5 +158,6 @@ class FlashViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         private const val HEALTH_POLL_MS = 1000L
         private const val MAX_LOG = 300
+        private const val MAX_DEVICE_LOG = 600
     }
 }

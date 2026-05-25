@@ -76,7 +76,8 @@ fun ProtocolScreen(
     onShareSavedSession: () -> Unit,
     flashState: FlashUiState,
     onFlashTestConnection: () -> Unit,
-    onFlashRefreshHealth: () -> Unit,
+    onFlashCopyCsv: (String) -> Unit,
+    onFlashExportCsv: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -138,7 +139,9 @@ fun ProtocolScreen(
             // estate — important on split-screen and in-dash setups.
             val onLiveDataRoot = uiState.activeSubPage == null &&
                 pagerState.currentPage == 1
-            if (!onLiveDataRoot) {
+            // Flash page hides the shared header + logo too (user request).
+            val onFlashPage = uiState.activeSubPage == SubPage.Flash
+            if (!onLiveDataRoot && !onFlashPage) {
                 ProtocolHeader(
                     subPageTitle = subPageTitle,
                     showHamburger = false,
@@ -224,7 +227,9 @@ fun ProtocolScreen(
                     SubPage.Flash -> FlashPage(
                         state = flashState,
                         onTestConnection = onFlashTestConnection,
-                        onRefreshHealth = onFlashRefreshHealth
+                        onClose = onCloseSubPage,
+                        onCopyCsv = onFlashCopyCsv,
+                        onExportCsv = onFlashExportCsv
                     )
                     SubPage.Diagnostics, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)

@@ -28,6 +28,7 @@ class FlashBulkIo(private val session: FlashUsbSession) {
             session.endpointOut, packet, packet.size, WRITE_TIMEOUT_MS
         )
         if (result < 0) throw FlashUsbException("write failed (bulkTransfer=$result)")
+        FlashTrafficLog.recordWrite(packet)
         return result
     }
 
@@ -70,6 +71,7 @@ class FlashBulkIo(private val session: FlashUsbSession) {
             val buffer = ByteArray(READ_CHUNK_SIZE)
             val received = session.connection.bulkTransfer(session.endpointIn, buffer, buffer.size, pollMs)
             if (received > 0) {
+                FlashTrafficLog.recordRead(buffer.copyOfRange(0, received))
                 for (i in 0 until received) accumulated.add(buffer[i])
                 val snapshot = accumulated.toByteArray()
                 if (predicate(snapshot)) return ReadResult(snapshot, matched = true)
@@ -98,6 +100,22 @@ object FlashHex {
         for (b in bytes) {
             if (sb.isNotEmpty()) sb.append(' ')
             sb.append(String.format("%02X", b.toInt() and 0xFF))
+        }
+        return sb.toString()
+    }
+
+    fun bytesToPrintableAscii(bytes: ByteArray): String {
+        val sb = StringBuilder(bytes.size)
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            sb.append(
+                when {
+                    v == 0x0D -> "\\r"
+                    v == 0x0A -> "\\n"
+                    v in 0x20..0x7E -> v.toChar().toString()
+                    else -> "[%02X]".format(v)
+                }
+            )
         }
         return sb.toString()
     }
