@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.protocol.app.obdlink.ObdLinkTrafficEvent
+import com.protocol.app.obdlink.ObdLinkTrafficLog
 import com.protocol.app.openport2.TrafficEvent
 import com.protocol.app.openport2.UsbTrafficLog
 import java.text.SimpleDateFormat
@@ -60,6 +62,7 @@ internal fun DeveloperBody(
     onExportProbeLog: () -> Unit
 ) {
     val trafficEvents by UsbTrafficLog.events.collectAsState()
+    val btEvents by ObdLinkTrafficLog.events.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -121,6 +124,92 @@ internal fun DeveloperBody(
             DevSmallButton(text = "Clear Traffic", onClick = { UsbTrafficLog.clear() })
         }
         TrafficLogCard(trafficEvents)
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ── OBDLink Bluetooth traffic ──────────────────────────────
+        // ELM/STN ASCII exchanges over the MX+ (handshake + SSM2-over-CAN
+        // polling). The in-app replacement for Wireshark, which USBPcap
+        // keeps blocking on the OBDLink. Sourced from ObdLinkTrafficLog.
+        CategoryHeader("OBDLINK BT TRAFFIC")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Events (${btEvents.size})",
+                color = InkPrimary,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            DevSmallButton(text = "Clear BT", onClick = { ObdLinkTrafficLog.clear() })
+        }
+        ObdLinkTrafficLogCard(btEvents)
+    }
+}
+
+@Composable
+private fun ObdLinkTrafficLogCard(events: List<ObdLinkTrafficEvent>) {
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
+        border = BorderStroke(1.dp, BorderGray),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        val listState = rememberLazyListState()
+        LaunchedEffect(events.size) {
+            if (events.isNotEmpty()) listState.animateScrollToItem(events.size - 1)
+        }
+        if (events.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(300.dp).padding(12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "No OBDLink traffic yet. Turn on Bluetooth (OBDLink) and read live data.",
+                    color = NeutralGray,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            return@Card
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().height(300.dp).padding(8.dp)
+        ) {
+            items(events) { event -> ObdLinkTrafficEventRow(event) }
+        }
+    }
+}
+
+@Composable
+private fun ObdLinkTrafficEventRow(event: ObdLinkTrafficEvent) {
+    val isOut = event.direction == ObdLinkTrafficEvent.Direction.OUT
+    val arrow = if (isOut) "→" else "←"
+    val arrowColor = if (isOut) Accent else PassGreen
+    val ts = trafficTimeFmt.format(Date(event.timestampMs))
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(text = ts, color = NeutralGray, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+        Text(
+            text = "  $arrow  ",
+            color = arrowColor,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp
+        )
+        Text(
+            text = event.text,
+            color = Color.White,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 
