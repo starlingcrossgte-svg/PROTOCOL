@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.protocol.app.flash.engine.CanFlashSession
 import com.protocol.app.flash.engine.FlashBulkIo
 import com.protocol.app.flash.engine.FlashIdentify
+import com.protocol.app.flash.engine.FlashTrafficLog
 import com.protocol.app.flash.engine.FlashUsbException
 import com.protocol.app.flash.engine.FlashUsbResult
 import com.protocol.app.flash.engine.FlashUsbSessionManager
