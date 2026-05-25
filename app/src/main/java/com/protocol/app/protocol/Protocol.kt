@@ -89,6 +89,33 @@ class Protocol : ComponentActivity() {
         )
     }
 
+    // OBDLink Bluetooth: when the toggle flips ON, request BLUETOOTH_CONNECT
+    // (API 31+) then connect. Denied -> flip the setting back off so the menu
+    // reflects reality and nothing tries to connect.
+    private val btPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted: Boolean ->
+        if (granted) {
+            viewModel.connectObdLink(applicationContext)
+        } else {
+            viewModel.setObdLinkEnabled(false)
+            Toast.makeText(this, "Bluetooth permission denied", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun onObdLinkToggle(on: Boolean) {
+        viewModel.setObdLinkEnabled(on)
+        if (!on) return // setObdLinkEnabled(false) already disconnects
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            btPermissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            viewModel.connectObdLink(applicationContext)
+        }
+    }
+
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent == null) return
@@ -172,7 +199,7 @@ class Protocol : ComponentActivity() {
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSplitScreenChange = { on -> viewModel.setSplitScreenMode(on) },
-                    onObdLinkChange = { on -> viewModel.setObdLinkEnabled(on) },
+                    onObdLinkChange = { on -> onObdLinkToggle(on) },
                     onResetLayout = { viewModel.resetLayout() },
                     onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
                     onSelectVehicle = { id -> viewModel.selectVehicle(id) },

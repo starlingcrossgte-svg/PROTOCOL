@@ -65,6 +65,10 @@ class ProtocolViewModel : ViewModel() {
     // can hand it a fresh PID set without restarting the flow (so gauges
     // don't flicker when the user toggles a parameter while reading live).
     private var runningPoller: Ssm2Poller? = null
+    // OBDLink (Bluetooth) live path — parallel to the USB poller, selected per
+    // run when the toggle is ON and the BT link is connected. USB path untouched.
+    private var runningObdSource: com.protocol.app.obdlink.ObdLinkLiveSource? = null
+    private var obdLinkManager: com.protocol.app.obdlink.ObdLinkBtManager? = null
     private var layoutStore: GaugeLayoutStore? = null
     private var backgroundStore: BackgroundStore? = null
     private var settingsStore: SettingsStore? = null
@@ -151,7 +155,56 @@ class ProtocolViewModel : ViewModel() {
      * instantiated and no connection of any kind is attempted. Stage 2 wires
      * the actual BT source behind this flag.
      */
-    fun setObdLinkEnabled(on: Boolean) = updateSettings { it.copy(obdLinkEnabled = on) }
+    fun setObdLinkEnabled(on: Boolean) {
+        updateSettings { it.copy(obdLinkEnabled = on) }
+        if (!on) disconnectObdLink()
+    }
+
+    /**
+     * Connect the *paired* OBDLink over Bluetooth. The caller (Activity) must
+     * have granted BLUETOOTH_CONNECT first. Runs off the main thread; on success
+     * the connection status flips to Connected and Read/Log Live route here.
+     * No-op unless the toggle is ON (defense in depth on the off-guarantee).
+     */
+    fun connectObdLink(appContext: android.content.Context) {
+        if (!_uiState.value.settings.obdLinkEnabled) return
+        setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Connecting to OBDLink…")
+        viewModelScope.launch(Dispatchers.IO) {
+            val mgr = obdLinkManager
+                ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
+            when (val r = mgr.connect()) {
+                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Connected ->
+                    setConnectionStatus(ConnectionStatus.Connected(r.deviceLabel), "Connected to ${r.deviceLabel}")
+                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Failure -> {
+                    obdLinkManager?.disconnect()
+                    obdLinkManager = null
+                    setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+                }
+            }
+        }
+    }
+
+    /** Tear down the OBDLink link. Safe whether or not it's connected; leaves a
+     *  live USB session (if any) untouched. */
+    fun disconnectObdLink() {
+        val wasObd = runningObdSource != null
+        if (wasObd) {
+            runJob?.cancel()
+            runJob = null
+            runningObdSource = null
+        }
+        obdLinkManager?.disconnect()
+        obdLinkManager = null
+        if (openSession == null) {
+            _uiState.value = _uiState.value.copy(
+                isReadingLive = if (wasObd) false else _uiState.value.isReadingLive,
+                isLogging = if (wasObd) false else _uiState.value.isLogging,
+                liveValues = if (wasObd) emptyMap() else _uiState.value.liveValues,
+                connectionStatus = ConnectionStatus.NoDevice,
+                statusMessage = "OBDLink disconnected"
+            )
+        }
+    }
 
     fun attachSessionLogStore(store: SessionLogStore) {
         sessionLogStore = store
@@ -246,10 +299,9 @@ class ProtocolViewModel : ViewModel() {
         layoutStore?.save(next)
         // If a poll flow is running, hand it the new PID set without
         // tearing down — the next cycle picks it up automatically.
-        runningPoller?.let { poller ->
-            val newPids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in next.pidIds }
-            poller.updatePids(newPids)
-        }
+        val livePids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in next.pidIds }
+        runningPoller?.updatePids(livePids)
+        runningObdSource?.updatePids(livePids)
     }
 
     /** Add a gauge for [pidId] to the Live Data page if not already present. */
@@ -404,13 +456,16 @@ class ProtocolViewModel : ViewModel() {
             }
             return
         }
-        openSession ?: run {
-            _uiState.value = state.copy(statusMessage = "No OpenPort session — discover and grant USB permission first")
-            return
-        }
-        val client = tactrixClient ?: run {
-            _uiState.value = state.copy(statusMessage = "No adapter client — reconnect the OpenPort")
-            return
+        val useObdLink = state.settings.obdLinkEnabled && (obdLinkManager?.isConnected() == true)
+        if (!useObdLink) {
+            openSession ?: run {
+                _uiState.value = state.copy(statusMessage = "No OpenPort session — discover and grant USB permission first")
+                return
+            }
+            if (tactrixClient == null) {
+                _uiState.value = state.copy(statusMessage = "No adapter client — reconnect the OpenPort")
+                return
+            }
         }
 
         // Only poll PIDs the user has placed on the Live Data page —
@@ -431,39 +486,73 @@ class ProtocolViewModel : ViewModel() {
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
             sessionLog = if (recordToLog) emptyList() else state.sessionLog,
-            statusMessage = if (client.channelInitialized) "Reusing channel..." else "Initializing channel..."
+            statusMessage = when {
+                useObdLink -> "Connecting OBDLink…"
+                tactrixClient?.channelInitialized == true -> "Reusing channel..."
+                else -> "Initializing channel..."
+            }
         )
 
         val pollIntervalMs = state.settings.pollIntervalMs.toLong()
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
-            client.drainResponseBuffer()
-            client.resetRequestIdCounter(startFrom = 2)
-
-            val probe = Ssm2EcmProbe(client)
-            val initLog = mutableListOf<TactrixCommandLog>()
-            val ok = probe.initializeChannel(initLog)
-
-            if (!ok) {
+            val sampleFlow: kotlinx.coroutines.flow.Flow<com.protocol.app.openport2.PollSample> = if (useObdLink) {
+                // OBDLink (Bluetooth) path — ELM channel already set up by the
+                // manager on connect; just build the SSM2-over-CAN poll source.
+                val transport = obdLinkManager?.transport
+                if (transport == null) {
+                    _uiState.value = _uiState.value.copy(
+                        isReadingLive = false,
+                        isLogging = false,
+                        statusMessage = "OBDLink not connected — turn Bluetooth on first"
+                    )
+                    return@launch
+                }
+                val src = com.protocol.app.obdlink.ObdLinkLiveSource(transport, pidsOnPage)
+                runningObdSource = src
                 _uiState.value = _uiState.value.copy(
-                    isReadingLive = false,
-                    isLogging = false,
-                    statusMessage = "Channel init failed — check connection and retry"
+                    statusMessage = if (_uiState.value.isLogging)
+                        "Logging live data (OBDLink)..."
+                    else
+                        "Reading live data (OBDLink)..."
                 )
-                return@launch
+                src.startFlow(pollIntervalMs)
+            } else {
+                val client = tactrixClient ?: run {
+                    _uiState.value = _uiState.value.copy(
+                        isReadingLive = false,
+                        isLogging = false,
+                        statusMessage = "No adapter client — reconnect the OpenPort"
+                    )
+                    return@launch
+                }
+                client.drainResponseBuffer()
+                client.resetRequestIdCounter(startFrom = 2)
+
+                val probe = Ssm2EcmProbe(client)
+                val initLog = mutableListOf<TactrixCommandLog>()
+                if (!probe.initializeChannel(initLog)) {
+                    _uiState.value = _uiState.value.copy(
+                        isReadingLive = false,
+                        isLogging = false,
+                        statusMessage = "Channel init failed — check connection and retry"
+                    )
+                    return@launch
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    statusMessage = if (_uiState.value.isLogging)
+                        "Logging live data..."
+                    else
+                        "Reading live data..."
+                )
+
+                val poller = Ssm2Poller(client, pidsOnPage)
+                runningPoller = poller
+                poller.startFlow(pollIntervalMs)
             }
-
-            _uiState.value = _uiState.value.copy(
-                statusMessage = if (_uiState.value.isLogging)
-                    "Logging live data..."
-                else
-                    "Reading live data..."
-            )
-
-            val poller = Ssm2Poller(client, pidsOnPage)
-            runningPoller = poller
             try {
-                poller.startFlow(pollIntervalMs).collect { sample ->
+                sampleFlow.collect { sample ->
                     val current = _uiState.value
                     val maxRows = current.settings.sessionLogMaxSize
                     val nextSessionLog = if (current.isLogging) {
@@ -523,6 +612,7 @@ class ProtocolViewModel : ViewModel() {
                 // Coroutine cancelled — fall through to finally
             } finally {
                 runningPoller = null
+                runningObdSource = null
                 // Drop the last-known values so gauges revert to "--" when
                 // polling stops for any reason. Showing stale numbers after
                 // a stop is misleading. Min/max also reset so the next
