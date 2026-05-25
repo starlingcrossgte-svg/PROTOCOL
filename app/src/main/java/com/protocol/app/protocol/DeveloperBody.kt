@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -31,6 +32,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -63,6 +66,7 @@ internal fun DeveloperBody(
 ) {
     val trafficEvents by UsbTrafficLog.events.collectAsState()
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
+    val clipboard = LocalClipboardManager.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -144,6 +148,9 @@ internal fun DeveloperBody(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
+            DevSmallButton(text = "Copy BT", onClick = {
+                clipboard.setText(AnnotatedString(formatBtLog(btEvents)))
+            })
             DevSmallButton(text = "Clear BT", onClick = { ObdLinkTrafficLog.clear() })
         }
         ObdLinkTrafficLogCard(btEvents)
@@ -176,11 +183,13 @@ private fun ObdLinkTrafficLogCard(events: List<ObdLinkTrafficEvent>) {
             }
             return@Card
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxWidth().height(300.dp).padding(8.dp)
-        ) {
-            items(events) { event -> ObdLinkTrafficEventRow(event) }
+        SelectionContainer {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth().height(300.dp).padding(8.dp)
+            ) {
+                items(events) { event -> ObdLinkTrafficEventRow(event) }
+            }
         }
     }
 }
@@ -325,3 +334,9 @@ private fun DevSmallButton(
 }
 
 private val trafficTimeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+private fun formatBtLog(events: List<ObdLinkTrafficEvent>): String =
+    events.joinToString("\n") { e ->
+        val arrow = if (e.direction == ObdLinkTrafficEvent.Direction.OUT) "->" else "<-"
+        "${trafficTimeFmt.format(Date(e.timestampMs))} $arrow ${e.text}"
+    }
