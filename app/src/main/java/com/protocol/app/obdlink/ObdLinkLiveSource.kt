@@ -50,18 +50,34 @@ class ObdLinkLiveSource(
         if (addresses.isEmpty()) return null
 
         val wireStart = System.currentTimeMillis()
-        val requestHex = ObdLinkSsm2Can.toElmHex(ObdLinkSsm2Can.buildReadPayload(addresses))
-        val ascii = try {
-            transport.sendAscii(requestHex, timeoutMs = 1000L)
-        } catch (e: Exception) {
-            return null // dropped link / I/O — treated as a miss; manager handles reconnect
-        }
-        val replyBytes = ObdLinkSsm2Can.parseElmHex(ascii)
-        val raw = ObdLinkSsm2Can.parseReadResponse(replyBytes, addresses.size) ?: return null
-        val wireMs = System.currentTimeMillis() - wireStart
 
+        // One address per request so each is a single CAN frame
+        // (A8 00 + 3-byte addr = 5 bytes <= 7). Batching every address into one
+        // A8 forces a multi-frame ISO-TP *send*, which ELM/STN rejects with '?'.
+        // Single-frame reads are reliable; we trade speed for correctness here.
+        val raw = IntArray(addresses.size)
+        var anyOk = false
+        for ((i, addr) in addresses.withIndex()) {
+            val reqHex = ObdLinkSsm2Can.toElmHex(ObdLinkSsm2Can.buildReadPayload(listOf(addr)))
+            val ascii = try {
+                transport.sendAscii(reqHex, timeoutMs = 600L)
+            } catch (e: Exception) {
+                return if (anyOk) buildSample(pids, raw, wireStart) else null
+            }
+            val one = ObdLinkSsm2Can.parseReadResponse(ObdLinkSsm2Can.parseElmHex(ascii), 1)
+            if (one != null) {
+                raw[i] = one[0]
+                anyOk = true
+            }
+            // A failed address stays 0; its '?' / NO DATA is visible in the BT log.
+        }
+        if (!anyOk) return null
+        return buildSample(pids, raw, wireStart)
+    }
+
+    private fun buildSample(pids: List<Ssm2Pid>, raw: IntArray, wireStart: Long): PollSample {
         val values = HashMap<String, Double>()
-        val rawValues = ArrayList<Int>(addresses.size)
+        val rawValues = ArrayList<Int>(raw.size)
         var offset = 0
         for (pid in pids) {
             val slice = raw.copyOfRange(offset, offset + pid.addresses.size)
@@ -69,12 +85,11 @@ class ObdLinkLiveSource(
             rawValues.addAll(slice.toList())
             offset += pid.addresses.size
         }
-
         return PollSample(
             timestampMs = System.currentTimeMillis(),
             values = values,
             rawValues = rawValues.toIntArray(),
-            wireMs = wireMs,
+            wireMs = System.currentTimeMillis() - wireStart,
             ecmOk = true,
             tcmOk = true
         )

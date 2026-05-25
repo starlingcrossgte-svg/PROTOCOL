@@ -148,6 +148,7 @@ class ObdLinkBtManager(context: Context) {
             "ATL0",         // linefeeds off
             "ATS0",         // spaces off
             "ATH0",         // headers off (ATCRA filters to 7E8, so the reply is ECM-only)
+            "ATAL",         // allow long (>7 byte) messages — needed for any ISO-TP multi-frame
             "ATSP6",        // ISO 15765-4 CAN, 11-bit, 500 kbps
             "ATSH7E0",      // tester -> ECU header
             "ATCRA7E8",     // accept only ECU -> tester
