@@ -1,6 +1,7 @@
 package com.protocol.app.obdlink
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.Context
@@ -40,24 +41,42 @@ class ObdLinkBtManager(context: Context) {
      */
     @SuppressLint("MissingPermission") // caller guarantees BLUETOOTH_CONNECT is granted
     fun connect(): ConnectResult {
+        // Every phase is logged to the BT log so a failed/hung connect is
+        // visible on the Developer page instead of a silent "nothing happened".
+        fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
+
         val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
             ?: return ConnectResult.Failure("No Bluetooth adapter on this device")
-        if (!adapter.isEnabled) return ConnectResult.Failure("Bluetooth is turned off")
+        if (!adapter.isEnabled) {
+            info("Bluetooth is OFF")
+            return ConnectResult.Failure("Bluetooth is turned off")
+        }
 
-        val device = try {
-            adapter.bondedDevices?.firstOrNull {
-                val n = it.name ?: ""
-                n.contains("OBDLink", ignoreCase = true) || n.contains("OBD", ignoreCase = true)
-            }
+        val bonded = try {
+            adapter.bondedDevices?.toList() ?: emptyList()
         } catch (e: SecurityException) {
             return ConnectResult.Failure("Bluetooth permission not granted")
-        } ?: return ConnectResult.Failure("No paired OBDLink — pair it in Android Bluetooth settings first")
+        }
+        info("paired: " + if (bonded.isEmpty()) "(none)" else bonded.joinToString { it.name ?: "?" })
+        val device = bonded.firstOrNull { (it.name ?: "").contains("OBD", ignoreCase = true) }
+            ?: return ConnectResult.Failure("No paired OBDLink — pair the MX+ in Android Bluetooth settings first")
+        info("target: ${device.name}")
 
+        // cancelDiscovery() needs BLUETOOTH_SCAN on API 31+, which we don't
+        // request (paired-only, no scanning). It's only a connect-speed
+        // optimization, so swallow any SecurityException instead of letting
+        // it abort the whole connect (the original bug: it surfaced as a
+        // bogus "permission denied").
+        try { adapter.cancelDiscovery() } catch (_: Exception) {}
+
+        val sock = openSocket(device, ::info)
+            ?: run {
+                disconnect()
+                return ConnectResult.Failure("Couldn't open a Bluetooth socket to ${device.name} — see BT log")
+            }
+        socket = sock
+        info("socket OPEN — starting ELM setup")
         return try {
-            adapter.cancelDiscovery()
-            val sock = device.createRfcommSocketToServiceRecord(SPP_UUID)
-            sock.connect() // blocking; caller runs this off the main thread
-            socket = sock
             val t = ObdLinkBtTransport(
                 input = sock.inputStream,
                 output = sock.outputStream,
@@ -66,13 +85,50 @@ class ObdLinkBtManager(context: Context) {
             transport = t
             initElmForSsm2Can(t)
             ConnectResult.Connected(device.name ?: "OBDLink")
-        } catch (e: SecurityException) {
-            disconnect()
-            ConnectResult.Failure("Bluetooth permission denied")
         } catch (e: Exception) {
             disconnect()
-            ConnectResult.Failure(e.message ?: "Bluetooth connect failed")
+            ConnectResult.Failure(e.message ?: "ELM setup failed after connect")
         }
+    }
+
+    /**
+     * Open an RFCOMM socket, trying the three approaches that between them
+     * cover nearly every Android/adapter combo: secure SPP, insecure SPP,
+     * then the reflection channel-1 fallback (the classic workaround for
+     * adapters whose SDP-record connect fails). Each attempt is logged so a
+     * failure shows up in the BT log instead of vanishing.
+     */
+    @SuppressLint("MissingPermission")
+    private fun openSocket(device: BluetoothDevice, info: (String) -> Unit): BluetoothSocket? {
+        try {
+            info("try secure RFCOMM…")
+            val s = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            s.connect()
+            info("secure RFCOMM connected")
+            return s
+        } catch (e: Exception) {
+            info("secure failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+        try {
+            info("try insecure RFCOMM…")
+            val s = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+            s.connect()
+            info("insecure RFCOMM connected")
+            return s
+        } catch (e: Exception) {
+            info("insecure failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+        try {
+            info("try reflection createRfcommSocket(1)…")
+            val m = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+            val s = m.invoke(device, 1) as BluetoothSocket
+            s.connect()
+            info("reflection RFCOMM connected")
+            return s
+        } catch (e: Exception) {
+            info("reflection failed: ${e.message ?: e.javaClass.simpleName}")
+        }
+        return null
     }
 
     /**
