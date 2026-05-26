@@ -1,72 +1,93 @@
 package com.protocol.app.obdlink
 
 /**
- * DORMANT groundwork (added 2026-05-25) — NOT wired into any UI or ViewModel
- * yet, by design. Nothing references this file; it compiles inert.
+ * General "try sequences until one works" prober for the OBDLink Bluetooth
+ * path. Drives an already-connected [ObdLinkBtTransport] and logs every step
+ * to [ObdLinkTrafficLog] (the Developer console). Reusable for init-variant
+ * hunting, address discovery, DTC-read sequences, etc.
  *
- * A general "try sequences until one works" prober for the OBDLink Bluetooth
- * path. It drives an already-connected [ObdLinkBtTransport] and logs every
- * step to [ObdLinkTrafficLog] (the Developer console), so when it IS wired up
- * later the dev page already narrates the whole run.
+ * Flow per candidate: drain the buffer -> send its setup commands -> send the
+ * probe request -> classify the reply with the caller's predicate. Stop at the
+ * FIRST hit and return it (channel left as-is for inspection); otherwise report
+ * exhausted.
  *
- * Built deliberately general — the same engine can later brute-force unknown
- * parameter addresses, try alternate DTC-read sequences, hunt init variants,
- * etc. For now it just exists, ready to be triggered from a dev-mode action.
- *
- * Flow (per the agreed design): for each candidate -> drain the adapter
- * buffer -> send its setup commands -> send its probe request -> classify the
- * reply. Stop at the FIRST hit and return it (channel left as-is so the result
- * can be inspected); otherwise report exhausted.
+ * Primary use right now: find the STN init that flips the MX+ into raw K-line
+ * mode for SSM2 on the EZ30R/3.0R. We know the SSM2 frames work (BtSsm proved
+ * it); the prober cycles candidate inits against the real ECU until it answers
+ * an SSM2 reply (header 80 F0 10) — the ECU is the pass/fail oracle.
  */
 
-/** One thing to try: a label, ELM/STN setup commands to send first, and the probe request (hex). */
+/** One thing to try: a label, ELM/STN setup commands to send first, then the probe request (hex). */
 data class ObdLinkProbeCandidate(
     val label: String,
     val setupCommands: List<String>,
     val probeRequestHex: String
 )
 
-/** Result of an auto-probe run. */
 sealed class ObdLinkProbeOutcome {
-    /** First candidate that produced a valid reply, plus the raw + parsed hex for inspection. */
     data class Hit(
         val candidate: ObdLinkProbeCandidate,
         val replyHex: String,
         val rawAscii: String
     ) : ObdLinkProbeOutcome()
 
-    /** Nothing produced a valid reply. */
     data class Exhausted(val tried: Int) : ObdLinkProbeOutcome()
 }
 
-/** Judges whether an adapter reply counts as a successful response. */
+/** Reply-success predicates for the prober. */
 object ObdLinkProbeClassifier {
     private val FAIL_TOKENS = listOf(
-        "?", "NO DATA", "STOPPED", "BUFFER FULL", "CAN ERROR", "ERROR", "UNABLE", "SEARCHING"
+        "?", "NO DATA", "STOPPED", "BUFFER FULL", "CAN ERROR", "BUS INIT: ERROR",
+        "BUS ERROR", "ERROR", "UNABLE", "SEARCHING", "ACT ALERT", "FB ERROR"
     )
 
-    /** Hit = no error token AND the stripped hex starts with [expectedCode] (e.g. 0xE8 for an A8 read). */
-    fun isHit(ascii: String, expectedCode: Int): Boolean {
+    private fun hasError(ascii: String): Boolean {
         val up = ascii.uppercase()
-        if (FAIL_TOKENS.any { up.contains(it) }) return false
+        return FAIL_TOKENS.any { up.contains(it) }
+    }
+
+    private fun containsHeader(bytes: ByteArray, b0: Int, b1: Int, b2: Int): Boolean {
+        for (i in 0..bytes.size - 3) {
+            if ((bytes[i].toInt() and 0xFF) == b0 &&
+                (bytes[i + 1].toInt() and 0xFF) == b1 &&
+                (bytes[i + 2].toInt() and 0xFF) == b2
+            ) return true
+        }
+        return false
+    }
+
+    /** CAN read hit: no error and the stripped hex starts with 0xE8 (A8 reply). */
+    fun canReadHit(ascii: String): Boolean {
+        if (hasError(ascii)) return false
         val bytes = ObdLinkSsm2Can.parseElmHex(ascii)
-        return bytes.isNotEmpty() && (bytes[0].toInt() and 0xFF) == (expectedCode and 0xFF)
+        return bytes.isNotEmpty() && (bytes[0].toInt() and 0xFF) == 0xE8
+    }
+
+    /** K-line hit: no error and the reply carries the SSM2 reply header 80 F0 10. */
+    fun klineReplyHit(ascii: String): Boolean {
+        if (hasError(ascii)) return false
+        return containsHeader(ObdLinkSsm2Can.parseElmHex(ascii), 0x80, 0xF0, 0x10)
     }
 }
 
 class ObdLinkAutoProber(private val transport: ObdLinkBtTransport) {
 
     /**
-     * Run [candidates] in order, stopping at the first hit. [expectedCode] is
-     * the response byte that marks success (0xE8 = SSM2 A8 read reply).
+     * Run [candidates] in order, stopping at the first whose reply satisfies
+     * [isHit]. Returns the winner (channel left as-is) or Exhausted.
      */
-    fun run(candidates: List<ObdLinkProbeCandidate>, expectedCode: Int = 0xE8): ObdLinkProbeOutcome {
+    fun run(
+        candidates: List<ObdLinkProbeCandidate>,
+        isHit: (String) -> Boolean,
+        setupTimeoutMs: Long = 1500L,
+        probeTimeoutMs: Long = 3000L
+    ): ObdLinkProbeOutcome {
         for (c in candidates) {
             transport.drain()
             ObdLinkTrafficLog.record("OUT", "· [probe] try: ${c.label}")
-            for (cmd in c.setupCommands) transport.sendAscii(cmd, timeoutMs = 800L)
-            val reply = transport.sendAscii(c.probeRequestHex, timeoutMs = 1000L)
-            if (ObdLinkProbeClassifier.isHit(reply, expectedCode)) {
+            for (cmd in c.setupCommands) transport.sendAscii(cmd, setupTimeoutMs)
+            val reply = transport.sendAscii(c.probeRequestHex, probeTimeoutMs)
+            if (isHit(reply)) {
                 ObdLinkTrafficLog.record("OUT", "· [probe] HIT: ${c.label}")
                 val parsedHex = ObdLinkSsm2Can.toElmHex(ObdLinkSsm2Can.parseElmHex(reply))
                 return ObdLinkProbeOutcome.Hit(c, parsedHex, reply)
@@ -77,25 +98,34 @@ class ObdLinkAutoProber(private val transport: ObdLinkBtTransport) {
     }
 }
 
-/**
- * Default candidate matrix for SSM2-over-CAN bring-up — one variable changed
- * per row, ordered by likelihood. The probe requests use a known-safe single
- * address (0x000008) and a 2-address batch to probe the multi-frame boundary;
- * when wired up these would use the page's real addresses.
- */
 object ObdLinkProbeCandidates {
-    private const val SINGLE_ADDR = "A800000008"          // A8 00 + 0x000008 (5 bytes, single frame)
-    private const val TWO_ADDR = "A80000000800001C"       // 8 bytes -> forces multi-frame
 
+    /** SSM2-over-CAN init variants (bench ECU). Probe = single-address A8 read. */
     fun ssm2CanInitMatrix(): List<ObdLinkProbeCandidate> = listOf(
-        ObdLinkProbeCandidate("A base / single addr", listOf("ATSP6", "ATSH7E0", "ATCRA7E8"), SINGLE_ADDR),
-        ObdLinkProbeCandidate("B +ATAL / single addr", listOf("ATAL", "ATSP6", "ATSH7E0", "ATCRA7E8"), SINGLE_ADDR),
-        ObdLinkProbeCandidate("C +ATCAF1 / single addr", listOf("ATCAF1", "ATSP6", "ATSH7E0", "ATCRA7E8"), SINGLE_ADDR),
-        ObdLinkProbeCandidate(
-            "D +ATAL +flowctl / 2 addr",
-            listOf("ATAL", "ATSP6", "ATSH7E0", "ATCRA7E8", "ATFCSH7E0", "ATFCSD300000", "ATFCSM1"),
-            TWO_ADDR
-        ),
-        ObdLinkProbeCandidate("E no FC override / single addr", listOf("ATFCSM0", "ATSP6", "ATSH7E0", "ATCRA7E8"), SINGLE_ADDR)
+        ObdLinkProbeCandidate("A base / single addr", listOf("ATSP6", "ATSH7E0", "ATCRA7E8"), "A800000008"),
+        ObdLinkProbeCandidate("B +ATAL / single addr", listOf("ATAL", "ATSP6", "ATSH7E0", "ATCRA7E8"), "A800000008"),
+        ObdLinkProbeCandidate("C +ATCAF1 / single addr", listOf("ATCAF1", "ATSP6", "ATSH7E0", "ATCRA7E8"), "A800000008"),
+        ObdLinkProbeCandidate("E no FC override / single addr", listOf("ATFCSM0", "ATSP6", "ATSH7E0", "ATCRA7E8"), "A800000008")
     )
+
+    /**
+     * SSM2-over-K-line init variants (EZ30R / 3.0R). Probe = the SSM2
+     * read-ECU-ID frame `80 10 F0 01 BF 40` — a hit is the ECU answering with
+     * an `80 F0 10 …` reply. Best-effort spread of ELM + STN K-line entries;
+     * the ECU confirms which one actually opens the bus in raw mode.
+     */
+    fun klineInitMatrix(): List<ObdLinkProbeCandidate> {
+        val id = "8010F001BF40"
+        fun c(label: String, vararg setup: String) = ObdLinkProbeCandidate(label, setup.toList(), id)
+        return listOf(
+            c("A ISO14230 fast (SP5)", "ATPC", "ATSP5"),
+            c("B ISO14230 5-baud (SP4)", "ATPC", "ATSP4"),
+            c("C SP5 + CAF0 (raw send)", "ATPC", "ATSP5", "ATCAF0"),
+            c("D SP4 + CAF0 (raw send)", "ATPC", "ATSP4", "ATCAF0"),
+            c("E ISO9141 (SP3)", "ATPC", "ATSP3"),
+            c("F STN STP33 + 4800", "STP33", "STPBR4800"),
+            c("G STN STP32 + 4800", "STP32", "STPBR4800"),
+            c("H SP5 + slow init (SI)", "ATPC", "ATSP5", "ATSI")
+        )
+    }
 }

@@ -132,6 +132,40 @@ class ObdLinkBtManager(context: Context) {
     }
 
     /**
+     * Connect with only a basic reset (ATZ/ATE0/ATL0/ATS0/ATAL) and NO protocol
+     * selected, leaving the adapter ready for the auto-prober to try K-line
+     * init variants on top. Used by the K-line init hunt (EZ30R/3.0R).
+     */
+    @SuppressLint("MissingPermission")
+    fun connectBasic(): ConnectResult {
+        fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
+        val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+            ?: return ConnectResult.Failure("No Bluetooth adapter on this device")
+        if (!adapter.isEnabled) return ConnectResult.Failure("Bluetooth is turned off")
+        val device = try {
+            adapter.bondedDevices?.firstOrNull { (it.name ?: "").contains("OBD", ignoreCase = true) }
+        } catch (e: SecurityException) {
+            return ConnectResult.Failure("Bluetooth permission not granted")
+        } ?: return ConnectResult.Failure("No paired OBDLink — pair the MX+ in Android Bluetooth settings first")
+        try { adapter.cancelDiscovery() } catch (_: Exception) {}
+        val sock = openSocket(device, ::info)
+            ?: run { disconnect(); return ConnectResult.Failure("Couldn't open a Bluetooth socket to ${device.name} — see BT log") }
+        socket = sock
+        val t = ObdLinkBtTransport(
+            input = sock.inputStream,
+            output = sock.outputStream,
+            log = { dir, text -> ObdLinkTrafficLog.record(dir, text) }
+        )
+        transport = t
+        t.drain()
+        for (cmd in listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATAL")) {
+            t.sendAscii(cmd, timeoutMs = if (cmd == "ATZ") 1500L else 800L)
+        }
+        info("basic reset done — ready for K-line init probing")
+        return ConnectResult.Connected(device.name ?: "OBDLink")
+    }
+
+    /**
      * Best-effort ELM327/STN channel setup for SSM2-over-CAN: ISO15765 @ 500k,
      * tester header 7E0, receive filter 7E8 (ECM). Headers + spaces off so the
      * adapter returns clean reassembled SSM2 payload bytes (E8 ...).
