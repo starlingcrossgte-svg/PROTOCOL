@@ -119,22 +119,11 @@ internal fun LiveDataPage(
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Session Log (${uiState.sessionLog.size})",
-                color = InkPrimary,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            SmallLogButton("Clear", onClearSessionLog)
-            SmallLogButton("Copy", onCopySessionLog)
-            SmallLogButton("Export CSV", onExportSessionLog)
-        }
+        LogActionRow(
+            title = "Session Log (${uiState.sessionLog.size})",
+            onClear = onClearSessionLog,
+            onExportCsv = onExportSessionLog
+        )
 
         SessionLogCard(uiState)
     }
@@ -270,21 +259,7 @@ private fun ModeButton(
     }
 }
 
-@Composable
-private fun SmallLogButton(text: String, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = SurfaceBg,
-            contentColor = Color.White
-        ),
-        shape = y2kCornerShape(),
-        border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-    }
-}
+// SmallLogButton moved to CommonWidgets.LogActionRow (shared across all logs).
 
 @Composable
 private fun SessionLogCard(uiState: ProtocolUiState) {
@@ -315,13 +290,15 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
                 .verticalScroll(rememberScrollState())
         ) {
             Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                Text(
-                    text = formattedText,
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    softWrap = false
-                )
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        text = formattedText,
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        softWrap = false
+                    )
+                }
             }
         }
     }

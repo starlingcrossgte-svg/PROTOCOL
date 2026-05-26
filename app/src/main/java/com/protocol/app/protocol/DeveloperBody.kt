@@ -32,8 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -66,7 +65,7 @@ internal fun DeveloperBody(
 ) {
     val trafficEvents by UsbTrafficLog.events.collectAsState()
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
-    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -97,37 +96,24 @@ internal fun DeveloperBody(
         // Outcome card surfaces here (was on Home before this commit).
         OutcomeCard(uiState)
 
-        // Per-step run log — three small action buttons + the formatted
-        // log card. Visible in dev mode only, where the page lives.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            DevSmallButton("Clear Probe Log", onClearProbeLog, Modifier.weight(1f))
-            DevSmallButton("Copy Probe Log", onCopyProbeLog, Modifier.weight(1f))
-            DevSmallButton("Export Probe Log", onExportProbeLog, Modifier.weight(1f))
-        }
-        RunLogCard(uiState.log)
+        // Per-step run log — uniform Clear / Export CSV row + the log card.
+        LogActionRow(
+            title = "Probe Log",
+            onClear = onClearProbeLog,
+            onExportCsv = onExportProbeLog
+        )
+        SelectionContainer { RunLogCard(uiState.log) }
 
         Spacer(modifier = Modifier.height(8.dp))
 
         // ── USB traffic section ───────────────────────────────────
         CategoryHeader("USB TRAFFIC")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Events (${trafficEvents.size})",
-                color = InkPrimary,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            DevSmallButton(text = "Clear Traffic", onClick = { UsbTrafficLog.clear() })
-        }
-        TrafficLogCard(trafficEvents)
+        LogActionRow(
+            title = "USB Traffic (${trafficEvents.size})",
+            onClear = { UsbTrafficLog.clear() },
+            onExportCsv = { shareCsv(context, "protocol-usb-traffic.csv", formatUsbLog(trafficEvents)) }
+        )
+        SelectionContainer { TrafficLogCard(trafficEvents) }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -136,23 +122,11 @@ internal fun DeveloperBody(
         // polling). The in-app replacement for Wireshark, which USBPcap
         // keeps blocking on the OBDLink. Sourced from ObdLinkTrafficLog.
         CategoryHeader("OBDLINK BT TRAFFIC")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Events (${btEvents.size})",
-                color = InkPrimary,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            DevSmallButton(text = "Copy BT", onClick = {
-                clipboard.setText(AnnotatedString(formatBtLog(btEvents)))
-            })
-            DevSmallButton(text = "Clear BT", onClick = { ObdLinkTrafficLog.clear() })
-        }
+        LogActionRow(
+            title = "OBDLink BT (${btEvents.size})",
+            onClear = { ObdLinkTrafficLog.clear() },
+            onExportCsv = { shareCsv(context, "protocol-obdlink-bt.csv", formatBtLog(btEvents)) }
+        )
         ObdLinkTrafficLogCard(btEvents)
     }
 }
@@ -312,27 +286,6 @@ private fun TrafficEventRow(event: TrafficEvent) {
     }
 }
 
-@Composable
-private fun DevSmallButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = SurfaceBg,
-            contentColor = Color.White
-        ),
-        shape = y2kCornerShape(),
-        border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-        modifier = modifier
-    ) {
-        Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-    }
-}
-
 private val trafficTimeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
 private fun formatBtLog(events: List<ObdLinkTrafficEvent>): String =
@@ -340,3 +293,32 @@ private fun formatBtLog(events: List<ObdLinkTrafficEvent>): String =
         val arrow = if (e.direction == ObdLinkTrafficEvent.Direction.OUT) "->" else "<-"
         "${trafficTimeFmt.format(Date(e.timestampMs))} $arrow ${e.text}"
     }
+
+private fun formatUsbLog(events: List<TrafficEvent>): String =
+    events.joinToString("\n") { e ->
+        val dir = if (e.direction == TrafficEvent.Direction.OUT) "OUT" else "IN"
+        "${trafficTimeFmt.format(Date(e.timestampMs))},$dir,${e.byteCount},${e.hex},${e.ascii}"
+    }
+
+/** Write [content] to a CSV in cache and fire a share chooser. Used by the
+ *  USB / BT logs' Export CSV button (the others export via Activity callbacks). */
+private fun shareCsv(context: android.content.Context, fileName: String, content: String) {
+    try {
+        val dir = java.io.File(context.cacheDir, "exports").apply { if (!exists()) mkdirs() }
+        val file = java.io.File(dir, fileName).apply { writeText(content) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_TITLE, fileName)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(android.content.Intent.createChooser(send, "Export $fileName"))
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(
+            context, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG
+        ).show()
+    }
+}

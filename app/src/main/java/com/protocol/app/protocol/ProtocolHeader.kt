@@ -243,7 +243,7 @@ internal fun HamburgerMenu(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "Bluetooth (OBDLink)",
+                            "Bluetooth",
                             color = Color.White,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.SemiBold,
