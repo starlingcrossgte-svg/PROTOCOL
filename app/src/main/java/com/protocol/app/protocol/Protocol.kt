@@ -202,6 +202,7 @@ class Protocol : ComponentActivity() {
                     onSplitScreenChange = { on -> viewModel.setSplitScreenMode(on) },
                     onObdLinkChange = { on -> onObdLinkToggle(on) },
                     onResetLayout = { viewModel.resetLayout() },
+                    onResetAdapter = { viewModel.resetObdLinkAdapter(applicationContext) },
                     onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
                     onSelectVehicle = { id -> viewModel.selectVehicle(id) },
                     onDeleteVehicle = { id -> viewModel.deleteVehicle(id) },

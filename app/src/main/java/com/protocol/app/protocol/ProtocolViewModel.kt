@@ -203,6 +203,33 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
+     * Utility: factory-reset the paired OBDLink adapter over Bluetooth. Sends
+     * ATPP FF OFF (clear all programmable parameters / NVM-persisted config),
+     * ATD (restore default settings), ATZ (full reset). Used to wipe a persisted
+     * raw-K-line config so BtSsm re-sends its full init on the next connect,
+     * which we can then capture via HCI snoop. The adapter reboots after ATZ, so
+     * the manager is discarded; the next connect builds a fresh one.
+     */
+    fun resetObdLinkAdapter(appContext: android.content.Context) {
+        setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Resetting OBDLink adapter…")
+        viewModelScope.launch(Dispatchers.IO) {
+            val mgr = obdLinkManager
+                ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
+            val r = mgr.resetAdapter()
+            obdLinkManager = null // adapter reboots after ATZ — force a fresh manager next time
+            when (r) {
+                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Connected ->
+                    setConnectionStatus(
+                        ConnectionStatus.NoDevice,
+                        "OBDLink factory reset sent (ATPP FF OFF / ATD / ATZ) — power-cycle the adapter, then re-pair. See Developer BT log."
+                    )
+                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Failure ->
+                    setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+            }
+        }
+    }
+
+    /**
      * Connect the *paired* OBDLink over Bluetooth. The caller (Activity) must
      * have granted BLUETOOTH_CONNECT first. Runs off the main thread; on success
      * the connection status flips to Connected and Read/Log Live route here.

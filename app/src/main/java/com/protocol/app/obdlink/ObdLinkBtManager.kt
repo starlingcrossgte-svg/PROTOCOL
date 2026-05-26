@@ -166,6 +166,52 @@ class ObdLinkBtManager(context: Context) {
     }
 
     /**
+     * Factory-reset the paired OBDLink: open a socket, send the full STN/ELM
+     * restore sequence, then drop the link.
+     *
+     *   ATPP FF OFF — disable ALL programmable parameters at once. This is what
+     *                 clears settings persisted in the adapter's NVM. A plain
+     *                 ATZ does NOT touch stored PPs (FRPM §7), which is exactly
+     *                 why a persisted raw-K-line config can survive a reset.
+     *   ATD         — restore all runtime settings to defaults.
+     *   ATZ         — full device reset, applying the cleared PPs. The adapter
+     *                 reboots, so the socket is dead afterward.
+     *
+     * Purpose: wipe a persisted raw-K-line config so a tool like BtSsm is forced
+     * to re-send its COMPLETE init on the next connect (capturable via HCI snoop).
+     */
+    @SuppressLint("MissingPermission")
+    fun resetAdapter(): ConnectResult {
+        fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
+        val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+            ?: return ConnectResult.Failure("No Bluetooth adapter on this device")
+        if (!adapter.isEnabled) return ConnectResult.Failure("Bluetooth is turned off")
+        val device = try {
+            adapter.bondedDevices?.firstOrNull { (it.name ?: "").contains("OBD", ignoreCase = true) }
+        } catch (e: SecurityException) {
+            return ConnectResult.Failure("Bluetooth permission not granted — turn the Bluetooth toggle on first")
+        } ?: return ConnectResult.Failure("No paired OBDLink — pair the MX+ in Android Bluetooth settings first")
+        try { adapter.cancelDiscovery() } catch (_: Exception) {}
+        val sock = openSocket(device, ::info)
+            ?: run { disconnect(); return ConnectResult.Failure("Couldn't open a Bluetooth socket to ${device.name} — see BT log") }
+        socket = sock
+        val t = ObdLinkBtTransport(
+            input = sock.inputStream,
+            output = sock.outputStream,
+            log = { dir, text -> ObdLinkTrafficLog.record(dir, text) }
+        )
+        transport = t
+        t.drain()
+        info("FACTORY RESET: ATPP FF OFF / ATD / ATZ")
+        t.sendAscii("ATPP FF OFF", timeoutMs = 1200L)
+        t.sendAscii("ATD", timeoutMs = 1200L)
+        t.sendAscii("ATZ", timeoutMs = 2500L)
+        info("FACTORY RESET sent — adapter is rebooting; power-cycle + re-pair to be safe")
+        disconnect() // ATZ reboots the adapter; the socket is gone now
+        return ConnectResult.Connected(device.name ?: "OBDLink")
+    }
+
+    /**
      * Best-effort ELM327/STN channel setup for SSM2-over-CAN: ISO15765 @ 500k,
      * tester header 7E0, receive filter 7E8 (ECM). Headers + spaces off so the
      * adapter returns clean reassembled SSM2 payload bytes (E8 ...).

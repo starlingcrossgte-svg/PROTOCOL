@@ -72,6 +72,7 @@ fun ProtocolScreen(
     onSplitScreenChange: (Boolean) -> Unit,
     onObdLinkChange: (Boolean) -> Unit,
     onResetLayout: () -> Unit,
+    onResetAdapter: () -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
     onSelectVehicle: (id: String) -> Unit,
     onDeleteVehicle: (id: String) -> Unit,
@@ -213,7 +214,8 @@ fun ProtocolScreen(
                         onPollIntervalChange = onPollIntervalChange,
                         onSessionLogMaxChange = onSessionLogMaxChange,
                         onResetLayout = onResetLayout,
-                        onShareSavedSession = onShareSavedSession
+                        onShareSavedSession = onShareSavedSession,
+                        onResetAdapter = onResetAdapter
                     )
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,

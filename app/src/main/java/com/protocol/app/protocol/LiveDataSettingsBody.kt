@@ -23,7 +23,8 @@ internal fun LiveDataSettingsBody(
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onResetLayout: () -> Unit,
-    onShareSavedSession: () -> Unit
+    onShareSavedSession: () -> Unit,
+    onResetAdapter: () -> Unit
 ) {
     val s = uiState.settings
     Column(
@@ -62,5 +63,9 @@ internal fun LiveDataSettingsBody(
         CategoryHeader("CRASH RECOVERY")
         SettingsButton(label = "Share Saved Session", onClick = onShareSavedSession)
         SettingsHelp("PROTOCOL auto-saves your in-progress session log to internal cache every ~1 second while logging. If the app gets killed mid-session, tap this to recover the last saved CSV via the system share sheet (Files, Gmail, Drive, etc.).")
+
+        CategoryHeader("ADAPTER")
+        SettingsButton(label = "Reset OBDLink Adapter (factory)", onClick = onResetAdapter)
+        SettingsHelp("Sends ATPP FF OFF / ATD / ATZ to the paired OBDLink over Bluetooth — clears its stored programmable parameters, restores factory defaults, then reboots it. Use this to wipe a persisted K-line config so a fresh BtSsm session re-sends its full init (capturable via HCI snoop). Requires the Bluetooth toggle ON and the MX+ paired. The adapter drops its link after the reset — power-cycle it and re-pair.")
     }
 }
