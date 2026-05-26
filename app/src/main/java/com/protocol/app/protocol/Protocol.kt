@@ -183,6 +183,7 @@ class Protocol : ComponentActivity() {
                         viewModel.resizeGauge(pidId, c, r, w, h)
                     },
                     onRunProbe = { runActionOrDiscover(PendingAction.Probe) },
+                    onHuntKlineInit = { viewModel.huntKlineInit(applicationContext) },
                     onStartReadingLive = { runActionOrDiscover(PendingAction.ReadLive) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
                     onStartLogging = { runActionOrDiscover(PendingAction.LogLive) },

@@ -53,6 +53,7 @@ fun ProtocolScreen(
     onRemoveGauge: (String) -> Unit,
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
     onRunProbe: () -> Unit,
+    onHuntKlineInit: () -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
@@ -231,7 +232,8 @@ fun ProtocolScreen(
                         onRunProbe = onRunProbe,
                         onClearProbeLog = onClearLog,
                         onCopyProbeLog = onCopyLog,
-                        onExportProbeLog = onExportLog
+                        onExportProbeLog = onExportLog,
+                        onHuntKlineInit = onHuntKlineInit
                     )
                     SubPage.Flash -> FlashPage(
                         state = flashState,

@@ -61,7 +61,8 @@ internal fun DeveloperBody(
     onRunProbe: () -> Unit,
     onClearProbeLog: () -> Unit,
     onCopyProbeLog: () -> Unit,
-    onExportProbeLog: () -> Unit
+    onExportProbeLog: () -> Unit,
+    onHuntKlineInit: () -> Unit
 ) {
     val trafficEvents by UsbTrafficLog.events.collectAsState()
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
@@ -103,6 +104,24 @@ internal fun DeveloperBody(
             onExportCsv = onExportProbeLog
         )
         SelectionContainer { RunLogCard(uiState.log) }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ── K-line init hunt (3.0R / EZ30R) ───────────────────────
+        // Basic-connects the MX+ then cycles candidate STN/ELM K-line inits
+        // until the ECU answers SSM2. Watch the OBDLINK BT TRAFFIC log below.
+        CategoryHeader("K-LINE INIT HUNT (3.0R)")
+        Button(
+            onClick = onHuntKlineInit,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF2F6FE4),
+                contentColor = Color.White
+            ),
+            shape = y2kCornerShape(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Hunt K-line Init", fontWeight = FontWeight.Bold)
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 

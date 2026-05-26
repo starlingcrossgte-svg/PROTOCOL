@@ -161,6 +161,48 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
+     * Dev-only: hunt the STN init that opens raw K-line SSM2 on the MX+ (for the
+     * EZ30R / 3.0R). Basic-connects, then cycles [ObdLinkProbeCandidates.klineInitMatrix]
+     * against the ECU until it answers an SSM2 reply (80 F0 10). Every step
+     * streams to the Developer BT log; the winning init lands in the status.
+     */
+    fun huntKlineInit(appContext: android.content.Context) {
+        setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Hunting K-line init…")
+        viewModelScope.launch(Dispatchers.IO) {
+            val mgr = obdLinkManager
+                ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
+            when (val r = mgr.connectBasic()) {
+                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Failure ->
+                    setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Connected -> {
+                    val transport = mgr.transport
+                    if (transport == null) {
+                        setConnectionStatus(ConnectionStatus.Error("no transport"), "K-line hunt: no transport")
+                        return@launch
+                    }
+                    val prober = com.protocol.app.obdlink.ObdLinkAutoProber(transport)
+                    val outcome = prober.run(
+                        com.protocol.app.obdlink.ObdLinkProbeCandidates.klineInitMatrix(),
+                        com.protocol.app.obdlink.ObdLinkProbeClassifier::klineReplyHit
+                    )
+                    when (outcome) {
+                        is com.protocol.app.obdlink.ObdLinkProbeOutcome.Hit ->
+                            setConnectionStatus(
+                                ConnectionStatus.Connected("OBDLink"),
+                                "K-line init FOUND: ${outcome.candidate.label} — see BT log"
+                            )
+                        is com.protocol.app.obdlink.ObdLinkProbeOutcome.Exhausted ->
+                            setConnectionStatus(
+                                ConnectionStatus.Error("no K-line init worked"),
+                                "K-line hunt: none of ${outcome.tried} candidates worked — see BT log"
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Connect the *paired* OBDLink over Bluetooth. The caller (Activity) must
      * have granted BLUETOOTH_CONNECT first. Runs off the main thread; on success
      * the connection status flips to Connected and Read/Log Live route here.
