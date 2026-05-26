@@ -117,15 +117,25 @@ object ObdLinkProbeCandidates {
     fun klineInitMatrix(): List<ObdLinkProbeCandidate> {
         val id = "8010F001BF40"
         fun c(label: String, vararg setup: String) = ObdLinkProbeCandidate(label, setup.toList(), id)
+        // FRPM-derived (OBDLink STN protocol presets, "ISO 9141 and ISO 14230-4" table):
+        //   STP21 = ISO 9141 (no header, no autoinit) — raw mode: we send the full SSM2
+        //           frame ourselves and the adapter skips the 5-baud/fast init handshake
+        //           that SSM2 doesn't use (this is the wall the ELM ATSP presets hit).
+        //   STP23 = ISO 14230-4 (no autoinit) — same idea on the KWP physical layer.
+        //   STPBR4800 = K-line @ 4800 baud (SSM2 runs at 4800, not the 10400 auto-detect uses).
+        //   STPCB0    = automatic check-byte OFF — the SSM2 frame already carries its own
+        //               checksum (req ends 0x40, reply ends 0x85); let it pass through raw.
+        //   STPO      = open the protocol without an init handshake.
+        // STPC first closes any (possibly NVM-persisted) protocol so the candidate is tested
+        // cleanly. Reply is matched as ASCII hex "80F010..." by klineReplyHit.
         return listOf(
-            c("A ISO14230 fast (SP5)", "ATPC", "ATSP5"),
-            c("B ISO14230 5-baud (SP4)", "ATPC", "ATSP4"),
-            c("C SP5 + CAF0 (raw send)", "ATPC", "ATSP5", "ATCAF0"),
-            c("D SP4 + CAF0 (raw send)", "ATPC", "ATSP4", "ATCAF0"),
-            c("E ISO9141 (SP3)", "ATPC", "ATSP3"),
-            c("F STN STP33 + 4800", "STP33", "STPBR4800"),
-            c("G STN STP32 + 4800", "STP32", "STPBR4800"),
-            c("H SP5 + slow init (SI)", "ATPC", "ATSP5", "ATSI")
+            c("STP21 ISO9141 raw 4800 (FRPM)", "STPC", "STP21", "STPBR4800", "STPCB0", "STPO"),
+            c("STP23 ISO14230 raw 4800", "STPC", "STP23", "STPBR4800", "STPCB0", "STPO"),
+            c("STP21 raw 4800, send auto-opens", "STPC", "STP21", "STPBR4800", "STPCB0"),
+            // Legacy ELM fallbacks — these force an autoinit handshake at 10400 baud, which
+            // SSM2 doesn't answer; kept only as a last resort if the STP presets misbehave.
+            c("ELM ISO14230 fast (SP5)", "ATPC", "ATSP5"),
+            c("ELM ISO9141 (SP3)", "ATPC", "ATSP3")
         )
     }
 }
