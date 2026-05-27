@@ -2,7 +2,6 @@ package com.protocol.app.protocol
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,12 +10,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,12 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.protocol.app.R
 
 /**
  * Thin colored bar pinned to the top of the screen above the header.
@@ -54,74 +48,6 @@ internal fun ConnectionStatusStripe(status: ConnectionStatus) {
             .height(3.dp)
             .background(color)
     )
-}
-
-/**
- * Shared app header. Layout (left to right):
- *   - Optional sub-page title (null on the main pager)
- *   - Centered logo (always)
- *   - Right-side action: close X on sub-pages, hamburger on Live Data,
- *     nothing on Home
- *
- * The Accent stripe below the header doubles as the divider + Y2K
- * accent line.
- */
-@Composable
-internal fun ProtocolHeader(
-    subPageTitle: String?,
-    showHamburger: Boolean,
-    splitScreenMode: Boolean,
-    obdLinkEnabled: Boolean,
-    onOpenParameters: () -> Unit,
-    onOpenTcmParameters: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit,
-    onToggleSplitScreen: () -> Unit,
-    onToggleObdLink: () -> Unit,
-    onClose: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(brush = headerBrush)
-            .padding(horizontal = 12.dp, vertical = 12.dp)
-    ) {
-        if (subPageTitle != null) {
-            Text(
-                text = subPageTitle,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.CenterStart)
-            )
-        }
-
-        Image(
-            painter = painterResource(id = R.drawable.protocol_logo),
-            contentDescription = "PROTOCOL",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .height(40.dp)
-                .align(Alignment.Center)
-        )
-
-        when {
-            subPageTitle != null -> CloseButton(
-                onClick = onClose,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
-            showHamburger -> HamburgerMenu(
-                splitScreenMode = splitScreenMode,
-                obdLinkEnabled = obdLinkEnabled,
-                onOpenParameters = onOpenParameters,
-                onOpenTcmParameters = onOpenTcmParameters,
-                onOpenLiveDataSettings = onOpenLiveDataSettings,
-                onToggleSplitScreen = onToggleSplitScreen,
-                onToggleObdLink = onToggleObdLink,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
-        }
-    }
-    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Accent))
 }
 
 // Hamburger opens a small dropdown with sub-page destinations plus the
@@ -267,7 +193,7 @@ internal fun HamburgerMenu(
 }
 
 @Composable
-private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clickable(onClick = onClick)

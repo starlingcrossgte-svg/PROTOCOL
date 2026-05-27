@@ -24,6 +24,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.protocol.app.R
 
 // Page 0 — Home / main menu. Layout (top to bottom):
 //   - One-line app subtitle + version
@@ -49,6 +53,15 @@ internal fun HomePage(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Logo lives in the scrolling Home content now (no fixed header), so it
+        // slides up with the page. Same art/size as before.
+        Image(
+            painter = painterResource(id = R.drawable.protocol_logo),
+            contentDescription = "PROTOCOL",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.height(40.dp)
+        )
+
         Text(
             text = "OpenPort 2.0  ·  Subaru SSM2 K-line  ·  v1.0",
             color = Color.White,

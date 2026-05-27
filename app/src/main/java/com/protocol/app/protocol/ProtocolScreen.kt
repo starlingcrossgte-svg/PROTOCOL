@@ -14,6 +14,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.protocol.app.flash.FlashPage
 import com.protocol.app.flash.FlashUiState
@@ -92,19 +95,6 @@ fun ProtocolScreen(
     // is preserved when they pop into a sub-page and back.
     val pagerState = rememberPagerState(pageCount = { 2 })
 
-    val subPageTitle: String? = when (uiState.activeSubPage) {
-        SubPage.Parameters -> "ECU Parameters"
-        SubPage.TcmParameters -> "TCM Parameters"
-        SubPage.LiveDataSettings -> "Live Data Settings"
-        SubPage.Settings -> "Settings"
-        SubPage.Garage -> "Garage"
-        SubPage.Developer -> "Developer"
-        SubPage.Flash -> "Flash ECU"
-        SubPage.Diagnostics -> "Diagnostics / CEL"
-        SubPage.Tuning -> "Minor Tuning"
-        null -> null
-    }
-
     // Sub-page BackHandler. LiveDataPage's edit-mode BackHandler is nested
     // deeper and stacks above this one when both could be relevant — but
     // openSubPage clears editMode anyway, so the two never both fire.
@@ -141,27 +131,22 @@ fun ProtocolScreen(
             // the old AdapterPill without occupying meaningful real estate.
             ConnectionStatusStripe(uiState.connectionStatus)
 
-            // Hide the shared header (logo + chrome) on Live Data. That
-            // page renders its own compact top row with mode buttons and
-            // an inline hamburger so the gauges get more vertical real
-            // estate — important on split-screen and in-dash setups.
-            val onLiveDataRoot = uiState.activeSubPage == null &&
-                pagerState.currentPage == 1
-            // Flash page hides the shared header + logo too (user request).
-            val onFlashPage = uiState.activeSubPage == SubPage.Flash
-            if (!onLiveDataRoot && !onFlashPage) {
-                ProtocolHeader(
-                    subPageTitle = subPageTitle,
-                    showHamburger = false,
-                    splitScreenMode = uiState.settings.splitScreenMode,
-                    obdLinkEnabled = uiState.settings.obdLinkEnabled,
-                    onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
-                    onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
-                    onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
-                    onToggleSplitScreen = { onSplitScreenChange(!uiState.settings.splitScreenMode) },
-                    onToggleObdLink = { onObdLinkChange(!uiState.settings.obdLinkEnabled) },
-                    onClose = onCloseSubPage
-                )
+            // Header + logo removed app-wide. The logo now lives in the Home
+            // page content and scrolls with it; Live Data and Flash render
+            // their own top rows. Sub-pages keep only a close (X) button so
+            // there's still a way back — the Flash page draws its own X, so
+            // it's excluded here.
+            if (uiState.activeSubPage != null && uiState.activeSubPage != SubPage.Flash) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    CloseButton(
+                        onClick = onCloseSubPage,
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    )
+                }
             }
 
             // Body — main pager or sub-page content. Adapter pill is gone
