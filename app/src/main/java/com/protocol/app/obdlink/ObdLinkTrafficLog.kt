@@ -19,8 +19,8 @@ data class ObdLinkTrafficEvent(
 /**
  * Process-wide ring buffer of recent OBDLink Bluetooth exchanges. Fed by
  * [ObdLinkBtTransport]'s log hook; the Developer page subscribes via [events]
- * so the user can watch the ELM handshake + SSM2 polling live — replacing the
- * Wireshark capture that USBPcap keeps interfering with.
+ * so the user can watch the ELM handshake + SSM2 polling live — an in-app
+ * view of the adapter's byte traffic.
  *
  * Its own log (zero shared code with the USB UsbTrafficLog / flash logs) so
  * the adapter paths stay isolated.

@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets
 /*
  * One-shot SSM2 ECM identify probe over the Tactrix adapter.
  *
- * The byte choreography below was reconstructed from USBPcap captures of a
+ * The byte choreography below was reconstructed from captures of a
  * working diagnostic session against a 2006 USDM Subaru Outback 3.0R 5EAT
  * (EZ30R H6, ECU 451A354006). The captured behavior is treated as the source
  * of truth; this implementation reproduces the same wire-side commands from

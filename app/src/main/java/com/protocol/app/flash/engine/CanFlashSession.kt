@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * CAN (ISO15765) transport to the ECU over the Tactrix OpenPort 2.0, for the
  * flash silo. Reproduces the exact channel-open + transmit choreography decoded
- * from the EcuFlash bench ROM-read USBPcap capture (2008 SH7058S, CAN @ 500k).
+ * from the bench ROM-read capture (2008 SH7058S, CAN @ 500k).
  *
  * Zero shared code with the logging path — its own USB layer ([FlashBulkIo]),
  * its own command framing. This class only opens the channel and exchanges raw

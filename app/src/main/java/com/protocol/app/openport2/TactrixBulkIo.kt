@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets
 /*
  * Low-level USB bulk read/write helpers for the Tactrix adapter.
  *
- * Observed protocol traits from USBPcap captures:
+ * Observed protocol traits from captures:
  *  - Adapter enumerates as USB CDC-ACM virtual serial; line-based ASCII
  *    requests on bulk OUT, mixed ASCII line replies + binary frames on bulk IN.
  *  - A single request that carries trailing binary (e.g. att3 transmit) is one

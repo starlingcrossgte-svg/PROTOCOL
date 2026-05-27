@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * The 12-step ati→atv setup binds the K-line bus to Tactrix channel 3 via
  * "ato3 512 4800 ..." (where the "3" is part of the command name, hardcoded
- * to match captured EcuFlash/RomRaider traffic). Every subsequent atf3/ats3/
+ * to match captured traffic). Every subsequent atf3/ats3/
  * att3 command targets that same channel, so all SSM2 reads and writes flow
  * through channel 3 in our setup.
  *
@@ -20,7 +20,7 @@ internal const val K_LINE_CHANNEL: Int = 3
 /*
  * High-level Tactrix adapter client.
  *
- * Composes the line-based ASCII command set observed in USBPcap traces of the
+ * Composes the line-based ASCII command set observed in traces of the
  * adapter. Each command takes an auto-incrementing request ID. Responses are
  * read off bulk IN and recognized as one of:
  *   ari <text>                       — info line (returned after ati)
@@ -167,7 +167,7 @@ class TactrixClient(private val io: TactrixBulkIo) {
      * Extracts and reassembles the full SSM2 reply from a buffered Tactrix
      * response stream that may contain multiple ar<ch> wrapper frames.
      *
-     * Tactrix wrapper format (confirmed from USBPcap captures):
+     * Tactrix wrapper format (confirmed from captures):
      *   "ar<ch>" (ASCII, 3 bytes) + 1-byte total-payload-length + 1-byte status
      *   + (length - 1) data bytes
      *

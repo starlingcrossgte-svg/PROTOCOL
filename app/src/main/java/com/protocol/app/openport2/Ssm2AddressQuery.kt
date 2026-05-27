@@ -9,7 +9,7 @@ package com.protocol.app.openport2
  *   [2]   0xF0   source (tester)
  *   [3]   len    2 + (addressCount * 3)
  *   [4]   0xA8   command
- *   [5]   0x00   flags (padding byte observed in wireshark captures)
+ *   [5]   0x00   flags (padding byte observed in captures)
  *   [6..] address bytes (3 bytes each: high, mid, low)
  *   last  checksum = sum of all preceding bytes mod 256
  *
@@ -22,7 +22,7 @@ package com.protocol.app.openport2
  *   [5..] one data byte per address, same order as request
  *   last  checksum
  *
- * Verified against RomRaider traffic for both modules:
+ * Verified against traffic for both modules:
  *   ECM request : 80 10 F0 08 A8 00 00 00 1C 00 00 0C 58
  *   ECM reply   : 80 F0 10 03 E8 9B 81 87
  *   TCM request: 80 18 F0 20 A8 00 [10 addresses...] B9

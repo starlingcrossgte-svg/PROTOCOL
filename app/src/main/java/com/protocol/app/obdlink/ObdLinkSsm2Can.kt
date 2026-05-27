@@ -10,7 +10,7 @@ import com.protocol.app.openport2.Ssm2Address
  * ISO-TP payload, and the adapter/ECU handle framing + integrity. The module
  * (ECM vs TCM) is selected by the CAN arbitration ID, not a dest byte.
  *
- * Decoded from the SSM2-over-CAN capture (`ssmcanbus rr.pcapng`):
+ * Decoded from the SSM2-over-CAN capture:
  *   request  → 0x7E0 :  A8 00 <hi mid lo> [<hi mid lo> ...]
  *   reply    ← 0x7E8 :  E8 <one data byte per address, same order>
  *

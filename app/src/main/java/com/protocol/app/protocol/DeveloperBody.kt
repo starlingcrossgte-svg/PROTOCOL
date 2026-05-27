@@ -169,8 +169,8 @@ internal fun DeveloperBody(
 
         // ── OBDLink Bluetooth traffic ──────────────────────────────
         // ELM/STN ASCII exchanges over the MX+ (handshake + SSM2-over-CAN
-        // polling). The in-app replacement for Wireshark, which USBPcap
-        // keeps blocking on the OBDLink. Sourced from ObdLinkTrafficLog.
+        // polling). An in-app view of the adapter's byte traffic.
+        // Sourced from ObdLinkTrafficLog.
         CategoryHeader("OBDLINK BT TRAFFIC")
         LogActionRow(
             title = "OBDLink BT (${btEvents.size})",

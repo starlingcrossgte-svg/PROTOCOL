@@ -71,7 +71,7 @@ sealed class PollResult {
  *   4. Cancel the collecting coroutine to stop.
  *
  * All addresses from all PIDs are batched into a single A8 request per
- * cycle, matching the approach observed in the RomRaider wireshark capture.
+ * cycle, matching the approach observed in the capture.
  */
 class Ssm2Poller(
     private val client: TactrixClient,
