@@ -50,7 +50,8 @@ internal fun LogActionRow(
     title: String,
     onClear: () -> Unit,
     onExportCsv: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onCopy: (() -> Unit)? = null
 ) {
     Row(
         modifier = modifier
@@ -67,6 +68,9 @@ internal fun LogActionRow(
             modifier = Modifier.weight(1f)
         )
         LogActionButton("Clear", onClear)
+        // Optional one-tap copy — the whole log to the clipboard, so there's no
+        // need to manually highlight text (lazy-list selection is unreliable).
+        if (onCopy != null) LogActionButton("Copy", onCopy)
         LogActionButton("Export CSV", onExportCsv)
     }
 }

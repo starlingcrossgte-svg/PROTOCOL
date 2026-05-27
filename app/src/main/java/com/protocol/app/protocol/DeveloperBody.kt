@@ -29,6 +29,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -67,6 +74,23 @@ internal fun DeveloperBody(
     val trafficEvents by UsbTrafficLog.events.collectAsState()
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    // SAF "create document" save: the Export buttons write the CSV to a folder
+    // the user picks (Downloads/Files) via the system dialog, instead of a
+    // share-only sheet. pendingCsv holds the content until the picker returns.
+    var pendingCsv by remember { mutableStateOf("") }
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(pendingCsv.toByteArray()) }
+                android.widget.Toast.makeText(context, "Saved", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -130,7 +154,14 @@ internal fun DeveloperBody(
         LogActionRow(
             title = "USB Traffic (${trafficEvents.size})",
             onClear = { UsbTrafficLog.clear() },
-            onExportCsv = { shareCsv(context, "protocol-usb-traffic.csv", formatUsbLog(trafficEvents)) }
+            onCopy = {
+                clipboard.setText(AnnotatedString(formatUsbLog(trafficEvents)))
+                android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onExportCsv = {
+                pendingCsv = formatUsbLog(trafficEvents)
+                saveCsvLauncher.launch("protocol-usb-traffic.csv")
+            }
         )
         SelectionContainer { TrafficLogCard(trafficEvents) }
 
@@ -144,7 +175,14 @@ internal fun DeveloperBody(
         LogActionRow(
             title = "OBDLink BT (${btEvents.size})",
             onClear = { ObdLinkTrafficLog.clear() },
-            onExportCsv = { shareCsv(context, "protocol-obdlink-bt.csv", formatBtLog(btEvents)) }
+            onCopy = {
+                clipboard.setText(AnnotatedString(formatBtLog(btEvents)))
+                android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onExportCsv = {
+                pendingCsv = formatBtLog(btEvents)
+                saveCsvLauncher.launch("protocol-obdlink-bt.csv")
+            }
         )
         ObdLinkTrafficLogCard(btEvents)
     }
@@ -319,25 +357,3 @@ private fun formatUsbLog(events: List<TrafficEvent>): String =
         "${trafficTimeFmt.format(Date(e.timestampMs))},$dir,${e.byteCount},${e.hex},${e.ascii}"
     }
 
-/** Write [content] to a CSV in cache and fire a share chooser. Used by the
- *  USB / BT logs' Export CSV button (the others export via Activity callbacks). */
-private fun shareCsv(context: android.content.Context, fileName: String, content: String) {
-    try {
-        val dir = java.io.File(context.cacheDir, "exports").apply { if (!exists()) mkdirs() }
-        val file = java.io.File(dir, fileName).apply { writeText(content) }
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            context, "${context.packageName}.fileprovider", file
-        )
-        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(android.content.Intent.EXTRA_STREAM, uri)
-            putExtra(android.content.Intent.EXTRA_TITLE, fileName)
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(android.content.Intent.createChooser(send, "Export $fileName"))
-    } catch (e: Exception) {
-        android.widget.Toast.makeText(
-            context, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG
-        ).show()
-    }
-}
