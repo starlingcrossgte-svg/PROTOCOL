@@ -205,10 +205,9 @@ class ProtocolViewModel : ViewModel() {
     /**
      * Utility: factory-reset the paired OBDLink adapter over Bluetooth. Sends
      * ATPP FF OFF (clear all programmable parameters / NVM-persisted config),
-     * ATD (restore default settings), ATZ (full reset). Used to wipe a persisted
-     * raw-K-line config so BtSsm re-sends its full init on the next connect,
-     * which we can then capture via HCI snoop. The adapter reboots after ATZ, so
-     * the manager is discarded; the next connect builds a fresh one.
+     * ATD (restore default settings), ATZ (full reset). Returns the adapter to a
+     * known factory state, clearing any persisted protocol/PP config. The adapter
+     * reboots after ATZ, so the manager is discarded; the next connect builds a fresh one.
      */
     fun resetObdLinkAdapter(appContext: android.content.Context) {
         setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Resetting OBDLink adapter…")

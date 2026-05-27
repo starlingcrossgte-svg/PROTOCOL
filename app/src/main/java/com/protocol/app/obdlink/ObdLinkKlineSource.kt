@@ -11,8 +11,8 @@ import kotlinx.coroutines.flow.flow
 
 /**
  * [LiveSampleSource] for SSM2 over **K-line** through the OBDLink MX+ — the
- * EZ30R / Outback 3.0R path. Confirmed from the BtSsm Bluetooth-snoop: over
- * K-line the FULL SSM2 frame is sent, header + checksum and all:
+ * EZ30R / Outback 3.0R path. Over K-line the FULL SSM2 frame is sent on the
+ * wire, header + checksum and all:
  *   send  80 10 F0 <len> A8 00 <3-byte addrs...> <checksum>
  *   recv  80 F0 10 <len> E8 <one byte per addr...> <checksum>
  *

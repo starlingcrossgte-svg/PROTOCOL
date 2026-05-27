@@ -12,8 +12,8 @@ package com.protocol.app.obdlink
  * exhausted.
  *
  * Primary use right now: find the STN init that flips the MX+ into raw K-line
- * mode for SSM2 on the EZ30R/3.0R. We know the SSM2 frames work (BtSsm proved
- * it); the prober cycles candidate inits against the real ECU until it answers
+ * mode for SSM2 on the EZ30R/3.0R. The SSM2 frames themselves are known-good;
+ * the prober cycles candidate inits against the real ECU until it answers
  * an SSM2 reply (header 80 F0 10) — the ECU is the pass/fail oracle.
  */
 
@@ -129,13 +129,18 @@ object ObdLinkProbeCandidates {
         // STPC first closes any (possibly NVM-persisted) protocol so the candidate is tested
         // cleanly. Reply is matched as ASCII hex "80F010..." by klineReplyHit.
         return listOf(
-            c("STP21 ISO9141 raw 4800 (FRPM)", "STPC", "STP21", "STPBR4800", "STPCB0", "STPO"),
-            c("STP23 ISO14230 raw 4800", "STPC", "STP23", "STPBR4800", "STPCB0", "STPO"),
-            c("STP21 raw 4800, send auto-opens", "STPC", "STP21", "STPBR4800", "STPCB0"),
-            // Legacy ELM fallbacks — these force an autoinit handshake at 10400 baud, which
-            // SSM2 doesn't answer; kept only as a last resort if the STP presets misbehave.
-            c("ELM ISO14230 fast (SP5)", "ATPC", "ATSP5"),
-            c("ELM ISO9141 (SP3)", "ATPC", "ATSP3")
+            // K-line SSM2 init for the STN (OBDLink) — opens a raw ISO-9141 channel at the
+            // 4800 baud SSM2 uses, with no auto-init handshake; the complete SSM2 frame is
+            // then sent verbatim. All commands are from the OBDLink/STN command set:
+            //   STP 21      ISO 9141, no header, no auto-init
+            //   STIMCS 1    STN ISO message setting
+            //   STPBR 4800  K-line baud = 4800
+            //   ATAL        allow long (>7-byte) messages
+            //   STIP4 0     transmit interbyte timing = 0 ms
+            c("STN K-line (STP21 / 4800 / no autoinit)",
+                "STP 21", "STIMCS 1", "STPBR 4800", "ATAL", "STIP4 0"),
+            // Fallback: try whatever protocol is already loaded on the adapter, no setup.
+            c("loaded protocol, no setup")
         )
     }
 }

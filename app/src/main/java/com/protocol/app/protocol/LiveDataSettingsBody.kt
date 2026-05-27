@@ -66,6 +66,6 @@ internal fun LiveDataSettingsBody(
 
         CategoryHeader("ADAPTER")
         SettingsButton(label = "Reset OBDLink Adapter (factory)", onClick = onResetAdapter)
-        SettingsHelp("Sends ATPP FF OFF / ATD / ATZ to the paired OBDLink over Bluetooth — clears its stored programmable parameters, restores factory defaults, then reboots it. Use this to wipe a persisted K-line config so a fresh BtSsm session re-sends its full init (capturable via HCI snoop). Requires the Bluetooth toggle ON and the MX+ paired. The adapter drops its link after the reset — power-cycle it and re-pair.")
+        SettingsHelp("Sends ATPP FF OFF / ATD / ATZ to the paired OBDLink over Bluetooth — clears its stored programmable parameters, restores factory defaults, then reboots it. Use this to return the adapter to a known factory state. Requires the Bluetooth toggle ON and the MX+ paired. The adapter drops its link after the reset — power-cycle it and re-pair.")
     }
 }

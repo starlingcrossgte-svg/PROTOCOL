@@ -158,10 +158,13 @@ class ObdLinkBtManager(context: Context) {
         )
         transport = t
         t.drain()
-        for (cmd in listOf("ATZ", "ATE0", "ATL0", "ATS0", "ATAL")) {
-            t.sendAscii(cmd, timeoutMs = if (cmd == "ATZ") 1500L else 800L)
+        // No ATZ — a full reset isn't needed before opening a K-line channel; the STN keeps
+        // its state. Just echo/linefeeds/spaces off so replies parse cleanly; the candidate
+        // supplies the full K-line init (protocol/baud/timing).
+        for (cmd in listOf("ATE0", "ATL0", "ATS0")) {
+            t.sendAscii(cmd, 800L)
         }
-        info("basic reset done — ready for K-line init probing")
+        info("preamble done — ready for K-line init probing")
         return ConnectResult.Connected(device.name ?: "OBDLink")
     }
 
@@ -177,8 +180,8 @@ class ObdLinkBtManager(context: Context) {
      *   ATZ         — full device reset, applying the cleared PPs. The adapter
      *                 reboots, so the socket is dead afterward.
      *
-     * Purpose: wipe a persisted raw-K-line config so a tool like BtSsm is forced
-     * to re-send its COMPLETE init on the next connect (capturable via HCI snoop).
+     * Purpose: return the adapter to a known factory state, clearing any persisted
+     * protocol / programmable-parameter config from a previous connection.
      */
     @SuppressLint("MissingPermission")
     fun resetAdapter(): ConnectResult {
