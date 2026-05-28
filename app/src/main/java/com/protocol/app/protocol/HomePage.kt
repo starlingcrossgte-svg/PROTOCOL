@@ -47,7 +47,12 @@ import com.protocol.app.R
 @Composable
 internal fun HomePage(
     uiState: ProtocolUiState,
-    onOpenSubPage: (SubPage) -> Unit
+    onOpenSubPage: (SubPage) -> Unit,
+    onRunProbe: () -> Unit,
+    onClearProbeLog: () -> Unit,
+    onCopyProbeLog: () -> Unit,
+    onExportProbeLog: () -> Unit,
+    onHuntKlineInit: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -82,11 +87,20 @@ internal fun HomePage(
             HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
-            // Developer Mode — gated on the settings toggle so it stays
-            // out of the way for non-debug use.
-            if (uiState.settings.devMode) {
-                HomeMenuButton(label = "Developer") { onOpenSubPage(SubPage.Developer) }
-            }
+        }
+
+        // Developer Mode content — inlined here (was a sub-page).
+        // Gated by Settings → Developer Mode so it stays out of the
+        // way for non-debug use.
+        if (uiState.settings.devMode) {
+            DeveloperBody(
+                uiState = uiState,
+                onRunProbe = onRunProbe,
+                onClearProbeLog = onClearProbeLog,
+                onCopyProbeLog = onCopyProbeLog,
+                onExportProbeLog = onExportProbeLog,
+                onHuntKlineInit = onHuntKlineInit,
+            )
         }
 
         SwipeHintRow()

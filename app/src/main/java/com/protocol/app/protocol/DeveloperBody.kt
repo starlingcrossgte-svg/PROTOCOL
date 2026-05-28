@@ -52,15 +52,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Developer Mode sub-page. Home for all low-level diagnostic surfaces:
+// Developer Mode content. Home for all low-level diagnostic surfaces:
 //
-//   - Test SSM2 Probe button + outcome card (moved here from Home)
+//   - Test SSM2 Probe button + outcome card
 //   - Per-step run log (formerly the dev panel on Home, gated by devMode)
 //   - Live USB bulk-transfer traffic log (every byte going to/from the
 //     adapter, as it happens) — sourced from UsbTrafficLog (singleton)
 //
-// Only accessible when Settings → Developer Mode is on; the Home menu's
-// "Developer" entry shows up under the same gate.
+// Renders inline on the Home page when Settings → Developer Mode is on
+// (no longer a sub-page). The parent Column provides the verticalScroll;
+// this body is fillMaxWidth-only so it stacks inside the same scroll.
 
 @Composable
 internal fun DeveloperBody(
@@ -92,10 +93,7 @@ internal fun DeveloperBody(
         }
     }
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // ── Probe section ─────────────────────────────────────────

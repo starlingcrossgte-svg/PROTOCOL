@@ -31,7 +31,7 @@ internal const val K_LINE_CHANNEL: Int = 3
  * Note: req-id management lives here, not in the caller. Counter starts at 2
  * and increments per command, matching the pattern seen in our captures.
  */
-class TactrixClient(private val io: TactrixBulkIo) {
+class TactrixClient(private val io: TactrixIo) {
 
     private val nextRequestId = AtomicInteger(2)
 

@@ -14,7 +14,9 @@ data class AppSettings(
     val obdLinkEnabled: Boolean = false,
     val adapter: Adapter? = null,
     val protocol: BusProtocol? = null,
-    val ssmVariant: SsmVariant? = null
+    val ssmVariant: SsmVariant? = null,
+    val simulatorMode: Boolean = false,
+    val simulatorPort: Int = DEFAULT_SIMULATOR_PORT
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -23,6 +25,9 @@ data class AppSettings(
         const val POLL_INTERVAL_MAX = 500
         const val SESSION_LOG_MIN = 500
         const val SESSION_LOG_MAX = 5000
+        const val DEFAULT_SIMULATOR_PORT = 9999
+        const val SIMULATOR_PORT_MIN = 1024
+        const val SIMULATOR_PORT_MAX = 65535
     }
 }
 
@@ -39,7 +44,9 @@ class SettingsStore(context: Context) {
         obdLinkEnabled = prefs.getBoolean(KEY_OBDLINK_ENABLED, false),
         adapter = prefs.getInt(KEY_ADAPTER, -1).takeIf { it >= 0 }?.let { Adapter.values().getOrNull(it) },
         protocol = prefs.getInt(KEY_PROTOCOL, -1).takeIf { it >= 0 }?.let { BusProtocol.values().getOrNull(it) },
-        ssmVariant = prefs.getInt(KEY_SSM_VARIANT, -1).takeIf { it >= 0 }?.let { SsmVariant.values().getOrNull(it) }
+        ssmVariant = prefs.getInt(KEY_SSM_VARIANT, -1).takeIf { it >= 0 }?.let { SsmVariant.values().getOrNull(it) },
+        simulatorMode = prefs.getBoolean(KEY_SIMULATOR_MODE, false),
+        simulatorPort = prefs.getInt(KEY_SIMULATOR_PORT, AppSettings.DEFAULT_SIMULATOR_PORT)
     )
 
     fun save(s: AppSettings) {
@@ -52,6 +59,8 @@ class SettingsStore(context: Context) {
             .putInt(KEY_ADAPTER, s.adapter?.ordinal ?: -1)
             .putInt(KEY_PROTOCOL, s.protocol?.ordinal ?: -1)
             .putInt(KEY_SSM_VARIANT, s.ssmVariant?.ordinal ?: -1)
+            .putBoolean(KEY_SIMULATOR_MODE, s.simulatorMode)
+            .putInt(KEY_SIMULATOR_PORT, s.simulatorPort)
             .apply()
     }
 
@@ -65,5 +74,7 @@ class SettingsStore(context: Context) {
         private const val KEY_ADAPTER = "adapter"
         private const val KEY_PROTOCOL = "protocol"
         private const val KEY_SSM_VARIANT = "ssm_variant"
+        private const val KEY_SIMULATOR_MODE = "simulator_mode"
+        private const val KEY_SIMULATOR_PORT = "simulator_port"
     }
 }

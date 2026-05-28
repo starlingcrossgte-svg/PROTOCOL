@@ -202,6 +202,8 @@ class Protocol : ComponentActivity() {
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
+                    onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
+                    onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
                     onResetLayout = { viewModel.resetLayout() },
                     onResetAdapter = { viewModel.resetObdLinkAdapter(applicationContext) },
                     onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
@@ -245,7 +247,10 @@ class Protocol : ComponentActivity() {
      * so the user doesn't have to tap a second time.
      */
     private fun runActionOrDiscover(action: PendingAction) {
-        if (viewModel.isConnected()) {
+        // Simulator mode opens its own TCP transport from inside the
+        // ViewModel — no USB discovery, no Tactrix session needed.
+        val simulatorMode = viewModel.uiState.value.settings.simulatorMode
+        if (simulatorMode || viewModel.isConnected()) {
             when (action) {
                 PendingAction.Probe -> viewModel.runProbe()
                 PendingAction.ReadLive -> viewModel.startReadingLive(recordToLog = false)

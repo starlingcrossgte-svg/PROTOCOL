@@ -78,6 +78,8 @@ fun ProtocolScreen(
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
+    onSimulatorModeChange: (Boolean) -> Unit,
+    onSimulatorPortChange: (Int) -> Unit,
     onResetLayout: () -> Unit,
     onResetAdapter: () -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
@@ -178,7 +180,12 @@ fun ProtocolScreen(
                             0 -> DiagnosticsPage()
                             1 -> HomePage(
                                 uiState = uiState,
-                                onOpenSubPage = onOpenSubPage
+                                onOpenSubPage = onOpenSubPage,
+                                onRunProbe = onRunProbe,
+                                onClearProbeLog = onClearLog,
+                                onCopyProbeLog = onCopyLog,
+                                onExportProbeLog = onExportLog,
+                                onHuntKlineInit = onHuntKlineInit,
                             )
                             else -> LiveDataPage(
                                 uiState = uiState,
@@ -225,17 +232,11 @@ fun ProtocolScreen(
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onDevModeChange = onDevModeChange,
+                        onSimulatorModeChange = onSimulatorModeChange,
+                        onSimulatorPortChange = onSimulatorPortChange,
                         onSaveVehicle = onSaveVehicle,
                         onSelectVehicle = onSelectVehicle,
                         onDeleteVehicle = onDeleteVehicle
-                    )
-                    SubPage.Developer -> DeveloperBody(
-                        uiState = uiState,
-                        onRunProbe = onRunProbe,
-                        onClearProbeLog = onClearLog,
-                        onCopyProbeLog = onCopyLog,
-                        onExportProbeLog = onExportLog,
-                        onHuntKlineInit = onHuntKlineInit
                     )
                     SubPage.Flash -> FlashPage(
                         state = flashState,

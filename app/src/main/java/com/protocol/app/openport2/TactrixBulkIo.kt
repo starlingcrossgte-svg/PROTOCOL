@@ -16,7 +16,7 @@ import java.nio.charset.StandardCharsets
  *  - Adapter replies can arrive in multiple bulk IN reads with no guarantee
  *    about how lines split across packets; callers must accumulate.
  */
-class TactrixBulkIo(private val session: OpenPort2UsbSession) {
+class TactrixBulkIo(private val session: OpenPort2UsbSession) : TactrixIo {
 
     companion object {
         private const val WRITE_TIMEOUT_MS = 1000
@@ -28,7 +28,7 @@ class TactrixBulkIo(private val session: OpenPort2UsbSession) {
      * Writes [packet] to the adapter. Returns the byte count on success.
      * @throws UsbDisconnectedException if the transfer returns a negative error code.
      */
-    fun write(packet: ByteArray): Int {
+    override fun write(packet: ByteArray): Int {
         val result = session.connection.bulkTransfer(
             session.endpointOut,
             packet,
@@ -65,7 +65,7 @@ class TactrixBulkIo(private val session: OpenPort2UsbSession) {
      * Reads chunks with a short per-call timeout until a chunk comes back empty
      * or the overall budget is spent.
      */
-    fun drain(maxTotalMs: Long = 500L) {
+    override fun drain(maxTotalMs: Long) {
         val deadline = System.currentTimeMillis() + maxTotalMs
         val buf = ByteArray(READ_CHUNK_SIZE)
         while (System.currentTimeMillis() < deadline) {
@@ -86,7 +86,7 @@ class TactrixBulkIo(private val session: OpenPort2UsbSession) {
      * Returns whatever has been accumulated, plus a flag indicating whether the
      * predicate matched (true) or the read timed out (false).
      */
-    fun readUntil(totalTimeoutMs: Long, predicate: (ByteArray) -> Boolean): ReadResult {
+    override fun readUntil(totalTimeoutMs: Long, predicate: (ByteArray) -> Boolean): ReadResult {
         val accumulated = ArrayList<Byte>(512)
         val deadline = System.currentTimeMillis() + totalTimeoutMs
 
@@ -127,19 +127,7 @@ class TactrixBulkIo(private val session: OpenPort2UsbSession) {
         }
     }
 
-    data class ReadResult(val bytes: ByteArray, val matched: Boolean) {
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (javaClass != other?.javaClass) return false
-            other as ReadResult
-            if (!bytes.contentEquals(other.bytes)) return false
-            if (matched != other.matched) return false
-            return true
-        }
-        override fun hashCode(): Int {
-            return 31 * bytes.contentHashCode() + matched.hashCode()
-        }
-    }
+    override fun close() = Unit
 }
 
 object TactrixHex {

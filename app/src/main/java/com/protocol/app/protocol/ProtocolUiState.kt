@@ -14,7 +14,6 @@ sealed class SubPage {
     object TcmParameters : SubPage()
     object LiveDataSettings : SubPage()
     object Settings : SubPage()
-    object Developer : SubPage()
     object Flash : SubPage()
     object Tuning : SubPage()
 }

@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
+    <!-- Localhost TCP via `adb reverse` for bench-test paths. No real network use. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- OBDLink MX+ (Bluetooth). Connect to an already-paired adapter only, so
          no scan/location permission is needed. BLUETOOTH_CONNECT is the runtime
          permission on API 31+; the legacy ones cover API <= 30. -->
