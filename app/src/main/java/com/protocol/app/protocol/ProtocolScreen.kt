@@ -224,10 +224,7 @@ fun ProtocolScreen(
                         onSsmVariantChange = onSsmVariantChange,
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
-                        onDevModeChange = onDevModeChange
-                    )
-                    SubPage.Garage -> GarageBody(
-                        uiState = uiState,
+                        onDevModeChange = onDevModeChange,
                         onSaveVehicle = onSaveVehicle,
                         onSelectVehicle = onSelectVehicle,
                         onDeleteVehicle = onDeleteVehicle
