@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -76,8 +75,7 @@ private fun LogActionButton(
         ),
         shape = shape,
         border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-        modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp)
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
     }
