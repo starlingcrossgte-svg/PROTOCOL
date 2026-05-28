@@ -78,7 +78,6 @@ internal fun HomePage(
             HomeMenuButton(label = "Garage") { onOpenSubPage(SubPage.Garage) }
             HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
-            HomeMenuButton(label = "Diagnostics / CEL") { onOpenSubPage(SubPage.Diagnostics) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
             // Developer Mode — gated on the settings toggle so it stays
             // out of the way for non-debug use.
@@ -155,11 +154,17 @@ private fun SwipeHintRow() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.Center,
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "swipe for Live Data →",
+            text = "← Diagnostics",
+            color = NeutralGray,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace
+        )
+        Text(
+            text = "Live Data →",
             color = NeutralGray,
             style = MaterialTheme.typography.labelSmall,
             fontFamily = FontFamily.Monospace

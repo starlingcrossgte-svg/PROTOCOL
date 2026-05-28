@@ -31,10 +31,6 @@ internal fun StubBody(page: SubPage) {
             "Full ECU reflash over OpenPort. Seed/key security access, flash-mode init, page-aligned erase + write, checksum, verify, ECU reset.",
             "Substantial — a multi-week project. The lower layers (USB + Tactrix line protocol + frame parser) are already in place; the flash sequence itself still needs to be written and tested very carefully."
         )
-        SubPage.Diagnostics -> Pair(
-            "Read stored DTCs from ECM (and TCM later) and decode them to P-codes with descriptions. SSM2 has a dedicated query for this; we'd sweep modules and group results.",
-            "Moderate — couple of weeks, mostly because the DTC label table has to be hand-curated per family."
-        )
         SubPage.Tuning -> Pair(
             "Live RAM-resident tunables: rev limiter, fuel cutoff, idle target, etc. Reads via SSM2 0xA8, writes via 0xB8. Addresses come from the per-ECU calibration definitions.",
             "Few weeks once we settle on which parameters are in scope and pull the EZ30R definitions in."

@@ -96,7 +96,7 @@ fun ProtocolScreen(
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
     // is preserved when they pop into a sub-page and back.
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
 
     // Sub-page BackHandler. LiveDataPage's edit-mode BackHandler is nested
     // deeper and stacks above this one when both could be relevant — but
@@ -165,7 +165,8 @@ fun ProtocolScreen(
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (page) {
-                            0 -> HomePage(
+                            0 -> DiagnosticsPage()
+                            1 -> HomePage(
                                 uiState = uiState,
                                 onOpenSubPage = onOpenSubPage
                             )
@@ -241,7 +242,7 @@ fun ProtocolScreen(
                         onToggleRunLogRecording = onFlashToggleRunLogRecording,
                         onClearRunLog = onFlashClearRunLog
                     )
-                    SubPage.Diagnostics, SubPage.Tuning ->
+                    SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)
                 }
             }
