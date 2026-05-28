@@ -61,10 +61,12 @@ internal fun LiveDataPage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState, enabled = !uiState.editMode)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         StatusLine(uiState)
+
+        Spacer(Modifier.height(6.dp))
 
         SnapGaugeGrid(
             uiState = uiState,

@@ -61,7 +61,12 @@ internal fun LogActionRow(
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f)
         )
-        SimpleButton("Clear", onClear, y2kLeftButtonShape())
+        SimpleButton(
+            "Clear Log",
+            onClear,
+            y2kLeftButtonShape(),
+            contentPadding = PaddingValues(horizontal = 10.75.dp, vertical = 6.dp)
+        )
         if (onCopy != null) SimpleButton("Copy", onCopy, y2kCornerShape())
         SimpleButton("Export CSV", onExportCsv, y2kBottomEndCutShape())
     }
@@ -73,7 +78,8 @@ internal fun SimpleButton(
     onClick: () -> Unit,
     shape: androidx.compose.ui.graphics.Shape,
     containerColor: Color = SurfaceBg,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 ) {
     Box(
         modifier = modifier
@@ -82,7 +88,7 @@ internal fun SimpleButton(
             .background(containerColor, shape)
             .border(1.dp, Accent, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(contentPadding),
         contentAlignment = Alignment.Center
     ) {
         Text(
