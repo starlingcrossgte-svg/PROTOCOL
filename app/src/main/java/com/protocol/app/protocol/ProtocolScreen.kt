@@ -73,10 +73,10 @@ fun ProtocolScreen(
     onClearBackground: () -> Unit,
     onAdapterChange: (Adapter) -> Unit,
     onProtocolChange: (BusProtocol) -> Unit,
+    onSsmVariantChange: (SsmVariant) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
-    onObdLinkChange: (Boolean) -> Unit,
     onResetLayout: () -> Unit,
     onResetAdapter: () -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
@@ -184,8 +184,7 @@ fun ProtocolScreen(
                                 onResizeGauge = onResizeGauge,
                                 onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
                                 onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
-                                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
-                                onToggleObdLink = { onObdLinkChange(!uiState.settings.obdLinkEnabled) }
+                                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) }
                             )
                         }
                     }
@@ -201,8 +200,6 @@ fun ProtocolScreen(
                     )
                     SubPage.LiveDataSettings -> LiveDataSettingsBody(
                         uiState = uiState,
-                        onAdapterChange = onAdapterChange,
-                        onProtocolChange = onProtocolChange,
                         onPollIntervalChange = onPollIntervalChange,
                         onSessionLogMaxChange = onSessionLogMaxChange,
                         onResetLayout = onResetLayout,
@@ -211,6 +208,9 @@ fun ProtocolScreen(
                     )
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,
+                        onAdapterChange = onAdapterChange,
+                        onProtocolChange = onProtocolChange,
+                        onSsmVariantChange = onSsmVariantChange,
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onDevModeChange = onDevModeChange

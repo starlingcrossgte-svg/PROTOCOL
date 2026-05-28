@@ -34,6 +34,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SettingsBody(
     uiState: ProtocolUiState,
+    onAdapterChange: (Adapter) -> Unit,
+    onProtocolChange: (BusProtocol) -> Unit,
+    onSsmVariantChange: (SsmVariant) -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onDevModeChange: (Boolean) -> Unit
@@ -46,6 +49,51 @@ internal fun SettingsBody(
             .padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // ── Adapter + Protocol (side-by-side) ───────────────────────
+        // Connection-config knobs shared by Live Data, Diagnostics, and
+        // future Flash. Live here so they're set once in Settings and
+        // every feature reads the same values.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CategoryHeader("ADAPTER")
+                SelectorButton("OpenPort 2.0", selected = s.adapter == Adapter.OpenPort) {
+                    onAdapterChange(Adapter.OpenPort)
+                }
+                SelectorButton("OBDLink MX+", selected = s.adapter == Adapter.OBDLink) {
+                    onAdapterChange(Adapter.OBDLink)
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CategoryHeader("PROTOCOL")
+                SelectorButton("K-Line", selected = s.protocol == BusProtocol.KLine) {
+                    onProtocolChange(BusProtocol.KLine)
+                }
+                SelectorButton("CAN Bus", selected = s.protocol == BusProtocol.CAN) {
+                    onProtocolChange(BusProtocol.CAN)
+                }
+            }
+        }
+
+        // ── SSM variant ────────────────────────────────────────────
+        // Drives Diagnostics request format. Live Data doesn't read this.
+        // SSM3 is a placeholder until protocol support lands.
+        CategoryHeader("SSM")
+        SelectorButton("SSM2", selected = s.ssmVariant == SsmVariant.SSM2) {
+            onSsmVariantChange(SsmVariant.SSM2)
+        }
+        SelectorButton("SSM3", selected = s.ssmVariant == SsmVariant.SSM3) {
+            onSsmVariantChange(SsmVariant.SSM3)
+        }
+
         // ── Background ─────────────────────────────────────────────
         CategoryHeader("BACKGROUND")
         Text(
@@ -93,6 +141,28 @@ internal fun SettingsBody(
             )
         }
         SettingsHelp("Reveals the SSM2 Run Log + Clear/Copy/Export Log buttons on the Home page. For debugging adapter / protocol issues.")
+    }
+}
+
+@Composable
+private fun SelectorButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (selected) Accent else SurfaceBg,
+            contentColor = Color.White
+        ),
+        shape = y2kCornerShape(),
+        border = BorderStroke(1.dp, Accent),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            label,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
+        )
     }
 }
 

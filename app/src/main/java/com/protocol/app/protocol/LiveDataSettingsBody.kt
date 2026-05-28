@@ -1,29 +1,18 @@
 package com.protocol.app.protocol
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun LiveDataSettingsBody(
     uiState: ProtocolUiState,
-    onAdapterChange: (Adapter) -> Unit,
-    onProtocolChange: (BusProtocol) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onResetLayout: () -> Unit,
@@ -38,22 +27,6 @@ internal fun LiveDataSettingsBody(
             .padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        CategoryHeader("ADAPTER")
-        SelectorButton("OpenPort 2.0", selected = s.adapter == Adapter.OpenPort) {
-            onAdapterChange(Adapter.OpenPort)
-        }
-        SelectorButton("OBDLink MX+", selected = s.adapter == Adapter.OBDLink) {
-            onAdapterChange(Adapter.OBDLink)
-        }
-
-        CategoryHeader("PROTOCOL")
-        SelectorButton("K-Line", selected = s.protocol == BusProtocol.KLine) {
-            onProtocolChange(BusProtocol.KLine)
-        }
-        SelectorButton("CAN Bus", selected = s.protocol == BusProtocol.CAN) {
-            onProtocolChange(BusProtocol.CAN)
-        }
-
         CategoryHeader("POLLING")
         SliderRow(
             label = "Poll interval",
@@ -86,28 +59,6 @@ internal fun LiveDataSettingsBody(
 
         CategoryHeader("ADAPTER RESET")
         SettingsButton(label = "Reset OBDLink Adapter (factory)", onClick = onResetAdapter)
-        SettingsHelp("Sends ATPP FF OFF / ATD / ATZ to the paired OBDLink over Bluetooth — clears its stored programmable parameters, restores factory defaults, then reboots it. Use this to return the adapter to a known factory state. Requires the Bluetooth toggle ON and the MX+ paired. The adapter drops its link after the reset — power-cycle it and re-pair.")
-    }
-}
-
-@Composable
-private fun SelectorButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) Accent else SurfaceBg,
-            contentColor = Color.White
-        ),
-        shape = y2kCornerShape(),
-        border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            label,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White
-        )
+        SettingsHelp("Sends ATPP FF OFF / ATD / ATZ to the paired OBDLink over Bluetooth — clears its stored programmable parameters, restores factory defaults, then reboots it. Use this to return the adapter to a known factory state. The adapter drops its link after the reset — power-cycle it and re-pair.")
     }
 }

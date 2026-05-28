@@ -151,6 +151,8 @@ class ProtocolViewModel : ViewModel() {
 
     fun setProtocol(protocol: BusProtocol) = updateSettings { it.copy(protocol = protocol) }
 
+    fun setSsmVariant(variant: SsmVariant) = updateSettings { it.copy(ssmVariant = variant) }
+
 
     /**
      * Toggle the OBDLink (Bluetooth) live-data path on/off. Persisted via

@@ -55,11 +55,9 @@ internal fun ConnectionStatusStripe(status: ConnectionStatus) {
 // icon inline next to its mode buttons when the shared header is hidden.
 @Composable
 internal fun HamburgerMenu(
-    obdLinkEnabled: Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
-    onToggleObdLink: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -126,35 +124,6 @@ internal fun HamburgerMenu(
                 onClick = {
                     expanded = false
                     onOpenTcmParameters()
-                }
-            )
-            // Bluetooth (OBDLink) toggle.
-            // OFF (default) means the OBDLink BT path is never engaged at all:
-            // no scan, no socket, no connection. Wired to the backend in Stage 2.
-            DropdownMenuItem(
-                text = {
-                    androidx.compose.foundation.layout.Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "Bluetooth",
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            if (obdLinkEnabled) "ON" else "OFF",
-                            color = if (obdLinkEnabled) PassGreen else NeutralGray,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                },
-                onClick = {
-                    expanded = false
-                    onToggleObdLink()
                 }
             )
         }

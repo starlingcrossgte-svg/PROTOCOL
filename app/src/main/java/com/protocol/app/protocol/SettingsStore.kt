@@ -4,6 +4,7 @@ import android.content.Context
 
 enum class Adapter { OpenPort, OBDLink }
 enum class BusProtocol { KLine, CAN }
+enum class SsmVariant { SSM2, SSM3 }
 
 data class AppSettings(
     val pollIntervalMs: Int = DEFAULT_POLL_INTERVAL_MS,
@@ -11,8 +12,9 @@ data class AppSettings(
     val devMode: Boolean = false,
     val splitScreenMode: Boolean = true,
     val obdLinkEnabled: Boolean = false,
-    val adapter: Adapter = Adapter.OpenPort,
-    val protocol: BusProtocol = BusProtocol.KLine
+    val adapter: Adapter? = null,
+    val protocol: BusProtocol? = null,
+    val ssmVariant: SsmVariant? = null
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -35,8 +37,9 @@ class SettingsStore(context: Context) {
         devMode = prefs.getBoolean(KEY_DEV_MODE, false),
         splitScreenMode = prefs.getBoolean(KEY_SPLIT_SCREEN, true),
         obdLinkEnabled = prefs.getBoolean(KEY_OBDLINK_ENABLED, false),
-        adapter = Adapter.values().getOrElse(prefs.getInt(KEY_ADAPTER, 0)) { Adapter.OpenPort },
-        protocol = BusProtocol.values().getOrElse(prefs.getInt(KEY_PROTOCOL, 0)) { BusProtocol.KLine }
+        adapter = prefs.getInt(KEY_ADAPTER, -1).takeIf { it >= 0 }?.let { Adapter.values().getOrNull(it) },
+        protocol = prefs.getInt(KEY_PROTOCOL, -1).takeIf { it >= 0 }?.let { BusProtocol.values().getOrNull(it) },
+        ssmVariant = prefs.getInt(KEY_SSM_VARIANT, -1).takeIf { it >= 0 }?.let { SsmVariant.values().getOrNull(it) }
     )
 
     fun save(s: AppSettings) {
@@ -46,8 +49,9 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_DEV_MODE, s.devMode)
             .putBoolean(KEY_SPLIT_SCREEN, s.splitScreenMode)
             .putBoolean(KEY_OBDLINK_ENABLED, s.obdLinkEnabled)
-            .putInt(KEY_ADAPTER, s.adapter.ordinal)
-            .putInt(KEY_PROTOCOL, s.protocol.ordinal)
+            .putInt(KEY_ADAPTER, s.adapter?.ordinal ?: -1)
+            .putInt(KEY_PROTOCOL, s.protocol?.ordinal ?: -1)
+            .putInt(KEY_SSM_VARIANT, s.ssmVariant?.ordinal ?: -1)
             .apply()
     }
 
@@ -60,5 +64,6 @@ class SettingsStore(context: Context) {
         private const val KEY_OBDLINK_ENABLED = "obdlink_enabled"
         private const val KEY_ADAPTER = "adapter"
         private const val KEY_PROTOCOL = "protocol"
+        private const val KEY_SSM_VARIANT = "ssm_variant"
     }
 }

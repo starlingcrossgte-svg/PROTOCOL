@@ -50,8 +50,7 @@ internal fun LiveDataPage(
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit,
-    onToggleObdLink: () -> Unit
+    onOpenLiveDataSettings: () -> Unit
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
@@ -86,8 +85,7 @@ internal fun LiveDataPage(
             onStopLogging = onStopLogging,
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
-            onOpenLiveDataSettings = onOpenLiveDataSettings,
-            onToggleObdLink = onToggleObdLink
+            onOpenLiveDataSettings = onOpenLiveDataSettings
         )
 
         Spacer(Modifier.height(6.dp))
@@ -148,8 +146,7 @@ private fun ModeButtonsRow(
     onStopLogging: () -> Unit,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit,
-    onToggleObdLink: () -> Unit
+    onOpenLiveDataSettings: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -157,11 +154,9 @@ private fun ModeButtonsRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         HamburgerMenu(
-            obdLinkEnabled = uiState.settings.obdLinkEnabled,
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
-            onOpenLiveDataSettings = onOpenLiveDataSettings,
-            onToggleObdLink = onToggleObdLink
+            onOpenLiveDataSettings = onOpenLiveDataSettings
         )
         ModeButton(
             label = when {
