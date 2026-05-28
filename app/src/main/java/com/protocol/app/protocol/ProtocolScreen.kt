@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -122,8 +124,11 @@ fun ProtocolScreen(
         // if no photo). Low alpha so it whispers either way.
         Canvas(modifier = Modifier.fillMaxSize()) { drawY2kBackgroundDecor(this) }
 
-        // Layer 3 — actual content.
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+        ) {
             // Connection status stripe — 3dp colored bar at the very top
             // of the screen. Always visible across every page so the user
             // can tell at a glance whether the adapter is alive. Replaces
