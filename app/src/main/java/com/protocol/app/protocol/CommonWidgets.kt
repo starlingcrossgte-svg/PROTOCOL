@@ -76,8 +76,8 @@ private fun LogActionButton(
         ),
         shape = shape,
         border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-        modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 42.dp)
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 14.dp),
+        modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp)
     ) {
         Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
     }
