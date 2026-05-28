@@ -1,7 +1,11 @@
 package com.protocol.app.protocol
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -92,22 +96,18 @@ internal fun HomePage(
 
 @Composable
 private fun HomeMenuButton(label: String, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = SurfaceBg,
-            contentColor = InkPrimary
-        ),
-        // Y2K terminal-panel slant — cut the top-right and bottom-left
-        // corners. Visible enough to read as "this is a tool, not a
-        // generic Material 3 button" without being a gimmick.
-        shape = y2kCornerShape(),
-        border = BorderStroke(1.dp, Accent),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            horizontal = 16.dp,
-            vertical = 16.dp
-        ),
-        modifier = Modifier.fillMaxWidth()
+    // Box-based to avoid Material3 Button's offscreen clipping layer and
+    // ripple-indication layer. Y2K corner cut still rendered correctly by
+    // background(shape) + border(shape); no clip() needed because the
+    // inner Row stays inside the padded rectangle.
+    val shape = y2kCornerShape()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceBg, shape)
+            .border(1.dp, Accent, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

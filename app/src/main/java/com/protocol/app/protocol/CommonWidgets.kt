@@ -98,7 +98,6 @@ internal fun SimpleButton(
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = 58.dp, minHeight = 40.dp)
-            .clip(shape)
             .background(containerColor, shape)
             .border(1.dp, Accent, shape)
             .clickable(onClick = onClick)
