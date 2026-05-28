@@ -47,20 +47,34 @@ internal fun LogActionRow(
     onClear: () -> Unit,
     onExportCsv: () -> Unit,
     modifier: Modifier = Modifier,
-    onCopy: (() -> Unit)? = null
+    onCopy: (() -> Unit)? = null,
+    titleAsHeader: Boolean = false
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = title,
-            color = InkPrimary,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f)
-        )
+        if (titleAsHeader) {
+            Text(
+                "── $title ──",
+                color = SectionGray,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 10.dp)
+            )
+        } else {
+            Text(
+                text = title,
+                color = InkPrimary,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+        }
         SimpleButton(
             "Clear Log",
             onClear,

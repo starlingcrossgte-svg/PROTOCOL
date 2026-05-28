@@ -93,7 +93,8 @@ internal fun LiveDataPage(
         LogActionRow(
             title = "Session Log (${uiState.sessionLog.size})",
             onClear = onClearSessionLog,
-            onExportCsv = onExportSessionLog
+            onExportCsv = onExportSessionLog,
+            titleAsHeader = true
         )
 
         Spacer(Modifier.height(6.dp))
