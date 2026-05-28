@@ -196,6 +196,8 @@ class Protocol : ComponentActivity() {
                     onExportSessionLog = { launchExportSessionLog() },
                     onPickBackground = { launchBackgroundPicker() },
                     onClearBackground = { viewModel.setBackgroundUri(null) },
+                    onAdapterChange = { adapter -> viewModel.setAdapter(adapter) },
+                    onProtocolChange = { protocol -> viewModel.setProtocol(protocol) },
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },

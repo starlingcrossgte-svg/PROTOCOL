@@ -71,6 +71,8 @@ fun ProtocolScreen(
     onExportSessionLog: () -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
+    onAdapterChange: (Adapter) -> Unit,
+    onProtocolChange: (Protocol) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
@@ -199,6 +201,8 @@ fun ProtocolScreen(
                     )
                     SubPage.LiveDataSettings -> LiveDataSettingsBody(
                         uiState = uiState,
+                        onAdapterChange = onAdapterChange,
+                        onProtocolChange = onProtocolChange,
                         onPollIntervalChange = onPollIntervalChange,
                         onSessionLogMaxChange = onSessionLogMaxChange,
                         onResetLayout = onResetLayout,
