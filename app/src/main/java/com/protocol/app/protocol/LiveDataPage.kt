@@ -57,7 +57,7 @@ internal fun LiveDataPage(
             .fillMaxSize()
             .verticalScroll(scrollState, enabled = !uiState.editMode)
             .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         StatusLine(uiState)
 
