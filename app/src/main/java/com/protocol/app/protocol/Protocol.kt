@@ -89,23 +89,52 @@ class Protocol : ComponentActivity() {
         )
     }
 
-    // OBDLink Bluetooth: when the toggle flips ON, request BLUETOOTH_CONNECT
-    // (API 31+) then connect. Denied -> flip the setting back off so the menu
-    // reflects reality and nothing tries to connect.
+    // OBDLink Bluetooth: when the user picks OBDLink in Settings, request
+    // BLUETOOTH_CONNECT (API 31+) then connect with the protocol they picked.
+    // Denied -> drop the OBDLink selection so the UI reflects reality.
     private val btPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted: Boolean ->
         if (granted) {
             viewModel.connectObdLink(applicationContext)
         } else {
-            viewModel.setObdLinkEnabled(false)
+            viewModel.clearObdLinkAdapter()
             Toast.makeText(this, "Bluetooth permission denied", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun onObdLinkToggle(on: Boolean) {
-        viewModel.setObdLinkEnabled(on)
-        if (!on) return // setObdLinkEnabled(false) already disconnects
+    /**
+     * Tap on the ADAPTER selector. Saves the selection, then:
+     *   - OpenPort selected → run USB discovery + permission flow
+     *   - OBDLink selected → request BT permission + connect with current protocol
+     *   - null (user deselected) → tear down OBDLink link if any; USB session is
+     *     left attached until USB-DETACH fires (so re-selecting OpenPort can reuse it)
+     */
+    private fun onAdapterChanged(adapter: Adapter?) {
+        viewModel.setAdapter(adapter)
+        when (adapter) {
+            Adapter.OpenPort -> discoverAndConnect()
+            Adapter.OBDLink -> ensureBtPermissionThenConnect()
+            null -> viewModel.disconnectObdLink()
+        }
+    }
+
+    /**
+     * Tap on the PROTOCOL selector. For OBDLink the STN init differs by
+     * protocol, so we reconnect immediately so the new mode is live before the
+     * user taps Read Live. For OpenPort the channel is re-initialized lazily
+     * inside startReadingLive (channelInitialized is reset by setProtocol).
+     */
+    private fun onProtocolChanged(protocol: BusProtocol?) {
+        viewModel.setProtocol(protocol)
+        val s = viewModel.uiState.value.settings
+        if (s.adapter == Adapter.OBDLink && protocol != null) {
+            viewModel.disconnectObdLink()
+            ensureBtPermissionThenConnect()
+        }
+    }
+
+    private fun ensureBtPermissionThenConnect() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -196,8 +225,8 @@ class Protocol : ComponentActivity() {
                     onExportSessionLog = { launchExportSessionLog() },
                     onPickBackground = { launchBackgroundPicker() },
                     onClearBackground = { viewModel.setBackgroundUri(null) },
-                    onAdapterChange = { adapter -> viewModel.setAdapter(adapter) },
-                    onProtocolChange = { protocol -> viewModel.setProtocol(protocol) },
+                    onAdapterChange = { adapter -> onAdapterChanged(adapter) },
+                    onProtocolChange = { protocol -> onProtocolChanged(protocol) },
                     onSsmVariantChange = { variant -> viewModel.setSsmVariant(variant) },
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
@@ -242,23 +271,31 @@ class Protocol : ComponentActivity() {
 
     /**
      * Connected path: kick off the action immediately. Disconnected path:
-     * stash the action in the VM and start USB discovery; once the session
-     * opens, ProtocolViewModel.setOpenSession replays the stashed action
-     * so the user doesn't have to tap a second time.
+     * route to the right adapter's connect flow (USB for OpenPort, BT for
+     * OBDLink). For OpenPort, ProtocolViewModel.setOpenSession replays the
+     * stashed pending action once the session opens; OBDLink doesn't yet
+     * replay (the user just taps Read Live again after the BT toast).
      */
     private fun runActionOrDiscover(action: PendingAction) {
-        // Simulator mode opens its own TCP transport from inside the
-        // ViewModel — no USB discovery, no Tactrix session needed.
-        val simulatorMode = viewModel.uiState.value.settings.simulatorMode
-        if (simulatorMode || viewModel.isConnected()) {
+        val s = viewModel.uiState.value.settings
+        if (s.simulatorMode || viewModel.isConnected()) {
             when (action) {
                 PendingAction.Probe -> viewModel.runProbe()
                 PendingAction.ReadLive -> viewModel.startReadingLive(recordToLog = false)
                 PendingAction.LogLive -> viewModel.startLogging()
             }
         } else {
-            viewModel.setPendingAction(action)
-            discoverAndConnect()
+            when (s.adapter) {
+                Adapter.OpenPort -> {
+                    viewModel.setPendingAction(action)
+                    discoverAndConnect()
+                }
+                Adapter.OBDLink -> ensureBtPermissionThenConnect()
+                null -> viewModel.setConnectionStatus(
+                    ConnectionStatus.NoDevice,
+                    "Pick ADAPTER and PROTOCOL in Settings before reading live data"
+                )
+            }
         }
     }
 

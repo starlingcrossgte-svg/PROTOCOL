@@ -17,10 +17,10 @@ import java.util.UUID
  * settings, so we never scan (no location/scan permission needed, just
  * BLUETOOTH_CONNECT on API 31+).
  *
- * GATING: this object is only ever constructed/called by the ViewModel when
- * the `obdLinkEnabled` setting is ON. While OFF, nothing here runs — no
- * adapter access, no socket, no connection. The caller also guarantees the
- * runtime BLUETOOTH_CONNECT permission is granted before [connect].
+ * GATING: this object is only constructed/called by the ViewModel when the
+ * user has picked OBDLink as the active adapter in Settings. The caller also
+ * guarantees the runtime BLUETOOTH_CONNECT permission is granted before
+ * [connect] / [connectKline].
  */
 class ObdLinkBtManager(context: Context) {
 
@@ -129,6 +129,58 @@ class ObdLinkBtManager(context: Context) {
             info("reflection failed: ${e.message ?: e.javaClass.simpleName}")
         }
         return null
+    }
+
+    /**
+     * Connect for SSM2-over-K-line. Opens the RFCOMM socket, then puts the STN
+     * into raw K-line mode at 4800 baud with no autoinit so the complete SSM2
+     * frame (header + checksum) can be sent verbatim. Verified working on the
+     * EZ30R / 3.0R.
+     *
+     *   STP 21      ISO 9141, no header, no auto-init
+     *   STIMCS 1    STN ISO message setting
+     *   STPBR 4800  K-line baud = 4800
+     *   ATAL        allow long (>7-byte) messages
+     *   STIP4 0     transmit interbyte timing = 0 ms
+     */
+    @SuppressLint("MissingPermission")
+    fun connectKline(): ConnectResult {
+        fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
+        val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+            ?: return ConnectResult.Failure("No Bluetooth adapter on this device")
+        if (!adapter.isEnabled) return ConnectResult.Failure("Bluetooth is turned off")
+        val device = try {
+            adapter.bondedDevices?.firstOrNull { (it.name ?: "").contains("OBD", ignoreCase = true) }
+        } catch (e: SecurityException) {
+            return ConnectResult.Failure("Bluetooth permission not granted")
+        } ?: return ConnectResult.Failure("No paired OBDLink — pair the MX+ in Android Bluetooth settings first")
+        try { adapter.cancelDiscovery() } catch (_: Exception) {}
+        val sock = openSocket(device, ::info)
+            ?: run { disconnect(); return ConnectResult.Failure("Couldn't open a Bluetooth socket to ${device.name} — see BT log") }
+        socket = sock
+        val t = ObdLinkBtTransport(
+            input = sock.inputStream,
+            output = sock.outputStream,
+            log = { dir, text -> ObdLinkTrafficLog.record(dir, text) }
+        )
+        transport = t
+        return try {
+            t.drain()
+            for (cmd in listOf("ATE0", "ATL0", "ATS0")) t.sendAscii(cmd, 800L)
+            for (cmd in KLINE_INIT_COMMANDS) {
+                val reply = t.sendAscii(cmd, timeoutMs = 1500L)
+                if (reply.contains("?")) {
+                    info("K-line init '$cmd' rejected (?)")
+                    disconnect()
+                    return ConnectResult.Failure("STN rejected '$cmd' during K-line init")
+                }
+            }
+            info("K-line raw mode open — ready to send SSM2 frames")
+            ConnectResult.Connected(device.name ?: "OBDLink")
+        } catch (e: Exception) {
+            disconnect()
+            ConnectResult.Failure(e.message ?: "K-line init failed after socket open")
+        }
     }
 
     /**
@@ -258,5 +310,13 @@ class ObdLinkBtManager(context: Context) {
     companion object {
         // Standard Serial Port Profile UUID.
         private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+
+        private val KLINE_INIT_COMMANDS = listOf(
+            "STP 21",
+            "STIMCS 1",
+            "STPBR 4800",
+            "ATAL",
+            "STIP4 0"
+        )
     }
 }

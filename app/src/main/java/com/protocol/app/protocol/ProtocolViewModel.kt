@@ -2,14 +2,20 @@ package com.protocol.app.protocol
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.protocol.app.obdlink.LiveSampleSource
+import com.protocol.app.obdlink.ObdLinkBtManager
+import com.protocol.app.obdlink.ObdLinkKlineSource
+import com.protocol.app.obdlink.ObdLinkLiveSource
 import com.protocol.app.openport2.OpenPort2UsbSession
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
+import com.protocol.app.openport2.OpenPortCanLiveSource
+import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2EcmProbe
+import com.protocol.app.openport2.Ssm2Pid
 import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.Ssm2Poller
 import com.protocol.app.openport2.TactrixBulkIo
 import com.protocol.app.openport2.TactrixClient
-import com.protocol.app.openport2.TactrixCommandLog
 import com.protocol.app.openport2.TactrixHex
 import com.protocol.app.openport2.TactrixTcpIo
 import com.protocol.app.openport2.UsbDisconnectedException
@@ -66,10 +72,11 @@ class ProtocolViewModel : ViewModel() {
     // can hand it a fresh PID set without restarting the flow (so gauges
     // don't flicker when the user toggles a parameter while reading live).
     private var runningPoller: Ssm2Poller? = null
-    // OBDLink (Bluetooth) live path — parallel to the USB poller, selected per
-    // run when the toggle is ON and the BT link is connected. USB path untouched.
-    private var runningObdSource: com.protocol.app.obdlink.ObdLinkLiveSource? = null
-    private var obdLinkManager: com.protocol.app.obdlink.ObdLinkBtManager? = null
+    // Non-USB-K-line live source (OBDLink CAN, OBDLink K-line, OpenPort CAN).
+    // Selected per run based on adapter × protocol. Held as the interface so
+    // updateLayout can hand any of the three concrete impls a fresh PID set.
+    private var runningLiveSource: LiveSampleSource? = null
+    private var obdLinkManager: ObdLinkBtManager? = null
     // TCP transport for simulator mode. Held across the coroutine so stop /
     // disconnect can close the socket and drop the reference.
     private var simulatorIo: TactrixTcpIo? = null
@@ -151,9 +158,24 @@ class ProtocolViewModel : ViewModel() {
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
-    fun setAdapter(adapter: Adapter?) = updateSettings { it.copy(adapter = adapter) }
+    fun setAdapter(adapter: Adapter?) {
+        // Switching adapter / protocol invalidates any cached K-line channel
+        // state so the next Read Live re-runs the full ATI..ATV init. If a
+        // poll is currently running, stop it first — letting it continue
+        // against the old adapter while the UI shows the new selection would
+        // be silently wrong.
+        val state = _uiState.value
+        if (state.isReadingLive || state.isLogging) stopReadingLive()
+        tactrixClient?.channelInitialized = false
+        updateSettings { it.copy(adapter = adapter) }
+    }
 
-    fun setProtocol(protocol: BusProtocol?) = updateSettings { it.copy(protocol = protocol) }
+    fun setProtocol(protocol: BusProtocol?) {
+        val state = _uiState.value
+        if (state.isReadingLive || state.isLogging) stopReadingLive()
+        tactrixClient?.channelInitialized = false
+        updateSettings { it.copy(protocol = protocol) }
+    }
 
     fun setSsmVariant(variant: SsmVariant?) = updateSettings { it.copy(ssmVariant = variant) }
 
@@ -165,14 +187,14 @@ class ProtocolViewModel : ViewModel() {
 
 
     /**
-     * Toggle the OBDLink (Bluetooth) live-data path on/off. Persisted via
-     * settings. Default is OFF; while OFF, the Bluetooth transport is never
-     * instantiated and no connection of any kind is attempted. Stage 2 wires
-     * the actual BT source behind this flag.
+     * Routed from the BT-permission denial path. Drops the OBDLink selection
+     * so the Settings UI reflects reality and nothing else tries to connect.
+     * The legacy obdLinkEnabled flag is no longer read by anything live — it
+     * stays persisted only to avoid prefs migration churn for existing users.
      */
-    fun setObdLinkEnabled(on: Boolean) {
-        updateSettings { it.copy(obdLinkEnabled = on) }
-        if (!on) disconnectObdLink()
+    fun clearObdLinkAdapter() {
+        if (_uiState.value.settings.adapter == Adapter.OBDLink) setAdapter(null)
+        disconnectObdLink()
     }
 
     /**
@@ -244,21 +266,40 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
-     * Connect the *paired* OBDLink over Bluetooth. The caller (Activity) must
-     * have granted BLUETOOTH_CONNECT first. Runs off the main thread; on success
-     * the connection status flips to Connected and Read/Log Live route here.
-     * No-op unless the toggle is ON (defense in depth on the off-guarantee).
+     * Connect the *paired* OBDLink over Bluetooth, picking the right channel
+     * mode based on the user's selected protocol. The Activity must have
+     * granted BLUETOOTH_CONNECT first. No-op unless OBDLink is the selected
+     * adapter (defense in depth on stale callbacks).
      */
     fun connectObdLink(appContext: android.content.Context) {
-        if (!_uiState.value.settings.obdLinkEnabled) return
-        setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Connecting to OBDLink…")
+        val s = _uiState.value.settings
+        if (s.adapter != Adapter.OBDLink) return
+        val protocol = s.protocol ?: run {
+            setConnectionStatus(
+                ConnectionStatus.Error("PROTOCOL not picked"),
+                "Pick K-Line or CAN in Settings before connecting OBDLink"
+            )
+            return
+        }
+        val protocolLabel = if (protocol == BusProtocol.KLine) "K-line" else "CAN"
+        setConnectionStatus(
+            ConnectionStatus.PermissionRequired("OBDLink"),
+            "Connecting OBDLink ($protocolLabel)..."
+        )
         viewModelScope.launch(Dispatchers.IO) {
             val mgr = obdLinkManager
-                ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
-            when (val r = mgr.connect()) {
-                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Connected ->
-                    setConnectionStatus(ConnectionStatus.Connected(r.deviceLabel), "Connected to ${r.deviceLabel}")
-                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Failure -> {
+                ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
+            val r = when (protocol) {
+                BusProtocol.CAN -> mgr.connect()
+                BusProtocol.KLine -> mgr.connectKline()
+            }
+            when (r) {
+                is ObdLinkBtManager.ConnectResult.Connected ->
+                    setConnectionStatus(
+                        ConnectionStatus.Connected(r.deviceLabel),
+                        "Connected to ${r.deviceLabel} ($protocolLabel)"
+                    )
+                is ObdLinkBtManager.ConnectResult.Failure -> {
                     obdLinkManager?.disconnect()
                     obdLinkManager = null
                     setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
@@ -270,11 +311,11 @@ class ProtocolViewModel : ViewModel() {
     /** Tear down the OBDLink link. Safe whether or not it's connected; leaves a
      *  live USB session (if any) untouched. */
     fun disconnectObdLink() {
-        val wasObd = runningObdSource != null
+        val wasObd = runningLiveSource != null && _uiState.value.settings.adapter == Adapter.OBDLink
         if (wasObd) {
             runJob?.cancel()
             runJob = null
-            runningObdSource = null
+            runningLiveSource = null
         }
         obdLinkManager?.disconnect()
         obdLinkManager = null
@@ -384,7 +425,7 @@ class ProtocolViewModel : ViewModel() {
         // tearing down — the next cycle picks it up automatically.
         val livePids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in next.pidIds }
         runningPoller?.updatePids(livePids)
-        runningObdSource?.updatePids(livePids)
+        runningLiveSource?.updatePids(livePids)
     }
 
     /** Add a gauge for [pidId] to the Live Data page if not already present. */
@@ -539,23 +580,11 @@ class ProtocolViewModel : ViewModel() {
             }
             return
         }
-        val useSimulator = state.settings.simulatorMode
-        val useObdLink = !useSimulator && state.settings.obdLinkEnabled && (obdLinkManager?.isConnected() == true)
-        if (!useSimulator && !useObdLink) {
-            openSession ?: run {
-                _uiState.value = state.copy(statusMessage = "No OpenPort session — discover and grant USB permission first")
-                return
-            }
-            if (tactrixClient == null) {
-                _uiState.value = state.copy(statusMessage = "No adapter client — reconnect the OpenPort")
-                return
-            }
-        }
 
-        // Only poll PIDs the user has placed on the Live Data page —
-        // saves K-line bandwidth and keeps the log columns aligned with
-        // what's visible. Refuse to start with an empty layout instead
-        // of running an empty A8 query.
+        val useSimulator = state.settings.simulatorMode
+        val adapter = state.settings.adapter
+        val protocol = state.settings.protocol
+
         val pidsOnPage = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in state.gaugeLayout.pidIds }
         if (pidsOnPage.isEmpty()) {
             _uiState.value = state.copy(
@@ -564,116 +593,89 @@ class ProtocolViewModel : ViewModel() {
             return
         }
 
+        // Pre-flight: confirm the selected path is reachable.
+        if (!useSimulator) {
+            if (adapter == null || protocol == null) {
+                _uiState.value = state.copy(
+                    statusMessage = "Pick ADAPTER and PROTOCOL in Settings first"
+                )
+                return
+            }
+            when (adapter) {
+                Adapter.OpenPort -> if (openSession == null || tactrixClient == null) {
+                    _uiState.value = state.copy(
+                        statusMessage = "OpenPort not connected — Settings → tap OpenPort 2.0 to grant USB permission"
+                    )
+                    return
+                }
+                Adapter.OBDLink -> if (obdLinkManager?.isConnected() != true) {
+                    _uiState.value = state.copy(
+                        statusMessage = "OBDLink not connected — Settings → tap OBDLink MX+ to pair and grant Bluetooth"
+                    )
+                    return
+                }
+            }
+        }
+
+        val initialStatus = when {
+            useSimulator -> "Connecting simulator on port ${state.settings.simulatorPort}..."
+            adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
+                if (tactrixClient?.channelInitialized == true) "Reusing K-line channel..." else "Initializing OpenPort K-line..."
+            adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> "Initializing OpenPort CAN @ 500 kbps..."
+            adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> "Polling OBDLink K-line @ 4800..."
+            adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> "Polling OBDLink CAN @ 500k..."
+            else -> "Connecting..."
+        }
+
         _uiState.value = state.copy(
             isReadingLive = true,
             isLogging = recordToLog,
             liveValues = emptyMap(),
             lastSampleTimestampMs = 0L,
             sessionLog = if (recordToLog) emptyList() else state.sessionLog,
-            statusMessage = when {
-                useSimulator -> "Connecting simulator on port ${state.settings.simulatorPort}…"
-                useObdLink -> "Connecting OBDLink…"
-                tactrixClient?.channelInitialized == true -> "Reusing channel..."
-                else -> "Initializing channel..."
-            }
+            statusMessage = initialStatus
         )
 
         val pollIntervalMs = state.settings.pollIntervalMs.toLong()
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
-            val sampleFlow: kotlinx.coroutines.flow.Flow<com.protocol.app.openport2.PollSample> = if (useSimulator) {
-                // Simulator path — TCP socket to 127.0.0.1:<port> instead of USB.
-                // Init and poll loop are byte-identical to the USB path; the only
-                // difference is the underlying TactrixIo implementation.
-                val port = state.settings.simulatorPort
-                val tcpIo = try {
-                    TactrixTcpIo("127.0.0.1", port)
-                } catch (e: UsbDisconnectedException) {
-                    _uiState.value = _uiState.value.copy(
-                        isReadingLive = false,
-                        isLogging = false,
-                        statusMessage = "Simulator unreachable on port $port — start it on the host and run `adb reverse tcp:$port tcp:$port`"
-                    )
-                    return@launch
+            val sampleFlow: kotlinx.coroutines.flow.Flow<PollSample>? = try {
+                when {
+                    useSimulator -> startSimulatorFlow(state.settings.simulatorPort, pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.OpenPort && protocol == BusProtocol.KLine -> startOpenPortKlineFlow(pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> startOpenPortCanFlow(pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> startObdLinkKlineFlow(pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> startObdLinkCanFlow(pidsOnPage, pollIntervalMs)
+                    else -> null
                 }
-                simulatorIo = tcpIo
-                val client = TactrixClient(tcpIo)
-                client.drainResponseBuffer()
-                client.resetRequestIdCounter(startFrom = 2)
-                val probe = Ssm2EcmProbe(client)
-                val initLog = mutableListOf<TactrixCommandLog>()
-                if (!probe.initializeChannel(initLog)) {
-                    _uiState.value = _uiState.value.copy(
-                        isReadingLive = false,
-                        isLogging = false,
-                        statusMessage = "Simulator channel init failed"
-                    )
-                    return@launch
-                }
+            } catch (e: UsbDisconnectedException) {
                 _uiState.value = _uiState.value.copy(
-                    statusMessage = if (_uiState.value.isLogging)
-                        "Logging live data (simulator)..."
-                    else
-                        "Reading live data (simulator)..."
+                    isReadingLive = false,
+                    isLogging = false,
+                    statusMessage = "Adapter disconnected during init"
                 )
-                val poller = Ssm2Poller(client, pidsOnPage)
-                runningPoller = poller
-                poller.startFlow(pollIntervalMs)
-            } else if (useObdLink) {
-                // OBDLink (Bluetooth) path — ELM channel already set up by the
-                // manager on connect; just build the SSM2-over-CAN poll source.
-                val transport = obdLinkManager?.transport
-                if (transport == null) {
-                    _uiState.value = _uiState.value.copy(
-                        isReadingLive = false,
-                        isLogging = false,
-                        statusMessage = "OBDLink not connected — turn Bluetooth on first"
-                    )
-                    return@launch
-                }
-                val src = com.protocol.app.obdlink.ObdLinkLiveSource(transport, pidsOnPage)
-                runningObdSource = src
+                return@launch
+            } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
-                    statusMessage = if (_uiState.value.isLogging)
-                        "Logging live data (OBDLink)..."
-                    else
-                        "Reading live data (OBDLink)..."
+                    isReadingLive = false,
+                    isLogging = false,
+                    statusMessage = "Init failed: ${e.message ?: e.javaClass.simpleName}"
                 )
-                src.startFlow(pollIntervalMs)
-            } else {
-                val client = tactrixClient ?: run {
-                    _uiState.value = _uiState.value.copy(
-                        isReadingLive = false,
-                        isLogging = false,
-                        statusMessage = "No adapter client — reconnect the OpenPort"
-                    )
-                    return@launch
-                }
-                client.drainResponseBuffer()
-                client.resetRequestIdCounter(startFrom = 2)
-
-                val probe = Ssm2EcmProbe(client)
-                val initLog = mutableListOf<TactrixCommandLog>()
-                if (!probe.initializeChannel(initLog)) {
-                    _uiState.value = _uiState.value.copy(
-                        isReadingLive = false,
-                        isLogging = false,
-                        statusMessage = "Channel init failed — check connection and retry"
-                    )
-                    return@launch
-                }
-
-                _uiState.value = _uiState.value.copy(
-                    statusMessage = if (_uiState.value.isLogging)
-                        "Logging live data..."
-                    else
-                        "Reading live data..."
-                )
-
-                val poller = Ssm2Poller(client, pidsOnPage)
-                runningPoller = poller
-                poller.startFlow(pollIntervalMs)
+                return@launch
             }
+
+            if (sampleFlow == null) {
+                _uiState.value = _uiState.value.copy(
+                    isReadingLive = false,
+                    isLogging = false,
+                    statusMessage = "Channel init failed — check connection and retry"
+                )
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                statusMessage = if (_uiState.value.isLogging) "Logging live data..." else "Reading live data..."
+            )
             try {
                 sampleFlow.collect { sample ->
                     val current = _uiState.value
@@ -735,7 +737,7 @@ class ProtocolViewModel : ViewModel() {
                 // Coroutine cancelled — fall through to finally
             } finally {
                 runningPoller = null
-                runningObdSource = null
+                runningLiveSource = null
                 simulatorIo?.close()
                 simulatorIo = null
                 // Drop the last-known values so gauges revert to "--" when
@@ -753,6 +755,78 @@ class ProtocolViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    /**
+     * Simulator path — TCP socket to 127.0.0.1:<port> instead of USB. Init and
+     * poll loop are byte-identical to the USB K-line path; only the underlying
+     * TactrixIo implementation differs.
+     */
+    private fun startSimulatorFlow(
+        port: Int,
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val tcpIo = TactrixTcpIo("127.0.0.1", port)
+        simulatorIo = tcpIo
+        val client = TactrixClient(tcpIo)
+        client.drainResponseBuffer()
+        client.resetRequestIdCounter(startFrom = 2)
+        val probe = Ssm2EcmProbe(client)
+        if (!probe.initializeChannel(mutableListOf())) return null
+        val poller = Ssm2Poller(client, pidsOnPage)
+        runningPoller = poller
+        return poller.startFlow(pollIntervalMs)
+    }
+
+    /** OpenPort 2.0 + K-line: the original path, full ATI..ATV init then SSM2 polling. */
+    private fun startOpenPortKlineFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val client = tactrixClient ?: return null
+        client.drainResponseBuffer()
+        client.resetRequestIdCounter(startFrom = 2)
+        val probe = Ssm2EcmProbe(client)
+        if (!probe.initializeChannel(mutableListOf())) return null
+        val poller = Ssm2Poller(client, pidsOnPage)
+        runningPoller = poller
+        return poller.startFlow(pollIntervalMs)
+    }
+
+    /** OpenPort 2.0 + CAN: open ISO15765 channel @ 500k on 7E0/7E8 then per-address A8 polling. */
+    private fun startOpenPortCanFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val session = openSession ?: return null
+        val io = TactrixBulkIo(session)
+        val src = OpenPortCanLiveSource(io, pidsOnPage)
+        if (!src.initChannel()) return null
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
+    /** OBDLink + K-line: raw STN K-line mode + full SSM2 frame batched in one A8. */
+    private fun startObdLinkKlineFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val transport = obdLinkManager?.transport ?: return null
+        val src = ObdLinkKlineSource(transport, pidsOnPage)
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
+    /** OBDLink + CAN: ELM CAN channel set up by ObdLinkBtManager.connect(); poll one address at a time. */
+    private fun startObdLinkCanFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val transport = obdLinkManager?.transport ?: return null
+        val src = ObdLinkLiveSource(transport, pidsOnPage)
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
     }
 
     fun startLogging() {
@@ -797,6 +871,16 @@ class ProtocolViewModel : ViewModel() {
 
     fun runProbe() {
         if (_uiState.value.isRunningProbe || _uiState.value.isReadingLive || _uiState.value.isLogging) return
+        val s = _uiState.value.settings
+        // Probe still drives the K-line ATI..ATV init + BF40 ECU ID query. The
+        // CAN and OBDLink paths verify themselves through Read Live Data; a
+        // dedicated probe for each path is a follow-up.
+        if (!s.simulatorMode && (s.adapter != Adapter.OpenPort || s.protocol != BusProtocol.KLine)) {
+            _uiState.value = _uiState.value.copy(
+                statusMessage = "Test SSM2 Probe runs on OpenPort 2.0 + K-Line. For the other paths, use Read Live Data."
+            )
+            return
+        }
         openSession ?: run {
             _uiState.value = _uiState.value.copy(
                 statusMessage = "No OpenPort session — discover and grant USB permission first"
