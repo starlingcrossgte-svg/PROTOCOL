@@ -55,12 +55,10 @@ internal fun ConnectionStatusStripe(status: ConnectionStatus) {
 // icon inline next to its mode buttons when the shared header is hidden.
 @Composable
 internal fun HamburgerMenu(
-    splitScreenMode: Boolean,
     obdLinkEnabled: Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
-    onToggleSplitScreen: () -> Unit,
     onToggleObdLink: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -130,36 +128,7 @@ internal fun HamburgerMenu(
                     onOpenTcmParameters()
                 }
             )
-            // Toggle item — shows ON/OFF state at the right so the user can
-            // tell at a glance whether split screen is active. Tap closes
-            // the menu and flips the setting.
-            DropdownMenuItem(
-                text = {
-                    androidx.compose.foundation.layout.Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "Split Screen",
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            if (splitScreenMode) "ON" else "OFF",
-                            color = if (splitScreenMode) PassGreen else NeutralGray,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                },
-                onClick = {
-                    expanded = false
-                    onToggleSplitScreen()
-                }
-            )
-            // Bluetooth (OBDLink) toggle — same ON/OFF pattern as Split Screen.
+            // Bluetooth (OBDLink) toggle.
             // OFF (default) means the OBDLink BT path is never engaged at all:
             // no scan, no socket, no connection. Wired to the backend in Stage 2.
             DropdownMenuItem(

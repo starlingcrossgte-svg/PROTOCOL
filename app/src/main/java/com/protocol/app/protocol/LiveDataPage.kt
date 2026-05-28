@@ -29,19 +29,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-// Page 1 — Live Data. Active polling page: snap grid of gauges, mode
-// buttons + inline hamburger, bright-green status/polling-rate line, and
-// the session log table beneath. The shared header is hidden on this
-// page (see ProtocolScreen) so gauges get the maximum vertical space —
-// important for split-screen and in-dash setups.
-//
-// Layout depends on settings.splitScreenMode:
-//   OFF (default) — mode buttons + hamburger on top, then status,
-//                   then gauges, then log section
-//   ON            — status, then gauges, then mode buttons + hamburger,
-//                   then log section. Gauge growth pushes both the
-//                   button row and the log down together.
-
 @Composable
 internal fun LiveDataPage(
     uiState: ProtocolUiState,
@@ -59,12 +46,10 @@ internal fun LiveDataPage(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
-    onToggleSplitScreen: () -> Unit,
     onToggleObdLink: () -> Unit
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
-    val splitScreen = uiState.settings.splitScreenMode
     val scrollState = rememberScrollState()
 
     Column(
@@ -72,27 +57,8 @@ internal fun LiveDataPage(
             .fillMaxSize()
             .verticalScroll(scrollState, enabled = !uiState.editMode)
             .padding(horizontal = 10.dp, vertical = 4.dp),
-        // Tight global spacing — every Live Data px counts on split-screen
-        // and in-dash setups. Status line + gauges should sit as close to
-        // the top of the page as possible.
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        if (!splitScreen) {
-            ModeButtonsRow(
-                uiState = uiState,
-                splitScreenMode = splitScreen,
-                onStartReadingLive = onStartReadingLive,
-                onStopReadingLive = onStopReadingLive,
-                onStartLogging = onStartLogging,
-                onStopLogging = onStopLogging,
-                onOpenParameters = onOpenParameters,
-                onOpenTcmParameters = onOpenTcmParameters,
-                onOpenLiveDataSettings = onOpenLiveDataSettings,
-                onToggleSplitScreen = onToggleSplitScreen,
-                onToggleObdLink = onToggleObdLink
-            )
-        }
-
         StatusLine(uiState)
 
         SnapGaugeGrid(
@@ -103,21 +69,17 @@ internal fun LiveDataPage(
             onResizeGauge = onResizeGauge
         )
 
-        if (splitScreen) {
-            ModeButtonsRow(
-                uiState = uiState,
-                splitScreenMode = splitScreen,
-                onStartReadingLive = onStartReadingLive,
-                onStopReadingLive = onStopReadingLive,
-                onStartLogging = onStartLogging,
-                onStopLogging = onStopLogging,
-                onOpenParameters = onOpenParameters,
-                onOpenTcmParameters = onOpenTcmParameters,
-                onOpenLiveDataSettings = onOpenLiveDataSettings,
-                onToggleSplitScreen = onToggleSplitScreen,
-                onToggleObdLink = onToggleObdLink
-            )
-        }
+        ModeButtonsRow(
+            uiState = uiState,
+            onStartReadingLive = onStartReadingLive,
+            onStopReadingLive = onStopReadingLive,
+            onStartLogging = onStartLogging,
+            onStopLogging = onStopLogging,
+            onOpenParameters = onOpenParameters,
+            onOpenTcmParameters = onOpenTcmParameters,
+            onOpenLiveDataSettings = onOpenLiveDataSettings,
+            onToggleObdLink = onToggleObdLink
+        )
 
         LogActionRow(
             title = "Session Log (${uiState.sessionLog.size})",
@@ -164,13 +126,9 @@ private fun StatusLine(uiState: ProtocolUiState) {
     )
 }
 
-// Mode buttons + inline hamburger, used both at-top (default layout) and
-// below-gauges (split-screen layout). Buttons share remaining width via
-// weight(1f); the hamburger takes its native 44×32 dp footprint.
 @Composable
 private fun ModeButtonsRow(
     uiState: ProtocolUiState,
-    splitScreenMode: Boolean,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
@@ -178,7 +136,6 @@ private fun ModeButtonsRow(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
-    onToggleSplitScreen: () -> Unit,
     onToggleObdLink: () -> Unit
 ) {
     Row(
@@ -186,10 +143,13 @@ private fun ModeButtonsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Read button. Always tappable (modulo probe in-flight).
-        //   idle             → "Read Live Data"             → start reading only
-        //   reading only     → "Stop Reading"               → stop reading
-        //   reading+logging  → "Stop Reading + Logging"     → stop both
+        HamburgerMenu(
+            obdLinkEnabled = uiState.settings.obdLinkEnabled,
+            onOpenParameters = onOpenParameters,
+            onOpenTcmParameters = onOpenTcmParameters,
+            onOpenLiveDataSettings = onOpenLiveDataSettings,
+            onToggleObdLink = onToggleObdLink
+        )
         ModeButton(
             label = when {
                 uiState.isLogging -> "Stop Reading + Logging"
@@ -201,13 +161,9 @@ private fun ModeButtonsRow(
             onClick = {
                 if (uiState.isReadingLive) onStopReadingLive() else onStartReadingLive()
             },
+            shape = y2kLeftButtonShape(),
             modifier = Modifier.weight(1f)
         )
-        // Log button. Always tappable (modulo probe in-flight).
-        //   idle             → "Read + Log Live"            → start reading + logging
-        //   reading only     → "Log Live Data"              → add logging on top
-        //   logging (both)   → "Stop Logging"               → stop logging only,
-        //                                                     keep reading running
         ModeButton(
             label = when {
                 uiState.isLogging -> "Stop Logging"
@@ -219,16 +175,8 @@ private fun ModeButtonsRow(
             onClick = {
                 if (uiState.isLogging) onStopLogging() else onStartLogging()
             },
+            shape = y2kRightButtonShape(),
             modifier = Modifier.weight(1f)
-        )
-        HamburgerMenu(
-            splitScreenMode = splitScreenMode,
-            obdLinkEnabled = uiState.settings.obdLinkEnabled,
-            onOpenParameters = onOpenParameters,
-            onOpenTcmParameters = onOpenTcmParameters,
-            onOpenLiveDataSettings = onOpenLiveDataSettings,
-            onToggleSplitScreen = onToggleSplitScreen,
-            onToggleObdLink = onToggleObdLink
         )
     }
 }
@@ -239,6 +187,7 @@ private fun ModeButton(
     active: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    shape: androidx.compose.ui.graphics.Shape = y2kCornerShape(),
     modifier: Modifier = Modifier
 ) {
     Button(
@@ -250,7 +199,7 @@ private fun ModeButton(
             disabledContainerColor = SurfaceBg.copy(alpha = 0.5f),
             disabledContentColor = NeutralGray
         ),
-        shape = y2kCornerShape(),
+        shape = shape,
         border = BorderStroke(1.dp, Accent),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
         modifier = modifier

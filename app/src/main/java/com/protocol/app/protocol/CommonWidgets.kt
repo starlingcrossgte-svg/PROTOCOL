@@ -35,16 +35,6 @@ internal fun CategoryHeader(label: String) {
     )
 }
 
-/**
- * Uniform header/action row for every log on the logging side (Session Log,
- * Probe Log, USB Traffic, OBDLink BT). Title on the left (weight 1f), then
- * Clear and Export CSV side by side. Single source so spacing, font, button
- * height, and the right-edge inset are identical on every log — modeled on the
- * Session Log. (The flash silo intentionally keeps its own controls.)
- *
- * The 2.dp end padding pulls the Export CSV button a hair inside the log
- * card's right edge so it no longer slightly overhangs it.
- */
 @Composable
 internal fun LogActionRow(
     title: String,
@@ -54,9 +44,7 @@ internal fun LogActionRow(
     onCopy: (() -> Unit)? = null
 ) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(end = 2.dp),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -83,7 +71,7 @@ private fun LogActionButton(text: String, onClick: () -> Unit) {
             containerColor = SurfaceBg,
             contentColor = Color.White
         ),
-        shape = y2kCornerShape(),
+        shape = y2kLeftButtonShape(),
         border = BorderStroke(1.dp, Accent),
         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
     ) {

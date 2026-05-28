@@ -147,7 +147,6 @@ class ProtocolViewModel : ViewModel() {
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
-    fun setSplitScreenMode(on: Boolean) = updateSettings { it.copy(splitScreenMode = on) }
 
     /**
      * Toggle the OBDLink (Bluetooth) live-data path on/off. Persisted via
