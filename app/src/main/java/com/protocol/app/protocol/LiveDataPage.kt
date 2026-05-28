@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -202,7 +203,7 @@ private fun ModeButton(
         shape = shape,
         border = BorderStroke(1.dp, Accent),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-        modifier = modifier
+        modifier = modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp)
     ) {
         Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
     }
