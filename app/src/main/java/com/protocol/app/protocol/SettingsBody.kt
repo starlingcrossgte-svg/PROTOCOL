@@ -34,9 +34,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SettingsBody(
     uiState: ProtocolUiState,
-    onAdapterChange: (Adapter) -> Unit,
-    onProtocolChange: (BusProtocol) -> Unit,
-    onSsmVariantChange: (SsmVariant) -> Unit,
+    onAdapterChange: (Adapter?) -> Unit,
+    onProtocolChange: (BusProtocol?) -> Unit,
+    onSsmVariantChange: (SsmVariant?) -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onDevModeChange: (Boolean) -> Unit
@@ -63,10 +63,10 @@ internal fun SettingsBody(
             ) {
                 CategoryHeader("ADAPTER")
                 SelectorButton("OpenPort 2.0", selected = s.adapter == Adapter.OpenPort) {
-                    onAdapterChange(Adapter.OpenPort)
+                    onAdapterChange(if (s.adapter == Adapter.OpenPort) null else Adapter.OpenPort)
                 }
                 SelectorButton("OBDLink MX+", selected = s.adapter == Adapter.OBDLink) {
-                    onAdapterChange(Adapter.OBDLink)
+                    onAdapterChange(if (s.adapter == Adapter.OBDLink) null else Adapter.OBDLink)
                 }
             }
             Column(
@@ -75,10 +75,10 @@ internal fun SettingsBody(
             ) {
                 CategoryHeader("PROTOCOL")
                 SelectorButton("K-Line", selected = s.protocol == BusProtocol.KLine) {
-                    onProtocolChange(BusProtocol.KLine)
+                    onProtocolChange(if (s.protocol == BusProtocol.KLine) null else BusProtocol.KLine)
                 }
                 SelectorButton("CAN Bus", selected = s.protocol == BusProtocol.CAN) {
-                    onProtocolChange(BusProtocol.CAN)
+                    onProtocolChange(if (s.protocol == BusProtocol.CAN) null else BusProtocol.CAN)
                 }
             }
         }
@@ -88,10 +88,10 @@ internal fun SettingsBody(
         // SSM3 is a placeholder until protocol support lands.
         CategoryHeader("SSM")
         SelectorButton("SSM2", selected = s.ssmVariant == SsmVariant.SSM2) {
-            onSsmVariantChange(SsmVariant.SSM2)
+            onSsmVariantChange(if (s.ssmVariant == SsmVariant.SSM2) null else SsmVariant.SSM2)
         }
         SelectorButton("SSM3", selected = s.ssmVariant == SsmVariant.SSM3) {
-            onSsmVariantChange(SsmVariant.SSM3)
+            onSsmVariantChange(if (s.ssmVariant == SsmVariant.SSM3) null else SsmVariant.SSM3)
         }
 
         // ── Background ─────────────────────────────────────────────

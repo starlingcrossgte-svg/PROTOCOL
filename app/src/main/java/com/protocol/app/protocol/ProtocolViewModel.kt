@@ -147,11 +147,11 @@ class ProtocolViewModel : ViewModel() {
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
-    fun setAdapter(adapter: Adapter) = updateSettings { it.copy(adapter = adapter) }
+    fun setAdapter(adapter: Adapter?) = updateSettings { it.copy(adapter = adapter) }
 
-    fun setProtocol(protocol: BusProtocol) = updateSettings { it.copy(protocol = protocol) }
+    fun setProtocol(protocol: BusProtocol?) = updateSettings { it.copy(protocol = protocol) }
 
-    fun setSsmVariant(variant: SsmVariant) = updateSettings { it.copy(ssmVariant = variant) }
+    fun setSsmVariant(variant: SsmVariant?) = updateSettings { it.copy(ssmVariant = variant) }
 
 
     /**
