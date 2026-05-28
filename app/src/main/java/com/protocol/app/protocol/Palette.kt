@@ -41,6 +41,7 @@ internal val InkMuted    = Color(0xFFB8B8C0)
 internal fun y2kCornerShape() = CutCornerShape(topEnd = 10.dp, bottomStart = 10.dp)
 internal fun y2kLeftButtonShape() = CutCornerShape(bottomStart = 10.dp)
 internal fun y2kRightButtonShape() = CutCornerShape(topEnd = 10.dp)
+internal fun y2kBottomEndCutShape() = CutCornerShape(bottomEnd = 10.dp)
 
 // Vertical gradient brushes — top of the surface a touch lighter than
 // the bottom, gives buttons and panels visible depth without needing

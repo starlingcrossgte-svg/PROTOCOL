@@ -45,7 +45,7 @@ internal fun LogActionRow(
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -55,23 +55,25 @@ internal fun LogActionRow(
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f)
         )
-        LogActionButton("Clear", onClear)
-        // Optional one-tap copy — the whole log to the clipboard, so there's no
-        // need to manually highlight text (lazy-list selection is unreliable).
-        if (onCopy != null) LogActionButton("Copy", onCopy)
-        LogActionButton("Export CSV", onExportCsv)
+        LogActionButton("Clear", onClear, y2kLeftButtonShape())
+        if (onCopy != null) LogActionButton("Copy", onCopy, y2kCornerShape())
+        LogActionButton("Export CSV", onExportCsv, y2kBottomEndCutShape())
     }
 }
 
 @Composable
-private fun LogActionButton(text: String, onClick: () -> Unit) {
+private fun LogActionButton(
+    text: String,
+    onClick: () -> Unit,
+    shape: androidx.compose.ui.graphics.Shape
+) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
             containerColor = SurfaceBg,
             contentColor = Color.White
         ),
-        shape = y2kLeftButtonShape(),
+        shape = shape,
         border = BorderStroke(1.dp, Accent),
         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
     ) {
