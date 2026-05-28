@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 internal fun LiveDataSettingsBody(
     uiState: ProtocolUiState,
     onAdapterChange: (Adapter) -> Unit,
-    onProtocolChange: (Protocol) -> Unit,
+    onProtocolChange: (BusProtocol) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onResetLayout: () -> Unit,
@@ -47,11 +47,11 @@ internal fun LiveDataSettingsBody(
         }
 
         CategoryHeader("PROTOCOL")
-        SelectorButton("K-Line", selected = s.protocol == Protocol.KLine) {
-            onProtocolChange(Protocol.KLine)
+        SelectorButton("K-Line", selected = s.protocol == BusProtocol.KLine) {
+            onProtocolChange(BusProtocol.KLine)
         }
-        SelectorButton("CAN Bus", selected = s.protocol == Protocol.CAN) {
-            onProtocolChange(Protocol.CAN)
+        SelectorButton("CAN Bus", selected = s.protocol == BusProtocol.CAN) {
+            onProtocolChange(BusProtocol.CAN)
         }
 
         CategoryHeader("POLLING")

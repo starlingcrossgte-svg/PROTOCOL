@@ -3,7 +3,7 @@ package com.protocol.app.protocol
 import android.content.Context
 
 enum class Adapter { OpenPort, OBDLink }
-enum class Protocol { KLine, CAN }
+enum class BusProtocol { KLine, CAN }
 
 data class AppSettings(
     val pollIntervalMs: Int = DEFAULT_POLL_INTERVAL_MS,
@@ -12,7 +12,7 @@ data class AppSettings(
     val splitScreenMode: Boolean = true,
     val obdLinkEnabled: Boolean = false,
     val adapter: Adapter = Adapter.OpenPort,
-    val protocol: Protocol = Protocol.KLine
+    val protocol: BusProtocol = BusProtocol.KLine
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -35,8 +35,8 @@ class SettingsStore(context: Context) {
         devMode = prefs.getBoolean(KEY_DEV_MODE, false),
         splitScreenMode = prefs.getBoolean(KEY_SPLIT_SCREEN, true),
         obdLinkEnabled = prefs.getBoolean(KEY_OBDLINK_ENABLED, false),
-        adapter = Adapter.entries.getOrElse(prefs.getInt(KEY_ADAPTER, 0)) { Adapter.OpenPort },
-        protocol = Protocol.entries.getOrElse(prefs.getInt(KEY_PROTOCOL, 0)) { Protocol.KLine }
+        adapter = Adapter.values().getOrElse(prefs.getInt(KEY_ADAPTER, 0)) { Adapter.OpenPort },
+        protocol = BusProtocol.values().getOrElse(prefs.getInt(KEY_PROTOCOL, 0)) { BusProtocol.KLine }
     )
 
     fun save(s: AppSettings) {

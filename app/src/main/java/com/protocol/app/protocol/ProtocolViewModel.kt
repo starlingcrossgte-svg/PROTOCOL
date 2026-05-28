@@ -149,7 +149,7 @@ class ProtocolViewModel : ViewModel() {
 
     fun setAdapter(adapter: Adapter) = updateSettings { it.copy(adapter = adapter) }
 
-    fun setProtocol(protocol: Protocol) = updateSettings { it.copy(protocol = protocol) }
+    fun setProtocol(protocol: BusProtocol) = updateSettings { it.copy(protocol = protocol) }
 
 
     /**

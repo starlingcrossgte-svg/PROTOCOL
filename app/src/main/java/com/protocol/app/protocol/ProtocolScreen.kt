@@ -72,7 +72,7 @@ fun ProtocolScreen(
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onAdapterChange: (Adapter) -> Unit,
-    onProtocolChange: (Protocol) -> Unit,
+    onProtocolChange: (BusProtocol) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
