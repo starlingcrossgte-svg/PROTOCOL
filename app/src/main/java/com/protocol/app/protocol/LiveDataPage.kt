@@ -2,12 +2,16 @@ package com.protocol.app.protocol
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +74,8 @@ internal fun LiveDataPage(
             onResizeGauge = onResizeGauge
         )
 
+        Spacer(Modifier.height(6.dp))
+
         ModeButtonsRow(
             uiState = uiState,
             onStartReadingLive = onStartReadingLive,
@@ -81,11 +88,15 @@ internal fun LiveDataPage(
             onToggleObdLink = onToggleObdLink
         )
 
+        Spacer(Modifier.height(6.dp))
+
         LogActionRow(
             title = "Session Log (${uiState.sessionLog.size})",
             onClear = onClearSessionLog,
             onExportCsv = onExportSessionLog
         )
+
+        Spacer(Modifier.height(6.dp))
 
         SessionLogCard(uiState)
     }
@@ -140,7 +151,7 @@ private fun ModeButtonsRow(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         HamburgerMenu(
@@ -190,21 +201,22 @@ private fun ModeButton(
     shape: androidx.compose.ui.graphics.Shape = y2kCornerShape(),
     modifier: Modifier = Modifier
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (active) Accent else SurfaceBg,
-            contentColor = Color.White,
-            disabledContainerColor = SurfaceBg.copy(alpha = 0.5f),
-            disabledContentColor = NeutralGray
-        ),
-        shape = shape,
-        border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    val containerColor = when {
+        !enabled -> SurfaceBg.copy(alpha = 0.5f)
+        active -> Accent
+        else -> SurfaceBg
+    }
+    val textColor = if (enabled) Color.White else NeutralGray
+    Box(
         modifier = modifier
+            .clip(shape)
+            .background(containerColor, shape)
+            .border(1.dp, Accent, shape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        Text(label, color = textColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

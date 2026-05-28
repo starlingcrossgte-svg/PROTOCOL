@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -50,7 +51,7 @@ internal fun LogActionRow(
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -60,29 +61,9 @@ internal fun LogActionRow(
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f)
         )
-        LogActionButton("Clear", onClear, y2kLeftButtonShape())
-        if (onCopy != null) LogActionButton("Copy", onCopy, y2kCornerShape())
+        SimpleButton("Clear", onClear, y2kLeftButtonShape())
+        if (onCopy != null) SimpleButton("Copy", onCopy, y2kCornerShape())
         SimpleButton("Export CSV", onExportCsv, y2kBottomEndCutShape())
-    }
-}
-
-@Composable
-private fun LogActionButton(
-    text: String,
-    onClick: () -> Unit,
-    shape: androidx.compose.ui.graphics.Shape
-) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = SurfaceBg,
-            contentColor = Color.White
-        ),
-        shape = shape,
-        border = BorderStroke(1.dp, Accent),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Text(text, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -96,6 +77,7 @@ internal fun SimpleButton(
 ) {
     Box(
         modifier = modifier
+            .defaultMinSize(minWidth = 58.dp, minHeight = 40.dp)
             .clip(shape)
             .background(containerColor, shape)
             .border(1.dp, Accent, shape)
