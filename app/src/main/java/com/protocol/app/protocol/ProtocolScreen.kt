@@ -14,6 +14,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
@@ -103,28 +104,37 @@ fun ProtocolScreen(
     // openSubPage clears editMode anyway, so the two never both fire.
     BackHandler(enabled = uiState.activeSubPage != null) { onCloseSubPage() }
 
-    Box(modifier = modifier.fillMaxSize().background(ScreenBg)) {
-        // Layer 1 — user-chosen background image, if any. ContentScale.Crop
-        // fills the screen, possibly cropping; the dim overlay keeps text
-        // readable regardless of photo brightness.
-        val bgUri = uiState.backgroundUri
+    // Overdraw note: ScreenBg is skipped when a background photo is set
+    // (the photo covers it completely). The 50% dim overlay is folded
+    // into the AsyncImage's own draw pass via drawWithContent, so the
+    // photo + dim render in a single layer instead of two.
+    val bgUri = uiState.backgroundUri
+    val rootModifier = if (bgUri != null) {
+        modifier.fillMaxSize()
+    } else {
+        modifier.fillMaxSize().background(ScreenBg)
+    }
+    Box(modifier = rootModifier) {
         if (bgUri != null) {
             AsyncImage(
                 model = bgUri,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.5f))
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(Color.Black.copy(alpha = 0.5f))
+                    }
             )
         }
 
-        // Layer 2 — Y2K spike decor. Sits over the photo (or the solid bg
-        // if no photo). Low alpha so it whispers either way.
-        Canvas(modifier = Modifier.fillMaxSize()) { drawY2kBackgroundDecor(this) }
+        // Y2K spike decor. Drawn only on the default ScreenBg — a user
+        // photo replaces the look entirely (the spikes would just be
+        // noise on top of their image and add 1x overdraw).
+        if (bgUri == null) {
+            Canvas(modifier = Modifier.fillMaxSize()) { drawY2kBackgroundDecor(this) }
+        }
 
         Column(modifier = Modifier
             .fillMaxSize()
