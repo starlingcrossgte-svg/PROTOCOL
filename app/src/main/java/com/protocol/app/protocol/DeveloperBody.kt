@@ -19,11 +19,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.protocol.app.obdlink.ObdLinkTrafficEvent
@@ -70,8 +76,11 @@ internal fun DeveloperBody(
     onClearProbeLog: () -> Unit,
     onCopyProbeLog: () -> Unit,
     onExportProbeLog: () -> Unit,
-    onHuntKlineInit: () -> Unit
+    onHuntKlineInit: () -> Unit,
+    onSimulatorModeChange: (Boolean) -> Unit,
+    onSimulatorPortChange: (Int) -> Unit
 ) {
+    val s = uiState.settings
     val trafficEvents by UsbTrafficLog.events.collectAsState()
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
     val context = LocalContext.current
@@ -96,6 +105,80 @@ internal fun DeveloperBody(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // ── Simulator ─────────────────────────────────────────────
+        // Routes the live-data flow over a localhost TCP socket instead of
+        // the real adapter, against the host-side VIPER emulator. The
+        // ADAPTER × PROTOCOL selectors in Settings still pick which of the
+        // four paths runs — VIPER auto-detects from the first client bytes.
+        // Forward through `adb reverse tcp:<port> tcp:<port>` on the host.
+        CategoryHeader("SIMULATOR")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Simulator Mode",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            Switch(
+                checked = s.simulatorMode,
+                onCheckedChange = onSimulatorModeChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Accent,
+                    uncheckedThumbColor = InkMuted,
+                    uncheckedTrackColor = SurfaceAlt,
+                    uncheckedBorderColor = BorderGray
+                )
+            )
+        }
+        var portField by remember(s.simulatorPort) { mutableStateOf(s.simulatorPort.toString()) }
+        OutlinedTextField(
+            value = portField,
+            onValueChange = { raw ->
+                val digits = raw.filter { it.isDigit() }.take(5)
+                portField = digits
+                digits.toIntOrNull()?.let(onSimulatorPortChange)
+            },
+            label = {
+                Text(
+                    "TCP PORT",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontFamily = FontFamily.Monospace,
+                color = Color.White
+            ),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Accent,
+                unfocusedBorderColor = Accent.copy(alpha = 0.6f),
+                cursorColor = Accent,
+                focusedLabelColor = Accent,
+                unfocusedLabelColor = NeutralGray,
+                focusedContainerColor = SurfaceBg,
+                unfocusedContainerColor = SurfaceBg
+            )
+        )
+        Text(
+            text = "ON → Read Live Data routes through 127.0.0.1:<port>. The ADAPTER × PROTOCOL selectors in Settings still pick which of the four paths runs.",
+            color = NeutralGray,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // ── Probe section ─────────────────────────────────────────
         CategoryHeader("SSM2 PROBE")
         Button(

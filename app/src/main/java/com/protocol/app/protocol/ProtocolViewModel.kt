@@ -6,6 +6,7 @@ import com.protocol.app.obdlink.LiveSampleSource
 import com.protocol.app.obdlink.ObdLinkBtManager
 import com.protocol.app.obdlink.ObdLinkKlineSource
 import com.protocol.app.obdlink.ObdLinkLiveSource
+import com.protocol.app.obdlink.ObdLinkTcpManager
 import com.protocol.app.openport2.OpenPort2UsbSession
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import com.protocol.app.openport2.OpenPortCanLiveSource
@@ -77,9 +78,13 @@ class ProtocolViewModel : ViewModel() {
     // updateLayout can hand any of the three concrete impls a fresh PID set.
     private var runningLiveSource: LiveSampleSource? = null
     private var obdLinkManager: ObdLinkBtManager? = null
-    // TCP transport for simulator mode. Held across the coroutine so stop /
-    // disconnect can close the socket and drop the reference.
+    // TCP transport for simulator mode (OpenPort paths). Held across the
+    // coroutine so stop / disconnect can close the socket and drop the
+    // reference.
     private var simulatorIo: TactrixTcpIo? = null
+    // TCP-backed OBDLink manager for simulator mode (OBDLink paths). Held
+    // separately so its lifecycle is independent of the real-BT manager.
+    private var simulatorObdLink: ObdLinkTcpManager? = null
     private var layoutStore: GaugeLayoutStore? = null
     private var backgroundStore: BackgroundStore? = null
     private var settingsStore: SettingsStore? = null
@@ -593,14 +598,18 @@ class ProtocolViewModel : ViewModel() {
             return
         }
 
-        // Pre-flight: confirm the selected path is reachable.
+        // Pre-flight: ADAPTER + PROTOCOL must be picked (true even in simulator
+        // mode — the selectors decide which of the four paths runs against
+        // VIPER, so an empty selector would just route nowhere).
+        if (adapter == null || protocol == null) {
+            _uiState.value = state.copy(
+                statusMessage = "Pick ADAPTER and PROTOCOL in Settings first"
+            )
+            return
+        }
+        // Live-hardware paths additionally require the adapter to be connected.
+        // Simulator paths skip this — they open their own TCP socket on demand.
         if (!useSimulator) {
-            if (adapter == null || protocol == null) {
-                _uiState.value = state.copy(
-                    statusMessage = "Pick ADAPTER and PROTOCOL in Settings first"
-                )
-                return
-            }
             when (adapter) {
                 Adapter.OpenPort -> if (openSession == null || tactrixClient == null) {
                     _uiState.value = state.copy(
@@ -617,8 +626,16 @@ class ProtocolViewModel : ViewModel() {
             }
         }
 
+        val simHostPort = "127.0.0.1:${state.settings.simulatorPort}"
         val initialStatus = when {
-            useSimulator -> "Connecting simulator on port ${state.settings.simulatorPort}..."
+            useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
+                "Simulator: OpenPort K-line @ $simHostPort"
+            useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.CAN ->
+                "Simulator: OpenPort CAN @ $simHostPort"
+            useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.KLine ->
+                "Simulator: OBDLink K-line @ $simHostPort"
+            useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.CAN ->
+                "Simulator: OBDLink CAN @ $simHostPort"
             adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
                 if (tactrixClient?.channelInitialized == true) "Reusing K-line channel..." else "Initializing OpenPort K-line..."
             adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> "Initializing OpenPort CAN @ 500 kbps..."
@@ -639,9 +656,17 @@ class ProtocolViewModel : ViewModel() {
         val pollIntervalMs = state.settings.pollIntervalMs.toLong()
 
         runJob = viewModelScope.launch(Dispatchers.IO) {
+            val simPort = state.settings.simulatorPort
             val sampleFlow: kotlinx.coroutines.flow.Flow<PollSample>? = try {
                 when {
-                    useSimulator -> startSimulatorFlow(state.settings.simulatorPort, pidsOnPage, pollIntervalMs)
+                    useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
+                        startSimulatorOpenPortKlineFlow(simPort, pidsOnPage, pollIntervalMs)
+                    useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.CAN ->
+                        startSimulatorOpenPortCanFlow(simPort, pidsOnPage, pollIntervalMs)
+                    useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.KLine ->
+                        startSimulatorObdLinkKlineFlow(simPort, pidsOnPage, pollIntervalMs)
+                    useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.CAN ->
+                        startSimulatorObdLinkCanFlow(simPort, pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OpenPort && protocol == BusProtocol.KLine -> startOpenPortKlineFlow(pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> startOpenPortCanFlow(pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> startObdLinkKlineFlow(pidsOnPage, pollIntervalMs)
@@ -740,6 +765,8 @@ class ProtocolViewModel : ViewModel() {
                 runningLiveSource = null
                 simulatorIo?.close()
                 simulatorIo = null
+                simulatorObdLink?.disconnect()
+                simulatorObdLink = null
                 // Drop the last-known values so gauges revert to "--" when
                 // polling stops for any reason. Showing stale numbers after
                 // a stop is misleading. Min/max also reset so the next
@@ -758,11 +785,12 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
-     * Simulator path — TCP socket to 127.0.0.1:<port> instead of USB. Init and
-     * poll loop are byte-identical to the USB K-line path; only the underlying
-     * TactrixIo implementation differs.
+     * Simulator — OpenPort 2.0 + K-line. TCP socket to 127.0.0.1:<port> instead
+     * of USB; init and poll loop are byte-identical to the live K-line path
+     * because [TactrixTcpIo] implements the same [com.protocol.app.openport2.TactrixIo]
+     * surface as [com.protocol.app.openport2.TactrixBulkIo].
      */
-    private fun startSimulatorFlow(
+    private fun startSimulatorOpenPortKlineFlow(
         port: Int,
         pidsOnPage: List<Ssm2Pid>,
         pollIntervalMs: Long
@@ -777,6 +805,73 @@ class ProtocolViewModel : ViewModel() {
         val poller = Ssm2Poller(client, pidsOnPage)
         runningPoller = poller
         return poller.startFlow(pollIntervalMs)
+    }
+
+    /**
+     * Simulator — OpenPort 2.0 + CAN. Same TCP socket, same Tactrix wire format
+     * the live CAN path uses (the `ato6 0 500000 0` channel open, the `att6`
+     * single-frame request loop). [OpenPortCanLiveSource] already accepts
+     * [com.protocol.app.openport2.TactrixIo], so swapping in [TactrixTcpIo]
+     * routes the whole CAN path through the emulator unchanged.
+     */
+    private fun startSimulatorOpenPortCanFlow(
+        port: Int,
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val tcpIo = TactrixTcpIo("127.0.0.1", port)
+        simulatorIo = tcpIo
+        val src = OpenPortCanLiveSource(tcpIo, pidsOnPage)
+        if (!src.initChannel()) return null
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
+    /**
+     * Simulator — OBDLink + K-line. [ObdLinkTcpManager] opens a TCP socket to
+     * VIPER, wraps the streams in the same [com.protocol.app.obdlink.ObdLinkBtTransport]
+     * the BT manager uses, and runs the same STN K-line init (STP21 / 4800 /
+     * STIP4 0). Downstream [ObdLinkKlineSource] is identical to the live path.
+     */
+    private fun startSimulatorObdLinkKlineFlow(
+        port: Int,
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val mgr = ObdLinkTcpManager()
+        simulatorObdLink = mgr
+        val r = mgr.connectKline("127.0.0.1", port)
+        if (r is ObdLinkTcpManager.ConnectResult.Failure) {
+            _uiState.value = _uiState.value.copy(statusMessage = "Simulator OBDLink K-line: ${r.reason}")
+            return null
+        }
+        val transport = mgr.transport ?: return null
+        val src = ObdLinkKlineSource(transport, pidsOnPage)
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
+    /**
+     * Simulator — OBDLink + CAN. Same as the K-line simulator path but runs
+     * the ELM CAN setup (ATSP6 / ATSH7E0 / ATCRA7E8 / flow control) so VIPER's
+     * ELM-CAN handler picks up the right mode from the first writes.
+     */
+    private fun startSimulatorObdLinkCanFlow(
+        port: Int,
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val mgr = ObdLinkTcpManager()
+        simulatorObdLink = mgr
+        val r = mgr.connect("127.0.0.1", port)
+        if (r is ObdLinkTcpManager.ConnectResult.Failure) {
+            _uiState.value = _uiState.value.copy(statusMessage = "Simulator OBDLink CAN: ${r.reason}")
+            return null
+        }
+        val transport = mgr.transport ?: return null
+        val src = ObdLinkLiveSource(transport, pidsOnPage)
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
     }
 
     /** OpenPort 2.0 + K-line: the original path, full ATI..ATV init then SSM2 polling. */
@@ -857,6 +952,8 @@ class ProtocolViewModel : ViewModel() {
         runJob = null
         simulatorIo?.close()
         simulatorIo = null
+        simulatorObdLink?.disconnect()
+        simulatorObdLink = null
         _uiState.value = _uiState.value.copy(
             isReadingLive = false,
             isLogging = false,

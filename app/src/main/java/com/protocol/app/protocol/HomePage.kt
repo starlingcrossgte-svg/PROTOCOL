@@ -52,7 +52,9 @@ internal fun HomePage(
     onClearProbeLog: () -> Unit,
     onCopyProbeLog: () -> Unit,
     onExportProbeLog: () -> Unit,
-    onHuntKlineInit: () -> Unit
+    onHuntKlineInit: () -> Unit,
+    onSimulatorModeChange: (Boolean) -> Unit,
+    onSimulatorPortChange: (Int) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -100,6 +102,8 @@ internal fun HomePage(
                 onCopyProbeLog = onCopyProbeLog,
                 onExportProbeLog = onExportProbeLog,
                 onHuntKlineInit = onHuntKlineInit,
+                onSimulatorModeChange = onSimulatorModeChange,
+                onSimulatorPortChange = onSimulatorPortChange,
             )
         }
 

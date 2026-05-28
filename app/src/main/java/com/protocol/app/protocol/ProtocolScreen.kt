@@ -186,6 +186,8 @@ fun ProtocolScreen(
                                 onCopyProbeLog = onCopyLog,
                                 onExportProbeLog = onExportLog,
                                 onHuntKlineInit = onHuntKlineInit,
+                                onSimulatorModeChange = onSimulatorModeChange,
+                                onSimulatorPortChange = onSimulatorPortChange,
                             )
                             else -> LiveDataPage(
                                 uiState = uiState,
@@ -232,8 +234,6 @@ fun ProtocolScreen(
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onDevModeChange = onDevModeChange,
-                        onSimulatorModeChange = onSimulatorModeChange,
-                        onSimulatorPortChange = onSimulatorPortChange,
                         onSaveVehicle = onSaveVehicle,
                         onSelectVehicle = onSelectVehicle,
                         onDeleteVehicle = onDeleteVehicle

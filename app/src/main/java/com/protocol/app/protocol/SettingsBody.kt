@@ -57,8 +57,6 @@ internal fun SettingsBody(
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onDevModeChange: (Boolean) -> Unit,
-    onSimulatorModeChange: (Boolean) -> Unit,
-    onSimulatorPortChange: (Int) -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
     onSelectVehicle: (id: String) -> Unit,
     onDeleteVehicle: (id: String) -> Unit
@@ -207,74 +205,7 @@ internal fun SettingsBody(
                 )
             )
         }
-        SettingsHelp("Reveals the SSM2 Run Log + Clear/Copy/Export Log buttons on the Home page. For debugging adapter / protocol issues.")
-
-        // ── Simulator (dev-mode only) ──────────────────────────────
-        // Routes the live-data path over a localhost TCP socket instead
-        // of the USB adapter. Used with a host-side bench rig forwarded
-        // through `adb reverse tcp:<port> tcp:<port>`.
-        if (s.devMode) {
-            CategoryHeader("SIMULATOR")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Simulator Mode",
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = s.simulatorMode,
-                    onCheckedChange = onSimulatorModeChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Accent,
-                        uncheckedThumbColor = InkMuted,
-                        uncheckedTrackColor = SurfaceAlt,
-                        uncheckedBorderColor = BorderGray
-                    )
-                )
-            }
-            var portField by remember(s.simulatorPort) { mutableStateOf(s.simulatorPort.toString()) }
-            OutlinedTextField(
-                value = portField,
-                onValueChange = { raw ->
-                    val digits = raw.filter { it.isDigit() }.take(5)
-                    portField = digits
-                    digits.toIntOrNull()?.let(onSimulatorPortChange)
-                },
-                label = {
-                    Text(
-                        "TCP PORT",
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = FontFamily.Monospace,
-                    color = Color.White
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = Accent.copy(alpha = 0.6f),
-                    cursorColor = Accent,
-                    focusedLabelColor = Accent,
-                    unfocusedLabelColor = NeutralGray,
-                    focusedContainerColor = SurfaceBg,
-                    unfocusedContainerColor = SurfaceBg
-                )
-            )
-            SettingsHelp("When ON, Read Live Data opens a TCP socket to 127.0.0.1:<port> instead of the USB adapter. Run `adb reverse tcp:<port> tcp:<port>` on the host to forward through USB debug.")
-        }
+        SettingsHelp("Reveals the SSM2 Run Log + Clear/Copy/Export Log buttons on the Home page. For debugging adapter / protocol issues. SIMULATOR now lives on the Home page Developer panel.")
     }
 }
 
