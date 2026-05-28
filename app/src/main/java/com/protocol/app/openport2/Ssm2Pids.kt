@@ -5,12 +5,11 @@ package com.protocol.app.openport2
  *
  * Address sources:
  *  - 0x00001C (battery voltage) and 0x00000C (coolant temp) are
- *    CONFIRMED from the earlier wireshark RomRaider logger capture
- *    (wireshark-sequencelab/romraider-traffic-raw.txt). 12.4 V battery
- *    and 89 °C coolant decoded correctly on a warmed engine at rest.
- *  - 0x00000E,0F (RPM) and 0x000013,14 (MAF) are CONFIRMED from the new
- *    multi-PID capture (wireshark-sequencelab/log-to-add-more-guages-1.pcapng):
- *    decoded values 927 RPM and 6.39 g/s match an idling engine.
+ *    CONFIRMED from the earlier capture: 12.4 V battery and 89 °C
+ *    coolant decoded correctly on a warmed engine at rest.
+ *  - 0x00000E,0F (RPM) and 0x000013,14 (MAF) are CONFIRMED from the
+ *    new multi-PID capture: decoded values 927 RPM and 6.39 g/s
+ *    match an idling engine.
  *  - 0xFF2578-7B is IAM (4-byte float multiplier, ~0.41 on this ECU)
  *    and 0xFF8168-6B is Feedback Knock Correction (4-byte float, degrees,
  *    swings -3..+3° under load). The two were initially mapped the other
@@ -57,10 +56,10 @@ object Ssm2Pids {
         displayName = "Coolant",
         unit = "°F",
         // Address corrected 2026-05-23: previous value 0x00000C reads A/F
-        // Learning #2 (P6 in RomRaider's logger.xml), not coolant temp — it
-        // sat near 128 in closed-loop and our F formula gave a constant
-        // ~190 °F. Coolant Temperature is P2 at 0x000008, conversion (x-40)
-        // in °C → (x-40)*9/5+32 °F.
+        // Learning #2 (P6), not coolant temp — it sat near 128 in
+        // closed-loop and our F formula gave a constant ~190 °F. Coolant
+        // Temperature is P2 at 0x000008, conversion (x-40) in °C →
+        // (x-40)*9/5+32 °F.
         addresses = listOf(Ssm2Address(0x00, 0x00, 0x08)),
         decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0].toDouble() - 40.0) * 9.0 / 5.0 + 32.0 },
         longName = "Coolant Temperature"
@@ -160,8 +159,8 @@ object Ssm2Pids {
 
     // Engine Load (Calculated) = MAF (g/s) * 120 / RPM = grams of air per
     // engine cycle (2 revolutions). Reads RPM and MAF addresses again
-    // alongside MASS_AIRFLOW/RPM — matches how RomRaider's calculated load
-    // works (sees the addresses twice in the A8 query).
+    // alongside MASS_AIRFLOW/RPM — matches how the calculated load works
+    // (sees the addresses twice in the A8 query).
     val ENGINE_LOAD_CALC = Ssm2Pid(
         id = "load",
         displayName = "Eng Load",
@@ -176,9 +175,9 @@ object Ssm2Pids {
             if (raw.size < 4) 0.0 else {
                 // g/rev = MAF (g/s) * 60 (s/min) / RPM (rev/min).
                 // Previous formula used *120, which actually computes g/cycle
-                // (= g/2 revs on a 4-stroke). Reported value was 2× RR's at
-                // idle (0.90 vs 0.41 g/rev). Verified 2026-05-23 by side-by-
-                // side comparison with RomRaider logger CSV.
+                // (= g/2 revs on a 4-stroke). Reported value was 2× the
+                // reference at idle (0.90 vs 0.41 g/rev). Verified 2026-05-23
+                // by side-by-side comparison.
                 val rpm = ((raw[0] shl 8) or raw[1]) * 0.25
                 val maf = ((raw[2] shl 8) or raw[3]) * 0.01
                 if (rpm > 0.0) maf * 60.0 / rpm else 0.0
@@ -233,11 +232,10 @@ object Ssm2Pids {
         longName = "Knock Correction Advance"
     )
 
-    // ───────────── ECM additions (logger.xml P-codes) ─────────────
-    // Each PID's address + conversion is sourced directly from
-    // logger_IMP_EN_v370.xml. Where the def offers both metric and
-    // imperial units, the imperial conversion is used (°F, psi, mph).
-    // Multi-byte addresses are listed in MSB → LSB order.
+    // ───────────── ECM additions (P-codes) ─────────────
+    // Where a parameter offers both metric and imperial units, the
+    // imperial conversion is used (°F, psi, mph). Multi-byte addresses
+    // are listed in MSB → LSB order.
 
     val ENGINE_LOAD_RELATIVE = Ssm2Pid(
         id = "load_rel",
@@ -730,7 +728,7 @@ object Ssm2Pids {
         displayName = "EGT",
         unit = "°F",
         addresses = listOf(Ssm2Address(0x00, 0x01, 0x06)),
-        // logger.xml: °F expr = 32 + 9*(x+40) — direct conversion, no /5.
+        // °F expr = 32 + 9*(x+40) — direct conversion, no /5.
         decode = { raw -> if (raw.isEmpty()) 0.0 else 32.0 + 9.0 * (raw[0] + 40) },
         longName = "Exhaust Gas Temperature"
     )
@@ -740,7 +738,7 @@ object Ssm2Pids {
         displayName = "EGT 2",
         unit = "°F",
         addresses = listOf(Ssm2Address(0x00, 0x01, 0x07)),
-        // logger.xml: °F expr = 32 + 9*(x*5+200)/5
+        // °F expr = 32 + 9*(x*5+200)/5
         decode = { raw -> if (raw.isEmpty()) 0.0 else 32.0 + 9.0 * (raw[0] * 5.0 + 200.0) / 5.0 },
         longName = "Exhaust Gas Temperature 2"
     )
@@ -823,7 +821,7 @@ object Ssm2Pids {
         longName = "Overspeed Count (High RPM)"
     )
 
-    // ───── Calculated PIDs (mirror RomRaider's P201, P202, P203) ─────
+    // ───── Calculated PIDs (mirror P201, P202, P203) ─────
     // These read raw bytes from other PIDs' addresses and compute on top.
     // Listed alongside the underlying address group so the poller fetches
     // them in the same A8 query — no separate round trip.
@@ -891,10 +889,9 @@ object Ssm2Pids {
 
     // ────── TCM (5EAT) parameters ──────
     //
-    // Addresses + conversions pulled from RomRaider's logger_IMP_EN_v370.xml
-    // for the 5EAT transmission. Verified on-car 2026-05-23 against a
-    // captured TCM reply at idle in Park (frame 138 of rrecucharkbetter.pcap):
-    // raw bytes for gear=0, line=53, ATF=74, RPM=0x0D94 etc. all sense-check
+    // Addresses + conversions for the 5EAT transmission. Verified on-car
+    // 2026-05-23 against a captured TCM reply at idle in Park: raw bytes
+    // for gear=0, line=53, ATF=74, RPM=0x0D94 etc. all sense-check
     // against expected idle conditions.
 
     val TCM_GEAR_POSITION = Ssm2Pid(
@@ -922,7 +919,7 @@ object Ssm2Pids {
         displayName = "ATF Temp",
         unit = "°F",
         addresses = listOf(Ssm2Address(0x00, 0x00, 0x56)),
-        // logger.xml gives °C as (x-50); convert to °F to match the other
+        // Raw is °C as (x-50); convert to °F to match the other
         // temperature gauges in the app.
         decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0].toDouble() - 50.0) * 9.0 / 5.0 + 32.0 },
         longName = "ATF Temperature",
@@ -954,7 +951,7 @@ object Ssm2Pids {
         displayName = "L/U Press",
         unit = "psi",
         addresses = listOf(Ssm2Address(0x00, 0x01, 0x4D)),
-        // logger.xml psi: x*1.450377 (raw byte directly to psi)
+        // psi: x*1.450377 (raw byte directly to psi)
         decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 1.450377 },
         longName = "L/U Solenoid Valve Pressure",
         category = Ssm2PidCategory.TCM
@@ -996,9 +993,9 @@ object Ssm2Pids {
         category = Ssm2PidCategory.TCM
     )
 
-    // ───────────── TCM additions (5EAT logger.xml P-codes) ─────────────
+    // ───────────── TCM additions (5EAT P-codes) ─────────────
     // Pressures in psi, currents in A (small) or A (raw), voltages in V,
-    // speeds in mph. Conversions sourced from logger_IMP_EN_v370.xml.
+    // speeds in mph.
 
     val TCM_LINE_PRESSURE_DUTY = Ssm2Pid(
         id = "tcm_lp_duty",
