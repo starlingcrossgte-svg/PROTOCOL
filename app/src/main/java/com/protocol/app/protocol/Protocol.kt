@@ -228,6 +228,7 @@ class Protocol : ComponentActivity() {
                     },
                     onRunProbe = { runActionOrDiscover(PendingAction.Probe) },
                     onHuntKlineInit = { viewModel.huntKlineInit(applicationContext) },
+                    onSendManualCommand = { cmd -> viewModel.sendManualCommand(cmd, applicationContext) },
                     onStartReadingLive = { runActionOrDiscover(PendingAction.ReadLive) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
                     onStartLogging = { runActionOrDiscover(PendingAction.LogLive) },

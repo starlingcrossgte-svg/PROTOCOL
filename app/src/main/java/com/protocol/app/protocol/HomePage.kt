@@ -56,6 +56,7 @@ internal fun HomePage(
     onCopyProbeLog: () -> Unit,
     onExportProbeLog: () -> Unit,
     onHuntKlineInit: () -> Unit,
+    onSendManualCommand: (String) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit
 ) {
@@ -64,7 +65,7 @@ internal fun HomePage(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Top bar: swipe hints flank the logo so the page-navigation cues sit
@@ -143,13 +144,13 @@ internal fun HomePage(
 
         // Main menu — destinations open as sub-pages.
         Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
+            HomeMenuButton(label = "Settings", shape = y2kTopCutShape()) { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
-            HomeMenuButton(label = "Notices") { onOpenSubPage(SubPage.Notices) }
+            HomeMenuButton(label = "Notices", shape = y2kBottomCutShape()) { onOpenSubPage(SubPage.Notices) }
         }
 
         // Developer Mode content — inlined here (was a sub-page).
@@ -163,6 +164,7 @@ internal fun HomePage(
                 onCopyProbeLog = onCopyProbeLog,
                 onExportProbeLog = onExportProbeLog,
                 onHuntKlineInit = onHuntKlineInit,
+                onSendManualCommand = onSendManualCommand,
                 onSimulatorModeChange = onSimulatorModeChange,
                 onSimulatorPortChange = onSimulatorPortChange,
             )
@@ -171,11 +173,14 @@ internal fun HomePage(
 }
 
 @Composable
-private fun HomeMenuButton(label: String, onClick: () -> Unit) {
+private fun HomeMenuButton(
+    label: String,
+    shape: androidx.compose.ui.graphics.Shape = RectangleShape,
+    onClick: () -> Unit
+) {
     // Box-based to avoid Material3 Button's offscreen clipping layer and
     // ripple-indication layer. Y2K corner cut still rendered correctly by
     // background(shape) + border(shape). Label is centered — no chevron.
-    val shape = RectangleShape
     Box(
         modifier = Modifier
             .fillMaxWidth()

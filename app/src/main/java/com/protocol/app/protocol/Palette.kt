@@ -48,6 +48,14 @@ internal fun y2kCornerShape() = CutCornerShape(topEnd = 10.dp, bottomStart = 10.
 internal fun y2kLeftButtonShape() = CutCornerShape(bottomStart = 10.dp)
 internal fun y2kRightButtonShape() = CutCornerShape(topEnd = 10.dp)
 internal fun y2kBottomEndCutShape() = CutCornerShape(bottomEnd = 10.dp)
+// Top-only / bottom-only cuts to frame a stacked button group (Settings on top,
+// Notices on the bottom).
+internal fun y2kTopCutShape() = CutCornerShape(topStart = 10.dp, topEnd = 10.dp)
+internal fun y2kBottomCutShape() = CutCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp)
+// Small right-side / left-side cuts for the log action buttons (Clear Log on the
+// left cuts its right corners; Export CSV on the right cuts its left corners).
+internal fun y2kRightCutShape() = CutCornerShape(topEnd = 6.dp, bottomEnd = 6.dp)
+internal fun y2kLeftCutShape() = CutCornerShape(topStart = 6.dp, bottomStart = 6.dp)
 
 // Vertical gradient brushes — top of the surface a touch lighter than
 // the bottom, gives buttons and panels visible depth without needing

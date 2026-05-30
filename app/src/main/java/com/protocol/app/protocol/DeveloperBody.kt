@@ -2,6 +2,8 @@ package com.protocol.app.protocol
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +78,7 @@ internal fun DeveloperBody(
     onCopyProbeLog: () -> Unit,
     onExportProbeLog: () -> Unit,
     onHuntKlineInit: () -> Unit,
+    onSendManualCommand: (String) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit
 ) {
@@ -113,11 +117,11 @@ internal fun DeveloperBody(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         // Combined raw log (USB + OBDLink), newest at the bottom.
         LogActionRow(
-            title = "BYTES",
+            title = "RAW BYTES",
             onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
             onCopy = {
                 clipboard.setText(AnnotatedString(formatCombined(merged)))
@@ -127,9 +131,18 @@ internal fun DeveloperBody(
                 pendingCsv = formatCombined(merged)
                 saveCsvLauncher.launch("protocol-traffic.csv")
             },
-            titleAsHeader = true
+            titleAsHeader = true,
+            clearShape = y2kLeftCutShape(),
+            exportShape = y2kRightCutShape()
         )
         CombinedLogCard(merged)
+
+        // Manual command console — type any raw AT/ST/SSM2 command; it's sent to
+        // the OBDLink and the reply shows in the RAW BYTES log above. Lets you
+        // drive the adapter one command at a time (resets/wake like ATWS·ATZ·ATI,
+        // or init/protocol probing) without a code change.
+        CategoryHeader("ELM327 MANUAL COMMANDS")
+        ManualCommandRow(onSend = onSendManualCommand)
 
         // Simulator — routes the live-data flow over a localhost TCP socket to
         // the host-side VIPER emulator (adb reverse tcp:<port> tcp:<port>).
@@ -190,6 +203,60 @@ internal fun DeveloperBody(
     }
 }
 
+@Composable
+private fun ManualCommandRow(onSend: (String) -> Unit) {
+    var cmd by remember { mutableStateOf("") }
+    // SEND lives INSIDE the command field on the left (leadingIcon). Typed text
+    // is kept after sending so you can edit one variable and fire again — handy
+    // for trying init/protocol combinations.
+    OutlinedTextField(
+        value = cmd,
+        onValueChange = { cmd = it },
+        label = {
+            Text(
+                "COMMAND",
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        leadingIcon = {
+            Box(
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .background(SurfaceBg, RoundedCornerShape(6.dp))
+                    .border(1.dp, Accent, RoundedCornerShape(6.dp))
+                    .clickable { if (cmd.isNotBlank()) onSend(cmd.trim()) }
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    "SEND",
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
+        },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(
+            fontFamily = FontFamily.Monospace,
+            color = Color.White
+        ),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedBorderColor = Accent,
+            unfocusedBorderColor = Accent.copy(alpha = 0.6f),
+            cursorColor = Accent,
+            focusedLabelColor = Accent,
+            unfocusedLabelColor = NeutralGray,
+            focusedContainerColor = SurfaceBg,
+            unfocusedContainerColor = SurfaceBg
+        )
+    )
+}
+
 private data class LogLine(
     val ts: Long,
     val isOut: Boolean,
@@ -200,6 +267,10 @@ private data class LogLine(
 
 @Composable
 private fun CombinedLogCard(lines: List<LogLine>) {
+    // Fill (almost) the whole screen so the RAW BYTES stream is the body of the
+    // page and only the ELM327 command box sits below it at the bottom of the
+    // view. Adaptive to screen height so it lands right on the S25 and S23.
+    val logHeight = (LocalConfiguration.current.screenHeightDp - 340).coerceAtLeast(300).dp
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
@@ -213,7 +284,7 @@ private fun CombinedLogCard(lines: List<LogLine>) {
         }
         if (lines.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(380.dp).padding(12.dp),
+                modifier = Modifier.fillMaxWidth().height(logHeight).padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -228,7 +299,7 @@ private fun CombinedLogCard(lines: List<LogLine>) {
         SelectionContainer {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxWidth().height(380.dp).padding(8.dp)
+                modifier = Modifier.fillMaxWidth().height(logHeight).padding(8.dp)
             ) {
                 items(lines) { line -> CombinedLogRow(line) }
             }

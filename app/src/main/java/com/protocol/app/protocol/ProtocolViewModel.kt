@@ -271,6 +271,48 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
+     * Dev console: send a raw AT/ST/SSM2 command typed in the Home BYTES box to
+     * the OBDLink; the reply auto-lands in the BYTES log (the transport logs
+     * OUT/IN to [com.protocol.app.obdlink.ObdLinkTrafficLog]). If nothing is
+     * connected yet, opens a raw channel first (ATE0/ATL0/ATS0 only, no protocol
+     * init) so the console works standalone for resets/wake/probing. If a live
+     * poll/log loop is running it is cancelled and joined first, so the command
+     * always fires and the manual write can't interleave with the loop on the
+     * same socket (which would trip STOPPED on the STN).
+     */
+    fun sendManualCommand(command: String, appContext: android.content.Context) {
+        val cmd = command.trim()
+        if (cmd.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            // Take over the link: stop any running poll/log loop and WAIT for it
+            // to fully finish before we write, so the two can't collide.
+            val active = runJob
+            runJob = null
+            active?.cancel()
+            active?.join()
+
+            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· manual: $cmd")
+            var transport = obdLinkManager?.transport
+            if (transport == null) {
+                com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· opening raw channel…")
+                val mgr = obdLinkManager ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
+                when (val r = mgr.connectBasic()) {
+                    is ObdLinkBtManager.ConnectResult.Failure -> {
+                        com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· connect failed: ${r.reason}")
+                        return@launch
+                    }
+                    is ObdLinkBtManager.ConnectResult.Connected -> transport = mgr.transport
+                }
+            }
+            try {
+                transport?.sendAscii(cmd, timeoutMs = 2000L)
+            } catch (e: Exception) {
+                com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· send failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Connect the *paired* OBDLink over Bluetooth, picking the right channel
      * mode based on the user's selected protocol. The Activity must have
      * granted BLUETOOTH_CONNECT first. No-op unless OBDLink is the selected

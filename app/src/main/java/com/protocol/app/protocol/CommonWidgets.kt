@@ -49,7 +49,9 @@ internal fun LogActionRow(
     onExportCsv: () -> Unit,
     modifier: Modifier = Modifier,
     onCopy: (() -> Unit)? = null,
-    titleAsHeader: Boolean = false
+    titleAsHeader: Boolean = false,
+    clearShape: androidx.compose.ui.graphics.Shape = RectangleShape,
+    exportShape: androidx.compose.ui.graphics.Shape = RectangleShape
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -79,11 +81,11 @@ internal fun LogActionRow(
         SimpleButton(
             "Clear Log",
             onClear,
-            RectangleShape,
+            clearShape,
             contentPadding = PaddingValues(horizontal = 10.75.dp, vertical = 6.dp)
         )
         if (onCopy != null) SimpleButton("Copy", onCopy, RectangleShape)
-        SimpleButton("Export CSV", onExportCsv, RectangleShape)
+        SimpleButton("Export CSV", onExportCsv, exportShape)
     }
 }
 

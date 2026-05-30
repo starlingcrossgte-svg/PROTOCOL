@@ -60,6 +60,7 @@ fun ProtocolScreen(
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
     onRunProbe: () -> Unit,
     onHuntKlineInit: () -> Unit,
+    onSendManualCommand: (String) -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
@@ -172,6 +173,7 @@ fun ProtocolScreen(
                                 onCopyProbeLog = onCopyLog,
                                 onExportProbeLog = onExportLog,
                                 onHuntKlineInit = onHuntKlineInit,
+                                onSendManualCommand = onSendManualCommand,
                                 onSimulatorModeChange = onSimulatorModeChange,
                                 onSimulatorPortChange = onSimulatorPortChange,
                             )
