@@ -19,12 +19,18 @@ internal val SurfaceBg   = Color(0xFF22252C)
 internal val SurfaceAlt  = Color(0xFF2E323A)
 internal val BorderGray  = Color(0xFF3A3C42)
 
-// Accent is the burnt-orange tone the user settled on (the "shaded"
-// probe-button color). Less saturated than #FF6A00 so it reads with
-// depth rather than retina burn. Used for non-text decoration only:
-// hamburger lines, close-X strokes, header/footer stripes, edit-mode
-// gauge border, drag-bar visuals, button outlines.
-internal val Accent      = Color(0xFFB85419)
+// Accent draws box outlines, selector buttons, stripes, and other
+// non-body-text decoration. Bright white now, per the user's move away
+// from the burnt-orange (former value 0xFFB85419, kept here in case we
+// ever want it back).
+//
+// AccentDim is the dimmed counterpart that drives the selection state of
+// reactive/selectable buttons: an UNCHOSEN selector shows a dim outline +
+// dim text (AccentDim); when CHOSEN it switches to full-bright Accent.
+// The button container stays dark in both states so the brightness change
+// alone carries the meaning — no fill.
+internal val Accent      = Color.White
+internal val AccentDim   = Color(0xFF808080)
 internal val PassGreen   = Color(0xFF22C55E)
 internal val BrightGreen = Color(0xFF22FF66)
 internal val FailRed     = Color(0xFFEF4444)

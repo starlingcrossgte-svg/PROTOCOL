@@ -195,22 +195,21 @@ private fun ModeButton(
     shape: androidx.compose.ui.graphics.Shape = y2kCornerShape(),
     modifier: Modifier = Modifier
 ) {
-    val containerColor = when {
-        !enabled -> SurfaceBg.copy(alpha = 0.5f)
-        active -> Accent
-        else -> SurfaceBg
-    }
-    val textColor = if (enabled) Color.White else NeutralGray
+    // Reactive button: dim outline + dim text when inactive, full-bright
+    // Accent (white) when active (reading/logging). Disabled dims further.
+    // Container stays dark in every state so brightness alone carries it.
+    val baseColor = if (active) Accent else AccentDim
+    val lineColor = if (enabled) baseColor else baseColor.copy(alpha = 0.4f)
     Box(
         modifier = modifier
             .clip(shape)
-            .background(containerColor, shape)
-            .border(1.dp, Accent, shape)
+            .background(SurfaceBg, shape)
+            .border(1.dp, lineColor, shape)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = textColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+        Text(label, color = lineColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

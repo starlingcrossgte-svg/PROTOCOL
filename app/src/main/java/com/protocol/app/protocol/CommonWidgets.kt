@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -78,11 +79,11 @@ internal fun LogActionRow(
         SimpleButton(
             "Clear Log",
             onClear,
-            y2kLeftButtonShape(),
+            RectangleShape,
             contentPadding = PaddingValues(horizontal = 10.75.dp, vertical = 6.dp)
         )
-        if (onCopy != null) SimpleButton("Copy", onCopy, y2kCornerShape())
-        SimpleButton("Export CSV", onExportCsv, y2kBottomEndCutShape())
+        if (onCopy != null) SimpleButton("Copy", onCopy, RectangleShape)
+        SimpleButton("Export CSV", onExportCsv, RectangleShape)
     }
 }
 

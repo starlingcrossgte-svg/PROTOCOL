@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -132,56 +131,62 @@ internal fun DeveloperBody(
         )
         CombinedLogCard(merged)
 
-        Spacer(modifier = Modifier.height(8.dp))
-
         // Simulator — routes the live-data flow over a localhost TCP socket to
         // the host-side VIPER emulator (adb reverse tcp:<port> tcp:<port>).
+        // Header sits right under the log; the toggle and the TCP PORT field
+        // share one row so the whole section stays on a single screen.
         CategoryHeader("SIMULATOR")
-        Switch(
-            checked = s.simulatorMode,
-            onCheckedChange = onSimulatorModeChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Accent,
-                uncheckedThumbColor = InkMuted,
-                uncheckedTrackColor = SurfaceAlt,
-                uncheckedBorderColor = BorderGray
-            )
-        )
-        var portField by remember(s.simulatorPort) { mutableStateOf(s.simulatorPort.toString()) }
-        OutlinedTextField(
-            value = portField,
-            onValueChange = { raw ->
-                val digits = raw.filter { it.isDigit() }.take(5)
-                portField = digits
-                digits.toIntOrNull()?.let(onSimulatorPortChange)
-            },
-            label = {
-                Text(
-                    "TCP PORT",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold
-                )
-            },
-            singleLine = true,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Monospace,
-                color = Color.White
-            ),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = Accent,
-                unfocusedBorderColor = Accent.copy(alpha = 0.6f),
-                cursorColor = Accent,
-                focusedLabelColor = Accent,
-                unfocusedLabelColor = NeutralGray,
-                focusedContainerColor = SurfaceBg,
-                unfocusedContainerColor = SurfaceBg
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Switch(
+                checked = s.simulatorMode,
+                onCheckedChange = onSimulatorModeChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AccentDim,
+                    uncheckedThumbColor = InkMuted,
+                    uncheckedTrackColor = SurfaceAlt,
+                    uncheckedBorderColor = BorderGray
+                )
             )
-        )
+            var portField by remember(s.simulatorPort) { mutableStateOf(s.simulatorPort.toString()) }
+            OutlinedTextField(
+                value = portField,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(5)
+                    portField = digits
+                    digits.toIntOrNull()?.let(onSimulatorPortChange)
+                },
+                label = {
+                    Text(
+                        "TCP PORT",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Accent,
+                    unfocusedBorderColor = Accent.copy(alpha = 0.6f),
+                    cursorColor = Accent,
+                    focusedLabelColor = Accent,
+                    unfocusedLabelColor = NeutralGray,
+                    focusedContainerColor = SurfaceBg,
+                    unfocusedContainerColor = SurfaceBg
+                )
+            )
+        }
     }
 }
 

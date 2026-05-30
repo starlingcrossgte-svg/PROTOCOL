@@ -192,7 +192,7 @@ internal fun SettingsBody(
                 onCheckedChange = onDevModeChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = Accent,
+                    checkedTrackColor = AccentDim,
                     uncheckedThumbColor = InkMuted,
                     uncheckedTrackColor = SurfaceAlt,
                     uncheckedBorderColor = BorderGray
@@ -307,7 +307,7 @@ private fun VehicleDropdown(
                 ) {
                     Text(
                         text = v.displayName,
-                        color = if (v.id == garage.selectedVehicleId) Accent else Color.White,
+                        color = if (v.id == garage.selectedVehicleId) Accent else AccentDim,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,
                         style = MaterialTheme.typography.bodyMedium,
@@ -352,16 +352,20 @@ private fun SmallDeleteX(onClick: () -> Unit) {
     }
 }
 
+// Reactive selector: dim outline + dim text when unselected, full-bright
+// Accent (white) outline + text when selected. No fill — the container
+// stays dark in both states so the brightness change reads cleanly.
 @Composable
 private fun SelectorButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    val lineColor = if (selected) Accent else AccentDim
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) Accent else SurfaceBg,
-            contentColor = Color.White
+            containerColor = SurfaceBg,
+            contentColor = lineColor
         ),
         shape = RectangleShape,
-        border = BorderStroke(1.dp, Accent),
+        border = BorderStroke(1.dp, lineColor),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -369,7 +373,7 @@ private fun SelectorButton(label: String, selected: Boolean, onClick: () -> Unit
             label,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White
+            color = lineColor
         )
     }
 }

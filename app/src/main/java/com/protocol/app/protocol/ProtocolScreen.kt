@@ -238,6 +238,7 @@ fun ProtocolScreen(
                     )
                     SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)
+                    SubPage.Notices -> NoticesBody()
                 }
             }
         }

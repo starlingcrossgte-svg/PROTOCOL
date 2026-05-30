@@ -23,10 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
@@ -65,14 +67,79 @@ internal fun HomePage(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Logo lives in the scrolling Home content now (no fixed header), so it
-        // slides up with the page. Same art/size as before.
-        Image(
-            painter = painterResource(id = R.drawable.protocol_logo),
-            contentDescription = "PROTOCOL",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.height(40.dp)
-        )
+        // Top bar: swipe hints flank the logo so the page-navigation cues sit
+        // up top next to the brand instead of at the bottom of the scroll. Both
+        // hints carry equal weight so the logo stays centered. The "™" rides the
+        // top of the wordmark as the (pending) trademark mark.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // The left arrow is the SAME "→" glyph as the right one, mirrored
+            // horizontally (scaleX = -1). Using one character for both makes a
+            // size/baseline/weight mismatch impossible — the monospace face
+            // lacks ←/→ and Android was substituting them from different
+            // fallback fonts, which is why the left arrow rendered smaller and
+            // lower.
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "→",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.scale(scaleX = -1f, scaleY = 1f)
+                )
+                Text(
+                    text = "Diagnostics",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = R.drawable.protocol_logo),
+                    contentDescription = "PROTOCOL",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.height(40.dp)
+                )
+                Text(
+                    text = "™",
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    modifier = Modifier
+                        .align(Alignment.Top)
+                        .padding(start = 2.dp)
+                )
+            }
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Live Data",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "→",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
 
         // Main menu — destinations open as sub-pages.
         Column(
@@ -82,6 +149,7 @@ internal fun HomePage(
             HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
+            HomeMenuButton(label = "Notices") { onOpenSubPage(SubPage.Notices) }
         }
 
         // Developer Mode content — inlined here (was a sub-page).
@@ -99,8 +167,6 @@ internal fun HomePage(
                 onSimulatorPortChange = onSimulatorPortChange,
             )
         }
-
-        SwipeHintRow()
     }
 }
 
@@ -108,8 +174,7 @@ internal fun HomePage(
 private fun HomeMenuButton(label: String, onClick: () -> Unit) {
     // Box-based to avoid Material3 Button's offscreen clipping layer and
     // ripple-indication layer. Y2K corner cut still rendered correctly by
-    // background(shape) + border(shape); no clip() needed because the
-    // inner Row stays inside the padded rectangle.
+    // background(shape) + border(shape). Label is centered — no chevron.
     val shape = RectangleShape
     Box(
         modifier = Modifier
@@ -117,27 +182,17 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
             .background(SurfaceBg, shape)
             .border(1.dp, Accent, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 16.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                label,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyLarge,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                "›",
-                color = Accent,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
-            )
-        }
+        Text(
+            label,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyLarge,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -153,31 +208,4 @@ private fun SmallActionButton(text: String, onClick: () -> Unit, modifier: Modif
         border = BorderStroke(1.dp, Accent),
         modifier = modifier
     ) { Text(text, color = Color.White) }
-}
-
-// Small hint shown only on Home — Live Data and Parameters don't need
-// it (by the time the user reaches them they already know the swipe
-// gesture works).
-@Composable
-private fun SwipeHintRow() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "← Diagnostics",
-            color = NeutralGray,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace
-        )
-        Text(
-            text = "Live Data →",
-            color = NeutralGray,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace
-        )
-    }
 }

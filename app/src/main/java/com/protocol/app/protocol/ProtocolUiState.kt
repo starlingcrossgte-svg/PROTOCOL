@@ -16,6 +16,7 @@ sealed class SubPage {
     object Settings : SubPage()
     object Flash : SubPage()
     object Tuning : SubPage()
+    object Notices : SubPage()
 }
 
 /**
