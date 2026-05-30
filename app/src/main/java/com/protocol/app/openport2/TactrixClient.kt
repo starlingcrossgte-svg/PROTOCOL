@@ -236,6 +236,23 @@ class TactrixClient(private val io: TactrixIo) {
         return responseBytes.copyOfRange(start, responseBytes.size)
     }
 
+    /*
+     * Read-only: wait for the next vehicle frame already streaming in from the
+     * bus, WITHOUT transmitting anything. Used by continuous SSM2 mode (A8 flag
+     * 0x01), where the ECU streams replies back-to-back after a single request
+     * — every reply after the first is harvested here with no new transmit.
+     * Returns the reassembled SSM2 frame, or null if none arrived in time.
+     */
+    fun readNextVehicleFrame(
+        channel: Int,
+        sourceByte: Byte,
+        timeoutMs: Long
+    ): ByteArray? {
+        val readResult = io.readUntil(timeoutMs) { buf -> containsArVehicleFrame(buf, channel, sourceByte) }
+        if (!readResult.matched) return null
+        return extractVehicleFrame(readResult.bytes, channel, sourceByte)
+    }
+
     private fun indexOfSubsequenceFrom(haystack: ByteArray, needle: ByteArray, startAt: Int): Int? {
         if (needle.isEmpty() || haystack.size < needle.size || startAt >= haystack.size) return null
         outer@ for (i in startAt..haystack.size - needle.size) {

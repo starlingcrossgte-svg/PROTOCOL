@@ -79,6 +79,9 @@ class Ssm2Poller(
 ) {
     private companion object {
         private const val ATT_TIMEOUT_MICROS = 400_000L
+        // Longer transmit/listen window for continuous mode so the adapter
+        // keeps receiving the streamed replies after the single A8 request.
+        private const val CONTINUOUS_ATT_TIMEOUT_MICROS = 2_000_000L
         private const val DEFAULT_MAX_CONSECUTIVE_MISSES = 5
     }
 
@@ -345,5 +348,124 @@ class Ssm2Poller(
             }
             if (intervalMs > 0) delay(intervalMs)
         }
+    }
+
+    /**
+     * Continuous SSM2 mode (ECM only). Sends ONE A8 request with the
+     * respond-continuously flag (0x01), then harvests the replies the ECU
+     * streams back with no further requests — dropping the request transmit
+     * (the dominant ~70% of K-line wire time) from every cycle after the first.
+     *
+     * Robust to ECUs that DON'T honor continuous mode: when the stream goes
+     * quiet (the read times out) it just re-arms (re-sends), degrading to
+     * single-response instead of breaking. ECM only — K-line is half-duplex so
+     * one stream can't carry two modules; mixed ECM+TCM pages use [startFlow].
+     */
+    fun startContinuousEcmFlow(
+        maxArmFailures: Int = DEFAULT_MAX_CONSECUTIVE_MISSES,
+        streamReadTimeoutMs: Long = 300L
+    ): Flow<PollSample> = flow {
+        var armed: List<Ssm2Address>? = null
+        var armedCfg: PidConfig? = null
+        var armFailures = 0
+        while (true) {
+            val cfg = config
+            val addrs = cfg.ecmAddresses
+            if (addrs.isEmpty()) {
+                armed = null
+                delay(150L)
+                continue
+            }
+            if (armed != addrs) {
+                // (Re)arm: one A8 with the continuous flag; the ECU then streams.
+                client.drainResponseBuffer(150L)
+                val first = armContinuousEcm(addrs)
+                if (first == null) {
+                    armFailures++
+                    EcuLogger.comm("continuous: arm failed ($armFailures/$maxArmFailures)")
+                    if (armFailures >= maxArmFailures) {
+                        EcuLogger.error("continuous: $maxArmFailures arm failures — stopping")
+                        client.channelInitialized = false
+                        break
+                    }
+                    delay(100L)
+                    continue
+                }
+                armed = addrs
+                armedCfg = cfg
+                armFailures = 0
+                emit(decodeEcmSample(first, cfg, 0L))
+                continue
+            }
+            // Harvest the next streamed reply with NO re-send.
+            val wireStart = System.currentTimeMillis()
+            val bytes = readContinuousEcm(armed!!.size, streamReadTimeoutMs)
+            if (bytes != null) {
+                emit(decodeEcmSample(bytes, armedCfg!!, System.currentTimeMillis() - wireStart))
+            } else {
+                // Stream quiet → drop the arm so we re-send next loop. This IS
+                // the single-response fallback when the ECU doesn't stream.
+                armed = null
+            }
+        }
+    }
+
+    /** Send one A8 with the continuous flag (0x01); return the first reply's bytes. */
+    private fun armContinuousEcm(addresses: List<Ssm2Address>): IntArray? {
+        val queryBytes = Ssm2AddressQuery.buildA8Query(
+            addresses, Ssm2AddressQuery.DEST_ECM, flags = 0x01.toByte()
+        )
+        val outcome = client.sendAsciiPlusBinary(
+            asciiBodyWithoutReqId = "att3 ${queryBytes.size} 0 $CONTINUOUS_ATT_TIMEOUT_MICROS",
+            binaryTail = queryBytes,
+            appendReqId = true,
+            expectVehicleFrameOnChannel = K_LINE_CHANNEL,
+            expectedReplySource = Ssm2AddressQuery.DEST_ECM,
+            readTimeoutMs = 1500L
+        )
+        return parseEcmReply(outcome.responseHex, addresses.size)
+    }
+
+    /** Read the next streamed reply (no send) and decode to one byte per address. */
+    private fun readContinuousEcm(addressCount: Int, timeoutMs: Long): IntArray? {
+        val frame = client.readNextVehicleFrame(K_LINE_CHANNEL, Ssm2AddressQuery.DEST_ECM, timeoutMs)
+            ?: return null
+        return parseA8Frame(frame, addressCount)
+    }
+
+    private fun parseEcmReply(responseHex: String, addressCount: Int): IntArray? {
+        val raw = TactrixHex.parseHexPayload(responseHex.replace(" ", ""))
+        val frame = client.extractVehicleFrame(raw, K_LINE_CHANNEL, Ssm2AddressQuery.DEST_ECM)
+            ?: return null
+        return parseA8Frame(frame, addressCount)
+    }
+
+    private fun parseA8Frame(frame: ByteArray, addressCount: Int): IntArray? {
+        val parsed = Ssm2FrameParser.parseSsm2Frame(frame) ?: return null
+        if (parsed.truncated || !parsed.checksumValid) return null
+        return Ssm2AddressQuery.parseA8Response(parsed, addressCount)
+    }
+
+    private fun decodeEcmSample(ecmBytes: IntArray, cfg: PidConfig, wireMs: Long): PollSample {
+        val values = HashMap<String, Double>()
+        val rawValuesList = ArrayList<Int>(ecmBytes.size)
+        var offset = 0
+        for (pid in cfg.ecmPids) {
+            val end = offset + pid.addresses.size
+            if (end <= ecmBytes.size) {
+                val slice = ecmBytes.copyOfRange(offset, end)
+                values[pid.id] = pid.decode(slice)
+                rawValuesList.addAll(slice.toList())
+            }
+            offset = end
+        }
+        return PollSample(
+            timestampMs = System.currentTimeMillis(),
+            values = values,
+            rawValues = rawValuesList.toIntArray(),
+            wireMs = wireMs,
+            ecmOk = true,
+            tcmOk = true
+        )
     }
 }

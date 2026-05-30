@@ -886,7 +886,19 @@ class ProtocolViewModel : ViewModel() {
         if (!probe.initializeChannel(mutableListOf())) return null
         val poller = Ssm2Poller(client, pidsOnPage)
         runningPoller = poller
-        return poller.startFlow(pollIntervalMs)
+        // Experimental continuous SSM2 mode (A8 flag 0x01): one request, the ECU
+        // streams replies, dropping the per-cycle request transmit (~70% of
+        // K-line wire time). Gated on Developer Mode + ECM-only pages (K-line
+        // can't stream two modules); auto-falls-back to single-response if the
+        // ECU ignores it. Verify in the BYTES log: look for `A8 01` and multiple
+        // E8 replies per request.
+        val ecmOnly = pidsOnPage.isNotEmpty() &&
+            pidsOnPage.none { it.category == com.protocol.app.openport2.Ssm2PidCategory.TCM }
+        return if (_uiState.value.settings.devMode && ecmOnly) {
+            poller.startContinuousEcmFlow()
+        } else {
+            poller.startFlow(pollIntervalMs)
+        }
     }
 
     /** OpenPort 2.0 + CAN: open ISO15765 channel @ 500k on 7E0/7E8 then per-address A8 polling. */
