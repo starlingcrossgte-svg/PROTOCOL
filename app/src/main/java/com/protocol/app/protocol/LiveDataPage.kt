@@ -63,10 +63,6 @@ internal fun LiveDataPage(
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        StatusLine(uiState)
-
-        Spacer(Modifier.height(6.dp))
-
         SnapGaugeGrid(
             uiState = uiState,
             onEnterEditMode = onEnterEditMode,
@@ -91,7 +87,7 @@ internal fun LiveDataPage(
         Spacer(Modifier.height(6.dp))
 
         LogActionRow(
-            title = "Session Log (${uiState.sessionLog.size})",
+            title = "Session Log",
             onClear = onClearSessionLog,
             onExportCsv = onExportSessionLog,
             titleAsHeader = true
@@ -241,15 +237,20 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
         border = BorderStroke(1.dp, BorderGray),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(300.dp)
-                .padding(10.dp)
-                .verticalScroll(rememberScrollState())
-        ) {
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                androidx.compose.foundation.text.selection.SelectionContainer {
+        // SelectionContainer wraps the scroll containers (not the inner Text)
+        // so the long-press-to-select gesture wins over the vertical/horizontal
+        // scroll drag — same pattern the Run Log / USB Traffic cards use. With
+        // it nested inside the scrolls, the scrolls swallowed the long-press and
+        // tap-hold highlight never started.
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+                    .padding(10.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                     Text(
                         text = formattedText,
                         color = Color.White,

@@ -149,23 +149,9 @@ fun ProtocolScreen(
             // the old AdapterPill without occupying meaningful real estate.
             ConnectionStatusStripe(uiState.connectionStatus)
 
-            // Header + logo removed app-wide. The logo now lives in the Home
-            // page content and scrolls with it; Live Data and Flash render
-            // their own top rows. Sub-pages keep only a close (X) button so
-            // there's still a way back — the Flash page draws its own X, so
-            // it's excluded here.
-            if (uiState.activeSubPage != null && uiState.activeSubPage != SubPage.Flash) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    CloseButton(
-                        onClick = onCloseSubPage,
-                        modifier = Modifier.align(Alignment.CenterEnd)
-                    )
-                }
-            }
+            // No header / close-X anywhere. The system back button closes
+            // sub-pages (BackHandler above), so the body fills straight from
+            // the status stripe down — nothing clips at an old header line.
 
             // Body — main pager or sub-page content. Adapter pill is gone
             // from the chrome; discovery now triggers off the action

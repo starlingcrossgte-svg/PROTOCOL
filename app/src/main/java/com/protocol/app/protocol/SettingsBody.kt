@@ -37,11 +37,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 // General app Settings sub-page. Background image + developer mode +
 // future global app preferences. Live-Data-specific knobs (poll
@@ -66,7 +69,7 @@ internal fun SettingsBody(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 20.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // ── Adapter + Protocol (side-by-side) ───────────────────────
@@ -148,7 +151,7 @@ internal fun SettingsBody(
             onValueChange = { subModelField = it.uppercase() }
         )
 
-        SettingsButton(label = "SAVE") {
+        SettingsButton(label = "SAVE", shape = RectangleShape) {
             onSaveVehicle(yearField, makeField, modelField, subModelField)
             yearField = ""; makeField = ""; modelField = ""; subModelField = ""
         }
@@ -161,23 +164,14 @@ internal fun SettingsBody(
 
         // ── Background ─────────────────────────────────────────────
         CategoryHeader("BACKGROUND")
-        Text(
-            text = if (uiState.backgroundUri == null)
-                "No custom background. App uses the default Y2K dark surface."
-            else
-                "Custom background active. Tap below to change or clear.",
-            color = Color.White,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace
-        )
         SettingsButton(
-            label = if (uiState.backgroundUri == null) "Choose Background" else "Change Background",
+            label = "Choose from Gallery",
+            shape = RectangleShape,
             onClick = onPickBackground
         )
         if (uiState.backgroundUri != null) {
-            SettingsButton(label = "Clear Background", onClick = onClearBackground)
+            SettingsButton(label = "Remove", shape = RectangleShape, onClick = onClearBackground)
         }
-        SettingsHelp("Pick any image from your gallery. A 50% dark overlay is applied automatically so text stays readable against bright photos.")
 
         // ── Developer ──────────────────────────────────────────────
         CategoryHeader("DEVELOPER")
@@ -205,7 +199,6 @@ internal fun SettingsBody(
                 )
             )
         }
-        SettingsHelp("Reveals the SSM2 Run Log + Clear/Copy/Export Log buttons on the Home page. For debugging adapter / protocol issues. SIMULATOR now lives on the Home page Developer panel.")
     }
 }
 
@@ -273,7 +266,7 @@ private fun VehicleDropdown(
     }
     var expanded by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxWidth()) {
-        val shape = y2kCornerShape()
+        val shape = RectangleShape
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -294,9 +287,10 @@ private fun VehicleDropdown(
             )
             Text(
                 text = "▾",
-                color = Accent,
+                color = Color.White,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp
             )
         }
         DropdownMenu(
@@ -366,7 +360,7 @@ private fun SelectorButton(label: String, selected: Boolean, onClick: () -> Unit
             containerColor = if (selected) Accent else SurfaceBg,
             contentColor = Color.White
         ),
-        shape = y2kCornerShape(),
+        shape = RectangleShape,
         border = BorderStroke(1.dp, Accent),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         modifier = Modifier.fillMaxWidth()
@@ -381,14 +375,14 @@ private fun SelectorButton(label: String, selected: Boolean, onClick: () -> Unit
 }
 
 @Composable
-internal fun SettingsButton(label: String, onClick: () -> Unit) {
+internal fun SettingsButton(label: String, shape: Shape = y2kCornerShape(), onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
             containerColor = SurfaceBg,
             contentColor = Color.White
         ),
-        shape = y2kCornerShape(),
+        shape = shape,
         border = BorderStroke(1.dp, Accent),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         modifier = Modifier.fillMaxWidth()

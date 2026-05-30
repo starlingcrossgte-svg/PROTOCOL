@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,7 +61,7 @@ internal fun HomePage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 18.dp),
+            .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -71,14 +72,6 @@ internal fun HomePage(
             contentDescription = "PROTOCOL",
             contentScale = ContentScale.Fit,
             modifier = Modifier.height(40.dp)
-        )
-
-        Text(
-            text = "OpenPort 2.0  ·  Subaru SSM2 K-line  ·  v1.0",
-            color = Color.White,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(bottom = 4.dp)
         )
 
         // Main menu — destinations open as sub-pages.
@@ -117,7 +110,7 @@ private fun HomeMenuButton(label: String, onClick: () -> Unit) {
     // ripple-indication layer. Y2K corner cut still rendered correctly by
     // background(shape) + border(shape); no clip() needed because the
     // inner Row stays inside the padded rectangle.
-    val shape = y2kCornerShape()
+    val shape = RectangleShape
     Box(
         modifier = Modifier
             .fillMaxWidth()

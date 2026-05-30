@@ -61,6 +61,21 @@ class Protocol : ComponentActivity() {
         } finally { pendingExportText = "" }
     }
 
+    // Direct-to-Files CSV save (Storage Access Framework). Same write path as
+    // exportLogLauncher but a text/csv document so the picker defaults the
+    // session log to a .csv the user can drop anywhere in their Files app.
+    private val exportCsvLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        if (uri == null) { Toast.makeText(this, "Export cancelled", Toast.LENGTH_SHORT).show(); return@registerForActivityResult }
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(pendingExportText.toByteArray(StandardCharsets.UTF_8)) }
+            Toast.makeText(this, "CSV exported", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Export failed: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+        } finally { pendingExportText = "" }
+    }
+
     // Settings → Choose Background. Android Photo Picker handles the
     // gallery selection — no runtime READ_EXTERNAL_STORAGE permission
     // needed. We take persistable read permission on the returned URI so
@@ -450,11 +465,6 @@ class Protocol : ComponentActivity() {
         Toast.makeText(this, "Session log copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
-    // Export session log via the system share chooser. Writes the CSV to
-    // app cache (exposed through FileProvider) and fires ACTION_SEND so the
-    // user can pick Files, Gmail, Drive, Bluetooth, etc. — anything that
-    // accepts a text/csv attachment. Previous behavior went straight to the
-    // Files save-as picker, which gave no email / share options.
     // Share the most recent autosaved session log via the system share
     // chooser. Used by the "Share Saved Session" button in Live Data
     // Settings — gives the user a way to recover their session log after
@@ -480,29 +490,17 @@ class Protocol : ComponentActivity() {
         startActivity(Intent.createChooser(send, "Share saved session"))
     }
 
+    // Export the live-data session log straight to the user's Files via the
+    // Storage Access Framework save-as picker (ACTION_CREATE_DOCUMENT). The
+    // user picks the destination (Downloads, Documents, Drive, …) and the CSV
+    // is written directly to it — no share sheet, no FileProvider temp file.
     private fun launchExportSessionLog() {
         val csv = ProtocolLogFormatter.formatSessionLogCsv(viewModel.uiState.value)
         if (csv.isEmpty()) {
             Toast.makeText(this, "No session data to export", Toast.LENGTH_SHORT).show()
             return
         }
-        val fileName = ProtocolLogFormatter.suggestedCsvFileName()
-        val uri = try {
-            val exportsDir = File(cacheDir, "exports").apply { if (!exists()) mkdirs() }
-            val tempFile = File(exportsDir, fileName)
-            tempFile.writeText(csv, StandardCharsets.UTF_8)
-            FileProvider.getUriForFile(this, "$packageName.fileprovider", tempFile)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Export prep failed: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
-            return
-        }
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, fileName)
-            putExtra(Intent.EXTRA_TITLE, fileName)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(send, "Export session log"))
+        pendingExportText = csv
+        exportCsvLauncher.launch(ProtocolLogFormatter.suggestedCsvFileName())
     }
 }

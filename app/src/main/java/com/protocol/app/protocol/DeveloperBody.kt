@@ -58,16 +58,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Developer Mode content. Home for all low-level diagnostic surfaces:
+// Developer Mode content. Pared down to two things:
 //
-//   - Test SSM2 Probe button + outcome card
-//   - Per-step run log (formerly the dev panel on Home, gated by devMode)
-//   - Live USB bulk-transfer traffic log (every byte going to/from the
-//     adapter, as it happens) — sourced from UsbTrafficLog (singleton)
+//   - Simulator toggle + TCP port (routes live data to the host-side VIPER
+//     emulator over a localhost socket).
+//   - One combined, raw traffic log: the USB (Tactrix/OpenPort) and OBDLink
+//     byte streams merged into a single time-ordered view. Only one transport
+//     runs at a time, so the single log just shows whatever is live.
 //
-// Renders inline on the Home page when Settings → Developer Mode is on
-// (no longer a sub-page). The parent Column provides the verticalScroll;
-// this body is fillMaxWidth-only so it stacks inside the same scroll.
+// Renders inline on the Home page when Settings → Developer Mode is on.
 
 @Composable
 internal fun DeveloperBody(
@@ -85,9 +84,9 @@ internal fun DeveloperBody(
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    // SAF "create document" save: the Export buttons write the CSV to a folder
-    // the user picks (Downloads/Files) via the system dialog, instead of a
-    // share-only sheet. pendingCsv holds the content until the picker returns.
+    // SAF "create document" save: Export writes the log to a folder the user
+    // picks (Downloads/Files) via the system dialog. pendingCsv holds it until
+    // the picker returns.
     var pendingCsv by remember { mutableStateOf("") }
     val saveCsvLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
@@ -101,41 +100,54 @@ internal fun DeveloperBody(
             }
         }
     }
+
+    // Merge USB + OBDLink traffic into one time-ordered stream.
+    val merged = remember(trafficEvents, btEvents) {
+        val lines = ArrayList<LogLine>(trafficEvents.size + btEvents.size)
+        for (e in trafficEvents)
+            lines.add(LogLine(e.timestampMs, e.direction == TrafficEvent.Direction.OUT, e.hex, e.byteCount, e.ascii))
+        for (e in btEvents)
+            lines.add(LogLine(e.timestampMs, e.direction == ObdLinkTrafficEvent.Direction.OUT, e.text, e.text.length))
+        lines.sortBy { it.ts }
+        lines
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // ── Simulator ─────────────────────────────────────────────
-        // Routes the live-data flow over a localhost TCP socket instead of
-        // the real adapter, against the host-side VIPER emulator. The
-        // ADAPTER × PROTOCOL selectors in Settings still pick which of the
-        // four paths runs — VIPER auto-detects from the first client bytes.
-        // Forward through `adb reverse tcp:<port> tcp:<port>` on the host.
+        // Combined raw log (USB + OBDLink), newest at the bottom.
+        LogActionRow(
+            title = "BYTES",
+            onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
+            onCopy = {
+                clipboard.setText(AnnotatedString(formatCombined(merged)))
+                android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            onExportCsv = {
+                pendingCsv = formatCombined(merged)
+                saveCsvLauncher.launch("protocol-traffic.csv")
+            },
+            titleAsHeader = true
+        )
+        CombinedLogCard(merged)
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Simulator — routes the live-data flow over a localhost TCP socket to
+        // the host-side VIPER emulator (adb reverse tcp:<port> tcp:<port>).
         CategoryHeader("SIMULATOR")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Simulator Mode",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
+        Switch(
+            checked = s.simulatorMode,
+            onCheckedChange = onSimulatorModeChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Accent,
+                uncheckedThumbColor = InkMuted,
+                uncheckedTrackColor = SurfaceAlt,
+                uncheckedBorderColor = BorderGray
             )
-            Switch(
-                checked = s.simulatorMode,
-                onCheckedChange = onSimulatorModeChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Accent,
-                    uncheckedThumbColor = InkMuted,
-                    uncheckedTrackColor = SurfaceAlt,
-                    uncheckedBorderColor = BorderGray
-                )
-            )
-        }
+        )
         var portField by remember(s.simulatorPort) { mutableStateOf(s.simulatorPort.toString()) }
         OutlinedTextField(
             value = portField,
@@ -170,107 +182,19 @@ internal fun DeveloperBody(
                 unfocusedContainerColor = SurfaceBg
             )
         )
-        Text(
-            text = "ON → Read Live Data routes through 127.0.0.1:<port>. The ADAPTER × PROTOCOL selectors in Settings still pick which of the four paths runs.",
-            color = NeutralGray,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── Probe section ─────────────────────────────────────────
-        CategoryHeader("SSM2 PROBE")
-        Button(
-            onClick = onRunProbe,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFFF6A00),
-                contentColor = Color.Black,
-                disabledContainerColor = Color(0xFFFF6A00).copy(alpha = 0.5f),
-                disabledContentColor = Color.Black.copy(alpha = 0.7f)
-            ),
-            shape = y2kCornerShape(),
-            enabled = !uiState.isReadingLive && !uiState.isLogging && !uiState.isRunningProbe,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = if (uiState.isRunningProbe) "Probing..." else "Test SSM2 Probe",
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Outcome card surfaces here (was on Home before this commit).
-        OutcomeCard(uiState)
-
-        // Per-step run log — uniform Clear / Export CSV row + the log card.
-        LogActionRow(
-            title = "Probe Log",
-            onClear = onClearProbeLog,
-            onExportCsv = onExportProbeLog
-        )
-        SelectionContainer { RunLogCard(uiState.log) }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── K-line init hunt (3.0R / EZ30R) ───────────────────────
-        // Basic-connects the MX+ then cycles candidate STN/ELM K-line inits
-        // until the ECU answers SSM2. Watch the OBDLINK BT TRAFFIC log below.
-        CategoryHeader("K-LINE INIT HUNT (3.0R)")
-        Button(
-            onClick = onHuntKlineInit,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF2F6FE4),
-                contentColor = Color.White
-            ),
-            shape = y2kCornerShape(),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Hunt K-line Init", fontWeight = FontWeight.Bold)
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── USB traffic section ───────────────────────────────────
-        CategoryHeader("USB TRAFFIC")
-        LogActionRow(
-            title = "USB Traffic (${trafficEvents.size})",
-            onClear = { UsbTrafficLog.clear() },
-            onCopy = {
-                clipboard.setText(AnnotatedString(formatUsbLog(trafficEvents)))
-                android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-            },
-            onExportCsv = {
-                pendingCsv = formatUsbLog(trafficEvents)
-                saveCsvLauncher.launch("protocol-usb-traffic.csv")
-            }
-        )
-        SelectionContainer { TrafficLogCard(trafficEvents) }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── OBDLink Bluetooth traffic ──────────────────────────────
-        // ELM/STN ASCII exchanges over the MX+ (handshake + SSM2-over-CAN
-        // polling). An in-app view of the adapter's byte traffic.
-        // Sourced from ObdLinkTrafficLog.
-        CategoryHeader("OBDLINK BT TRAFFIC")
-        LogActionRow(
-            title = "OBDLink BT (${btEvents.size})",
-            onClear = { ObdLinkTrafficLog.clear() },
-            onCopy = {
-                clipboard.setText(AnnotatedString(formatBtLog(btEvents)))
-                android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-            },
-            onExportCsv = {
-                pendingCsv = formatBtLog(btEvents)
-                saveCsvLauncher.launch("protocol-obdlink-bt.csv")
-            }
-        )
-        ObdLinkTrafficLogCard(btEvents)
     }
 }
 
+private data class LogLine(
+    val ts: Long,
+    val isOut: Boolean,
+    val payload: String,        // hex (USB) or ASCII text (OBDLink)
+    val byteCount: Int? = null, // USB only
+    val ascii: String? = null   // USB only — printable rendering of the bytes
+)
+
 @Composable
-private fun ObdLinkTrafficLogCard(events: List<ObdLinkTrafficEvent>) {
+private fun CombinedLogCard(lines: List<LogLine>) {
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
@@ -278,16 +202,17 @@ private fun ObdLinkTrafficLogCard(events: List<ObdLinkTrafficEvent>) {
         modifier = Modifier.fillMaxWidth()
     ) {
         val listState = rememberLazyListState()
-        LaunchedEffect(events.size) {
-            if (events.isNotEmpty()) listState.animateScrollToItem(events.size - 1)
+        // Auto-scroll to the newest line so the live tail is always visible.
+        LaunchedEffect(lines.size) {
+            if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
         }
-        if (events.isEmpty()) {
+        if (lines.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(300.dp).padding(12.dp),
+                modifier = Modifier.fillMaxWidth().height(380.dp).padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "No OBDLink traffic yet. Turn on Bluetooth (OBDLink) and read live data.",
+                    "No traffic yet. Turn on Simulator and Read Live Data.",
                     color = NeutralGray,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace
@@ -298,95 +223,25 @@ private fun ObdLinkTrafficLogCard(events: List<ObdLinkTrafficEvent>) {
         SelectionContainer {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxWidth().height(300.dp).padding(8.dp)
+                modifier = Modifier.fillMaxWidth().height(380.dp).padding(8.dp)
             ) {
-                items(events) { event -> ObdLinkTrafficEventRow(event) }
+                items(lines) { line -> CombinedLogRow(line) }
             }
         }
     }
 }
 
 @Composable
-private fun ObdLinkTrafficEventRow(event: ObdLinkTrafficEvent) {
-    val isOut = event.direction == ObdLinkTrafficEvent.Direction.OUT
-    val arrow = if (isOut) "→" else "←"
-    val arrowColor = if (isOut) Accent else PassGreen
-    val ts = trafficTimeFmt.format(Date(event.timestampMs))
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Text(text = ts, color = NeutralGray, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-        Text(
-            text = "  $arrow  ",
-            color = arrowColor,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 10.sp
-        )
-        Text(
-            text = event.text,
-            color = Color.White,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
-            modifier = Modifier.weight(1f)
-        )
-    }
-}
-
-@Composable
-private fun TrafficLogCard(events: List<TrafficEvent>) {
-    Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
-        border = BorderStroke(1.dp, BorderGray),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        val listState = rememberLazyListState()
-        // Auto-scroll to the newest event whenever a new one lands so the
-        // user always sees the live tail without manual scrolling.
-        LaunchedEffect(events.size) {
-            if (events.isNotEmpty()) {
-                listState.animateScrollToItem(events.size - 1)
-            }
-        }
-        if (events.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(380.dp).padding(12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "No USB traffic recorded yet. Start a probe or read live data to populate.",
-                    color = NeutralGray,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            return@Card
-        }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(380.dp)
-                .padding(8.dp)
-        ) {
-            items(events) { event -> TrafficEventRow(event) }
-        }
-    }
-}
-
-@Composable
-private fun TrafficEventRow(event: TrafficEvent) {
-    val arrow = if (event.direction == TrafficEvent.Direction.OUT) "→" else "←"
-    val arrowColor = if (event.direction == TrafficEvent.Direction.OUT) Accent else PassGreen
-    val ts = trafficTimeFmt.format(Date(event.timestampMs))
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-    ) {
+private fun CombinedLogRow(line: LogLine) {
+    val arrow = if (line.isOut) "→" else "←"
+    val arrowColor = if (line.isOut) Accent else PassGreen
+    // OpenPort-style layout: compact header (time · arrow · size) on top, then
+    // the payload on its own full-width line so the timestamp doesn't eat into
+    // the hex. ascii (USB only) sits under the hex when it's meaningful.
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = ts,
+                text = trafficTimeFmt.format(Date(line.ts)),
                 color = NeutralGray,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp
@@ -398,23 +253,26 @@ private fun TrafficEventRow(event: TrafficEvent) {
                 fontWeight = FontWeight.Bold,
                 fontSize = 10.sp
             )
-            Text(
-                text = "${event.byteCount}B",
-                color = NeutralGray,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp
-            )
+            if (line.byteCount != null) {
+                Text(
+                    text = "${line.byteCount}B",
+                    color = NeutralGray,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp
+                )
+            }
         }
         Text(
-            text = event.hex,
+            text = line.payload,
             color = Color.White,
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
             modifier = Modifier.padding(start = 8.dp)
         )
-        if (event.ascii.isNotBlank() && event.ascii.any { it.isLetterOrDigit() }) {
+        val ascii = line.ascii
+        if (ascii != null && ascii.isNotBlank() && ascii.any { it.isLetterOrDigit() }) {
             Text(
-                text = event.ascii,
+                text = ascii,
                 color = NeutralGray,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
@@ -426,15 +284,8 @@ private fun TrafficEventRow(event: TrafficEvent) {
 
 private val trafficTimeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
-private fun formatBtLog(events: List<ObdLinkTrafficEvent>): String =
-    events.joinToString("\n") { e ->
-        val arrow = if (e.direction == ObdLinkTrafficEvent.Direction.OUT) "->" else "<-"
-        "${trafficTimeFmt.format(Date(e.timestampMs))} $arrow ${e.text}"
+private fun formatCombined(lines: List<LogLine>): String =
+    lines.joinToString("\n") { l ->
+        val arrow = if (l.isOut) "->" else "<-"
+        "${trafficTimeFmt.format(Date(l.ts))} $arrow ${l.payload}"
     }
-
-private fun formatUsbLog(events: List<TrafficEvent>): String =
-    events.joinToString("\n") { e ->
-        val dir = if (e.direction == TrafficEvent.Direction.OUT) "OUT" else "IN"
-        "${trafficTimeFmt.format(Date(e.timestampMs))},$dir,${e.byteCount},${e.hex},${e.ascii}"
-    }
-

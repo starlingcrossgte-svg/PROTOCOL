@@ -94,12 +94,11 @@ internal fun FlashPage(
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top row: X close (left) | status (center) | hamburger (right)
+        // Top row: status (left) | hamburger (right). No close-X — system back.
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FlashCloseButton(onClose)
             val statusColor = when (state.phase) {
                 FlashUiState.Phase.Done -> PassGreen
                 FlashUiState.Phase.Failed -> FailRed
@@ -222,9 +221,6 @@ private fun FlashGate(onContinue: () -> Unit, onClose: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FlashCloseButton(onClose)
-        }
         CategoryHeader("FLASH TOOLS")
         Text(
             text = "Advanced / bench use. Phase 0 is read-only: it connects over CAN and reads " +
