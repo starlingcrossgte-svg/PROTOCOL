@@ -142,6 +142,7 @@ class ObdLinkBtManager(context: Context) {
      *   STPBR 4800  K-line baud = 4800
      *   ATAL        allow long (>7-byte) messages
      *   STIP4 0     transmit interbyte timing = 0 ms
+     *   ATAT 2      aggressive adaptive timing (trims post-reply wait)
      */
     @SuppressLint("MissingPermission")
     fun connectKline(): ConnectResult {
@@ -316,7 +317,8 @@ class ObdLinkBtManager(context: Context) {
             "STIMCS 1",
             "STPBR 4800",
             "ATAL",
-            "STIP4 0"
+            "STIP4 0",
+            "ATAT 2"      // aggressive adaptive timing — trims post-reply wait on the slow BT link
         )
     }
 }
