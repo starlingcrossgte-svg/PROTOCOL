@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -238,6 +239,14 @@ private fun ManualCommandRow(onSend: (String) -> Unit) {
             }
         },
         singleLine = true,
+        // Raw command box: kill autocorrect / autocapitalize / suggestions so
+        // terse AT/ST commands with spaces and punctuation (e.g.
+        // "STPX d:...,r:1,x:7") reach the adapter verbatim instead of mangled.
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Ascii,
+            autoCorrect = false,
+            capitalization = KeyboardCapitalization.None
+        ),
         modifier = Modifier.fillMaxWidth(),
         textStyle = MaterialTheme.typography.bodyMedium.copy(
             fontFamily = FontFamily.Monospace,

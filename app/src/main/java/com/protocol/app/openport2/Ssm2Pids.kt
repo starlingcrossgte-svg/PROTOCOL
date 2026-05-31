@@ -204,13 +204,13 @@ object Ssm2Pids {
         id = "iam",
         displayName = "IAM",
         unit = "x",
-        addresses = listOf(
-            Ssm2Address(0xFF.toByte(), 0x25, 0x78),
-            Ssm2Address(0xFF.toByte(), 0x25, 0x79),
-            Ssm2Address(0xFF.toByte(), 0x25, 0x7A),
-            Ssm2Address(0xFF.toByte(), 0x25, 0x7B)
-        ),
-        decode = { raw -> decodeFloatBE(raw) },
+        // Ignition Advance Multiplier: standard single-byte parameter at
+        // 0x0000F9, value = raw / 16 (16/16 = 1.0 = full advance on a healthy
+        // engine). Previously pointed at the 0xFF2578 4-byte RAM float — that
+        // was a wrong-ECU (2.5L turbo) address and read a bogus ~0.41 on this
+        // EZ30R while the engine was perfectly healthy.
+        addresses = listOf(Ssm2Address(0x00, 0x00, 0xF9.toByte())),
+        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 16.0 },
         longName = "IAM (Ignition Advance Multiplier)"
     )
 
@@ -658,15 +658,6 @@ object Ssm2Pids {
         addresses = listOf(Ssm2Address(0x00, 0x00, 0xF8.toByte())),
         decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
         longName = "Roughness Monitor Cylinder #6"
-    )
-
-    val LEARNED_IGN_TIMING_CORR = Ssm2Pid(
-        id = "learn_ign_corr",
-        displayName = "Learn IgnC",
-        unit = "°",
-        addresses = listOf(Ssm2Address(0x00, 0x00, 0xF9.toByte())),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 16.0 },
-        longName = "Learned Ignition Timing Correction"
     )
 
     val THROTTLE_MOTOR_DUTY = Ssm2Pid(
@@ -1435,7 +1426,6 @@ object Ssm2Pids {
         CYL4_ROUGHNESS,
         CYL5_ROUGHNESS,
         CYL6_ROUGHNESS,
-        LEARNED_IGN_TIMING_CORR,
         THROTTLE_MOTOR_DUTY,
         THROTTLE_MOTOR_VOLTAGE,
         TPS_SUB,
