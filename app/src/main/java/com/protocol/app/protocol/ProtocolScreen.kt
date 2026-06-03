@@ -1,6 +1,14 @@
 package com.protocol.app.protocol
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.drawBehind
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -13,6 +21,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
@@ -20,6 +34,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import com.protocol.app.flash.FlashPage
 import com.protocol.app.flash.FlashUiState
@@ -107,6 +124,58 @@ fun ProtocolScreen(
     // openSubPage clears editMode anyway, so the two never both fire.
     BackHandler(enabled = uiState.activeSubPage != null) { onCloseSubPage() }
 
+    // Live Data page lock (driven by the "Lock and Tap" button). Transient UI
+    // state on purpose: held here so it can freeze the pager (horizontal
+    // swipe), but it must NOT persist. Cancelling the lock — via the button,
+    // the Back button, or ON_STOP (home / backgrounded) — also stops live
+    // polling and logging if they're running, and the app always returns
+    // unlocked so the user re-applies it manually.
+    var locked by remember { mutableStateOf(false) }
+    val cancelLock: () -> Unit = {
+        if (uiState.isReadingLive) onStopReadingLive()   // stopReadingLive clears the logging flag too
+        locked = false
+    }
+    BackHandler(enabled = locked) { cancelLock() }
+    // rememberUpdatedState so the long-lived lifecycle observer always calls
+    // the latest cancelLock (which reads the current poll/log state).
+    val currentCancelLock by rememberUpdatedState(cancelLock)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && locked) currentCancelLock()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Lock-mode visual feedback (Compose animation only, no new deps). The
+    // status-bar pulse rides the connection color — solid when idle/unlocked,
+    // slow pulse while streaming, fast pulse while logging. The edge bars sit
+    // dim-white on the screen edges while streaming/logging and flash bright on
+    // each tap. Animated values are read in the draw phase so the pager below
+    // never recomposes per frame.
+    val pulse = remember { Animatable(1f) }
+    val pulsePhase = when {
+        locked && uiState.isLogging -> 2       // logging -> fast pulse
+        locked && uiState.isReadingLive -> 1   // streaming -> slow pulse
+        else -> 0                              // idle / unlocked -> solid
+    }
+    LaunchedEffect(pulsePhase) {
+        when (pulsePhase) {
+            1 -> while (true) { pulse.animateTo(0.3f, tween(700)); pulse.animateTo(1f, tween(700)) }
+            2 -> while (true) { pulse.animateTo(0.3f, tween(180)); pulse.animateTo(1f, tween(180)) }
+            else -> pulse.snapTo(1f)
+        }
+    }
+    val tapFlash = remember { Animatable(0f) }
+    val flashScope = rememberCoroutineScope()
+    val onTapFeedback: () -> Unit = {
+        flashScope.launch {
+            tapFlash.snapTo(0.9f)
+            tapFlash.animateTo(0f, tween(450))
+        }
+    }
+
     // Overdraw note: ScreenBg is skipped when a background photo is set
     // (the photo covers it completely). The 50% dim overlay is folded
     // into the AsyncImage's own draw pass via drawWithContent, so the
@@ -148,7 +217,7 @@ fun ProtocolScreen(
             // of the screen. Always visible across every page so the user
             // can tell at a glance whether the adapter is alive. Replaces
             // the old AdapterPill without occupying meaningful real estate.
-            ConnectionStatusStripe(uiState.connectionStatus)
+            ConnectionStatusStripe(uiState.connectionStatus) { pulse.value }
 
             // No header / close-X anywhere. The system back button closes
             // sub-pages (BackHandler above), so the body fills straight from
@@ -161,6 +230,7 @@ fun ProtocolScreen(
                 when (uiState.activeSubPage) {
                     null -> HorizontalPager(
                         state = pagerState,
+                        userScrollEnabled = !locked,
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (page) {
@@ -179,6 +249,9 @@ fun ProtocolScreen(
                             )
                             else -> LiveDataPage(
                                 uiState = uiState,
+                                locked = locked,
+                                onToggleLock = { if (locked) cancelLock() else { locked = true } },
+                                onTapFeedback = onTapFeedback,
                                 onStartReadingLive = onStartReadingLive,
                                 onStopReadingLive = onStopReadingLive,
                                 onStartLogging = onStartLogging,
@@ -242,7 +315,34 @@ fun ProtocolScreen(
                         StubBody(page = uiState.activeSubPage!!)
                     SubPage.Notices -> NoticesBody()
                 }
+
+                // Lock-mode edge bars: dim white on the screen's left/right
+                // edges while streaming/logging, flashing bright on each tap.
+                // Placed in the edge margin (outside the gauges' padding) so
+                // they never compress or overlap the gauges. drawBehind reads
+                // the animated alpha in the draw phase (no recomposition).
+                if (locked) {
+                    val edgeBaseline = if (uiState.isReadingLive || uiState.isLogging) 0.25f else 0f
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterStart)
+                            .width(5.dp)
+                            .fillMaxHeight()
+                            .drawBehind { drawRect(Color.White, alpha = maxOf(edgeBaseline, tapFlash.value)) }
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(5.dp)
+                            .fillMaxHeight()
+                            .drawBehind { drawRect(Color.White, alpha = maxOf(edgeBaseline, tapFlash.value)) }
+                    )
+                }
             }
+
+            // Matching status stripe pinned to the bottom of the screen — same
+            // connection color and pulse as the top one.
+            ConnectionStatusStripe(uiState.connectionStatus) { pulse.value }
         }
     }
 }

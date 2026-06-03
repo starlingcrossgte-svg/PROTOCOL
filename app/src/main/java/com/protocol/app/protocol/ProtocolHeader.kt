@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -34,7 +35,10 @@ import androidx.compose.ui.unit.dp
  * glance without occupying meaningful real estate.
  */
 @Composable
-internal fun ConnectionStatusStripe(status: ConnectionStatus) {
+internal fun ConnectionStatusStripe(
+    status: ConnectionStatus,
+    pulseAlpha: () -> Float = { 1f }
+) {
     val color = when (status) {
         is ConnectionStatus.Connected -> PassGreen
         is ConnectionStatus.Ready,
@@ -42,11 +46,14 @@ internal fun ConnectionStatusStripe(status: ConnectionStatus) {
         is ConnectionStatus.Error,
         ConnectionStatus.NoDevice -> FailRed
     }
+    // Pulse modulates only alpha — the connection color (green/accent/red)
+    // still reads. Alpha is read in the draw phase so the animation never
+    // recomposes anything.
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(3.dp)
-            .background(color)
+            .drawBehind { drawRect(color, alpha = pulseAlpha().coerceIn(0f, 1f)) }
     )
 }
 
@@ -58,22 +65,25 @@ internal fun HamburgerMenu(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
-            .clickable { expanded = true }
+            .clickable(enabled = enabled) { expanded = true }
             .size(width = 44.dp, height = 32.dp),
         contentAlignment = Alignment.Center
     ) {
+        // Dimmed while disabled (e.g. the Live Data page is locked).
+        val barColor = if (enabled) Accent else AccentDim
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             repeat(3) {
                 Box(
                     modifier = Modifier
                         .width(22.dp)
                         .height(2.dp)
-                        .background(Accent)
+                        .background(barColor)
                 )
             }
         }

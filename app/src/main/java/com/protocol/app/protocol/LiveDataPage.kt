@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,10 +27,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +40,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun LiveDataPage(
     uiState: ProtocolUiState,
+    locked: Boolean,
+    onToggleLock: () -> Unit,
+    onTapFeedback: () -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
@@ -54,48 +60,91 @@ internal fun LiveDataPage(
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
+    // `locked` is owned by ProtocolScreen (transient UI state) so the lock can
+    // also freeze the horizontal pager swipe, and so back/home can clear it
+    // without persisting. Here it gates scroll + edit-entry and drives the
+    // button label.
+
     val scrollState = rememberScrollState()
+
+    // Step 3 tap loop: while locked, a tap anywhere over the gauge area cycles
+    // stream -> +log -> stop both, then repeats. Routed through
+    // rememberUpdatedState so the gesture (registered once) always sees the
+    // current poll/log state instead of a stale snapshot.
+    val onCycleTap: () -> Unit = {
+        when {
+            !uiState.isReadingLive -> onStartReadingLive()   // idle -> stream
+            !uiState.isLogging -> onStartLogging()           // stream -> +log
+            else -> onStopReadingLive()                      // stream+log -> stop both
+        }
+    }
+    val currentCycleTap = rememberUpdatedState(onCycleTap)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState, enabled = !uiState.editMode)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        SnapGaugeGrid(
-            uiState = uiState,
-            onEnterEditMode = onEnterEditMode,
-            onExitEditMode = onExitEditMode,
-            onRemoveGauge = onRemoveGauge,
-            onResizeGauge = onResizeGauge
-        )
+        // Scrolling area: gauges + Session Log. Takes all height not used by
+        // the pinned bottom bar below.
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState, enabled = !uiState.editMode && !locked),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                SnapGaugeGrid(
+                    uiState = uiState,
+                    // Locked → swallow the long-press so the grid can't enter
+                    // edit mode. (Gating here keeps SnapGaugeGrid untouched.)
+                    onEnterEditMode = { if (!locked) onEnterEditMode() },
+                    onExitEditMode = onExitEditMode,
+                    onRemoveGauge = onRemoveGauge,
+                    onResizeGauge = onResizeGauge
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                LogActionRow(
+                    title = "Session Log",
+                    onClear = onClearSessionLog,
+                    onExportCsv = onExportSessionLog,
+                    titleAsHeader = true
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                SessionLogCard(uiState)
+            }
+            // While locked, a transparent overlay captures every tap over the
+            // gauge area and drives the loop; it also swallows drags, which
+            // reinforces "no scrolling while locked".
+            if (locked) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = {
+                                currentCycleTap.value()
+                                onTapFeedback()
+                            })
+                        }
+                )
+            }
+        }
 
         Spacer(Modifier.height(6.dp))
 
+        // Pinned to the bottom of the page — stays visible while the gauges
+        // and Session Log scroll above it.
         ModeButtonsRow(
-            uiState = uiState,
-            onStartReadingLive = onStartReadingLive,
-            onStopReadingLive = onStopReadingLive,
-            onStartLogging = onStartLogging,
-            onStopLogging = onStopLogging,
+            locked = locked,
+            onToggleLock = onToggleLock,
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenLiveDataSettings = onOpenLiveDataSettings
         )
-
-        Spacer(Modifier.height(6.dp))
-
-        LogActionRow(
-            title = "Session Log",
-            onClear = onClearSessionLog,
-            onExportCsv = onExportSessionLog,
-            titleAsHeader = true
-        )
-
-        Spacer(Modifier.height(6.dp))
-
-        SessionLogCard(uiState)
     }
 }
 
@@ -136,11 +185,8 @@ private fun StatusLine(uiState: ProtocolUiState) {
 
 @Composable
 private fun ModeButtonsRow(
-    uiState: ProtocolUiState,
-    onStartReadingLive: () -> Unit,
-    onStopReadingLive: () -> Unit,
-    onStartLogging: () -> Unit,
-    onStopLogging: () -> Unit,
+    locked: Boolean,
+    onToggleLock: () -> Unit,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit
@@ -150,37 +196,25 @@ private fun ModeButtonsRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Always present so the button keeps a fixed width whether or not the
+        // page is locked; dimmed + non-clickable while locked so there's no
+        // exit through the menu mid-session.
         HamburgerMenu(
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
-            onOpenLiveDataSettings = onOpenLiveDataSettings
+            onOpenLiveDataSettings = onOpenLiveDataSettings,
+            enabled = !locked
         )
+        // The single action button. Unlocked: "Lock and Tap" -> locks. Locked:
+        // "Cancel Lock and Tap" -> cancels the lock (the caller also stops any
+        // live poll/log). The stream -> log -> stop cycle itself is driven by
+        // tapping the gauge area while locked (see the overlay above).
         ModeButton(
-            label = when {
-                uiState.isLogging -> "Stop Reading + Logging"
-                uiState.isReadingLive -> "Stop Reading"
-                else -> "Read Live Data"
-            },
-            active = uiState.isReadingLive,
-            enabled = !uiState.isRunningProbe,
-            onClick = {
-                if (uiState.isReadingLive) onStopReadingLive() else onStartReadingLive()
-            },
-            shape = y2kLeftButtonShape(),
-            modifier = Modifier.weight(1f)
-        )
-        ModeButton(
-            label = when {
-                uiState.isLogging -> "Stop Logging"
-                uiState.isReadingLive -> "Log Live Data"
-                else -> "Read + Log Live"
-            },
-            active = uiState.isLogging,
-            enabled = !uiState.isRunningProbe,
-            onClick = {
-                if (uiState.isLogging) onStopLogging() else onStartLogging()
-            },
-            shape = y2kRightButtonShape(),
+            label = if (locked) "Cancel Lock and Tap" else "Lock and Tap",
+            active = true,
+            enabled = true,
+            onClick = onToggleLock,
+            shape = y2kCornerShape(),
             modifier = Modifier.weight(1f)
         )
     }
