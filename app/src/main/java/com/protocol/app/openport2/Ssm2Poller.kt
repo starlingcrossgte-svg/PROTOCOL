@@ -329,9 +329,11 @@ class Ssm2Poller(
                         "poller: bad frame ($consecutiveMisses/$maxConsecutiveMisses) — ${result.reason}"
                     )
                     if (consecutiveMisses >= maxConsecutiveMisses) {
-                        EcuLogger.error("poller: $maxConsecutiveMisses consecutive misses — stopping")
+                        EcuLogger.error("poller: $maxConsecutiveMisses consecutive misses — no ECU, stopping")
                         client.channelInitialized = false
-                        break
+                        throw NoEcuResponseException(
+                            "No ECU response after $maxConsecutiveMisses consecutive misses"
+                        )
                     }
                 }
                 is PollResult.Transport -> {
@@ -340,9 +342,11 @@ class Ssm2Poller(
                         "poller: transport miss ($consecutiveMisses/$maxConsecutiveMisses) — ${result.reason}"
                     )
                     if (consecutiveMisses >= maxConsecutiveMisses) {
-                        EcuLogger.error("poller: $maxConsecutiveMisses consecutive misses — stopping")
+                        EcuLogger.error("poller: $maxConsecutiveMisses consecutive misses — no ECU, stopping")
                         client.channelInitialized = false
-                        break
+                        throw NoEcuResponseException(
+                            "No ECU response after $maxConsecutiveMisses consecutive misses"
+                        )
                     }
                 }
             }
@@ -384,9 +388,11 @@ class Ssm2Poller(
                     armFailures++
                     EcuLogger.comm("continuous: arm failed ($armFailures/$maxArmFailures)")
                     if (armFailures >= maxArmFailures) {
-                        EcuLogger.error("continuous: $maxArmFailures arm failures — stopping")
+                        EcuLogger.error("continuous: $maxArmFailures arm failures — no ECU, stopping")
                         client.channelInitialized = false
-                        break
+                        throw NoEcuResponseException(
+                            "No ECU response after $maxArmFailures continuous-arm failures"
+                        )
                     }
                     delay(100L)
                     continue

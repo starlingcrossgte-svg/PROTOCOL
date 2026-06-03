@@ -40,6 +40,7 @@ class OpenPortCanLiveSource(
 
     private val nextReqId = AtomicInteger(2)
     private var channelOpened = false
+    private var consecutiveNoReply = 0
 
     override fun initChannel(): Boolean {
         if (channelOpened) return true
@@ -75,6 +76,7 @@ class OpenPortCanLiveSource(
 
     override fun startFlow(intervalMs: Long): Flow<PollSample> = flow {
         if (!initChannel()) return@flow
+        consecutiveNoReply = 0
         while (true) {
             pollOnce()?.let { emit(it) }
             if (intervalMs > 0) delay(intervalMs)
@@ -99,11 +101,24 @@ class OpenPortCanLiveSource(
 
             try {
                 io.write(packet)
-                val rr = io.readUntil(2000L) { buf -> extractVehicleData(buf) != null }
+                val rr = io.readUntil(READ_TIMEOUT_MS) { buf ->
+                    extractVehicleData(buf) != null || hasAreError(buf, reqId)
+                }
                 val data = extractVehicleData(rr.bytes)
                 if (data != null && data.size >= 2 && (data[0].toInt() and 0xFF) == 0xE8) {
                     raw[i] = data[1].toInt() and 0xFF
                     anyOk = true
+                    consecutiveNoReply = 0
+                } else {
+                    // No vehicle frame: the adapter returned `are` (no CAN
+                    // response) or the read timed out. Count it; a sustained
+                    // run means the ECU isn't on the bus.
+                    consecutiveNoReply++
+                    if (consecutiveNoReply >= MAX_CONSECUTIVE_NO_REPLY) {
+                        throw NoEcuResponseException(
+                            "No ECU response after $MAX_CONSECUTIVE_NO_REPLY consecutive requests"
+                        )
+                    }
                 }
             } catch (e: UsbDisconnectedException) {
                 channelOpened = false
@@ -172,6 +187,22 @@ class OpenPortCanLiveSource(
         }
     }
 
+    // True if the buffer holds an `are <...> <reqId>` transmit-error line for
+    // this request — the adapter's "no CAN response" answer. Distinct from
+    // `ar6` (received frame) and `aro` (ack); only the leading "are" matches.
+    private fun hasAreError(buf: ByteArray, reqId: Int): Boolean {
+        val s = String(buf, StandardCharsets.US_ASCII)
+        val needle = " $reqId\r\n"
+        var from = 0
+        while (true) {
+            val i = s.indexOf("are", from)
+            if (i < 0) return false
+            val end = s.indexOf("\r\n", i)
+            if (end > i && s.substring(i, end + 2).endsWith(needle)) return true
+            from = i + 2
+        }
+    }
+
     private fun extractVehicleData(buf: ByteArray): ByteArray? {
         val marker = "ar$CHANNEL".toByteArray(StandardCharsets.US_ASCII)
         var pos = 0
@@ -215,7 +246,16 @@ class OpenPortCanLiveSource(
         val CAN_ID_RESPONSE = byteArrayOf(0x00, 0x00, 0x07, 0xE8.toByte())
 
         private const val TX_FLAGS = 64
-        private const val DEFAULT_TX_TIMEOUT_MICROS = 2_000_000L
+        // Adapter-side transmit timeout. A present ECU answers in ~1 ms over
+        // CAN, so this only bounds how long a *dead* address waits before the
+        // adapter returns `are` (no response). Kept short so "no ECU" is
+        // caught in a few seconds instead of grinding 2 s per address forever.
+        private const val DEFAULT_TX_TIMEOUT_MICROS = 600_000L
+        // Ceiling on waiting for the adapter's reply (data or `are`).
+        private const val READ_TIMEOUT_MS = 1_500L
+        // Consecutive no-reply requests before declaring "no ECU". A present
+        // ECU answers the very first request, so a run this long = not on bus.
+        private const val MAX_CONSECUTIVE_NO_REPLY = 8
         private const val RX_FLAG_VEHICLE = 0x40
         private const val AR6_HEADER_LEN = 9
     }

@@ -29,6 +29,15 @@ enum class PendingAction { Probe, ReadLive, LogLive }
 
 data class ProtocolUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.NoDevice,
+    /** True when an adapter is physically present (USB device on the bus, or
+     *  OBDLink BT connected). Drives the status stripe: present = white,
+     *  absent = invisible. Distinct from [connectionStatus], which tracks the
+     *  session/permission state used for the status message text. */
+    val adapterPresent: Boolean = false,
+    /** Incremented each time a live source reports the ECU stopped answering
+     *  (NoEcuResponseException). The UI observes the change to auto-exit lock
+     *  mode and run the no-ECU red/white flash on the top/bottom bars. */
+    val noEcuEventId: Int = 0,
     val statusMessage: String = "",
     val isRunningProbe: Boolean = false,
     val isReadingLive: Boolean = false,

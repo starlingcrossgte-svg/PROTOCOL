@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,24 +37,24 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 internal fun ConnectionStatusStripe(
-    status: ConnectionStatus,
-    pulseAlpha: () -> Float = { 1f }
+    visible: Boolean,
+    flashing: Boolean = false,
+    flash: () -> Float = { 0f }
 ) {
-    val color = when (status) {
-        is ConnectionStatus.Connected -> PassGreen
-        is ConnectionStatus.Ready,
-        is ConnectionStatus.PermissionRequired -> Accent
-        is ConnectionStatus.Error,
-        ConnectionStatus.NoDevice -> FailRed
-    }
-    // Pulse modulates only alpha — the connection color (green/accent/red)
-    // still reads. Alpha is read in the draw phase so the animation never
-    // recomposes anything.
+    // Presence-based: solid white (Accent) when an adapter is present, invisible
+    // when not. During the no-ECU flash it shows a white<->red mix instead. 3 dp
+    // slot always reserved (no layout shift); the flash value is read in the
+    // draw phase so it never recomposes.
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(3.dp)
-            .drawBehind { drawRect(color, alpha = pulseAlpha().coerceIn(0f, 1f)) }
+            .drawBehind {
+                when {
+                    flashing -> drawRect(lerp(Color.White, Color.Red, flash().coerceIn(0f, 1f)))
+                    visible -> drawRect(Accent)
+                }
+            }
     )
 }
 

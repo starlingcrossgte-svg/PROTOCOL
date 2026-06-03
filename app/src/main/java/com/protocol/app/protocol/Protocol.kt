@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Uri
@@ -38,6 +39,26 @@ class Protocol : ComponentActivity() {
         private const val TACTRIX_PRODUCT_ID = 52301
         private const val ACTION_USB_PERMISSION =
             "com.protocol.app.OPENPORT_USB_PERMISSION"
+
+        // The app is the source of truth for its own scale — the OS "Screen
+        // zoom" and "Font size" sliders are bypassed so the layout is identical
+        // regardless of where a user leaves those sliders. Pinned to the
+        // dialed-in look on the 1440px flagship panels we target: density 560
+        // (screen-zoom lowest) + font scale 0.9 (font second-from-lowest).
+        // Both 1440-wide panels render the same dp width (~411 dp) at 560, so
+        // the S23-class and S25-class devices match each other exactly.
+        private const val LOCKED_DENSITY_DPI = 560
+        private const val LOCKED_FONT_SCALE = 0.9f
+    }
+
+    // Force our fixed density + font scale onto every context this Activity
+    // builds resources from. Runs on first create and again on any config-
+    // change recreation (e.g. the user moves an OS slider), so the lock holds.
+    override fun attachBaseContext(newBase: Context) {
+        val config = Configuration(newBase.resources.configuration)
+        config.densityDpi = LOCKED_DENSITY_DPI
+        config.fontScale = LOCKED_FONT_SCALE
+        super.attachBaseContext(newBase.createConfigurationContext(config))
     }
 
     private lateinit var viewModel: ProtocolViewModel
@@ -165,6 +186,7 @@ class Protocol : ComponentActivity() {
             if (intent == null) return
             when (intent.action) {
                 ACTION_USB_PERMISSION -> handlePermissionResult(intent)
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> handleAttached(intent)
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> handleDetached(intent)
             }
         }
@@ -195,7 +217,7 @@ class Protocol : ComponentActivity() {
         sessionLogStore = SessionLogStore(applicationContext)
         viewModel.attachSessionLogStore(sessionLogStore)
 
-        refreshConnectionStatus()
+        syncAdapterPresenceAndAutoConnect()
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -272,7 +294,7 @@ class Protocol : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         registerUsbReceiver()
-        refreshConnectionStatus()
+        syncAdapterPresenceAndAutoConnect()
     }
 
     override fun onStop() {
@@ -318,12 +340,14 @@ class Protocol : ComponentActivity() {
     private fun discoverAndConnect() {
         val device = sessionManager.findDevice()
         if (device == null) {
+            viewModel.setAdapterPresent(false)
             viewModel.setConnectionStatus(
                 ConnectionStatus.NoDevice,
                 "Tactrix VID=$TACTRIX_VENDOR_ID PID=$TACTRIX_PRODUCT_ID not detected"
             )
             return
         }
+        viewModel.setAdapterPresent(true)
 
         if (!sessionManager.hasPermission(device)) {
             viewModel.setConnectionStatus(
@@ -384,15 +408,33 @@ class Protocol : ComponentActivity() {
             return
         }
         viewModel.clearOpenSession()
+        viewModel.setAdapterPresent(false)
         viewModel.setConnectionStatus(
             ConnectionStatus.NoDevice,
             "Tactrix device detached"
         )
     }
 
+    /**
+     * USB attach while the app is open (or right after the manifest filter
+     * launches it on plug-in). Auto-select OpenPort, mark the adapter present,
+     * and connect — no manual selection needed. The first attach prompts for
+     * USB permission; once "always" is granted, subsequent attaches connect
+     * silently.
+     */
+    private fun handleAttached(intent: Intent) {
+        val device = usbPermissionHelper.getUsbDeviceFromIntent(intent) ?: return
+        if (device.vendorId != TACTRIX_VENDOR_ID || device.productId != TACTRIX_PRODUCT_ID) {
+            return
+        }
+        viewModel.setAdapterPresent(true)
+        onAdapterChanged(Adapter.OpenPort)
+    }
+
     private fun registerUsbReceiver() {
         val filter = IntentFilter().apply {
             addAction(ACTION_USB_PERMISSION)
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -409,20 +451,23 @@ class Protocol : ComponentActivity() {
         }
     }
 
-    private fun refreshConnectionStatus() {
+    /**
+     * Reconcile USB presence with the UI and auto-connect. Called on create /
+     * start, which also covers the manifest-launch-on-attach case. A present
+     * USB device → mark present + auto-select OpenPort + connect (if not
+     * already connected). No USB device → mark absent (stripe invisible),
+     * unless OBDLink is the active adapter, whose presence the VM owns.
+     */
+    private fun syncAdapterPresenceAndAutoConnect() {
         val device = sessionManager.findDevice()
-        when {
-            device == null -> viewModel.setConnectionStatus(
+        if (device != null) {
+            viewModel.setAdapterPresent(true)
+            if (!viewModel.isConnected()) onAdapterChanged(Adapter.OpenPort)
+        } else if (viewModel.uiState.value.settings.adapter != Adapter.OBDLink) {
+            viewModel.setAdapterPresent(false)
+            viewModel.setConnectionStatus(
                 ConnectionStatus.NoDevice,
                 "No Tactrix device on USB bus"
-            )
-            !sessionManager.hasPermission(device) -> viewModel.setConnectionStatus(
-                ConnectionStatus.PermissionRequired(deviceLabel(device)),
-                "Tap Discover to request USB permission"
-            )
-            else -> viewModel.setConnectionStatus(
-                ConnectionStatus.Ready(deviceLabel(device)),
-                "Tap Discover to open USB session"
             )
         }
     }

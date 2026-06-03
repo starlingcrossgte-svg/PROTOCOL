@@ -287,9 +287,12 @@ private fun CombinedLogCard(lines: List<LogLine>) {
         modifier = Modifier.fillMaxWidth()
     ) {
         val listState = rememberLazyListState()
-        // Auto-scroll to the newest line so the live tail is always visible.
+        // Snap (no animation) to the newest line so the live tail is always
+        // visible. An animated scroll races through the whole accumulated list
+        // when this page is swiped into view — fighting the pager's horizontal
+        // swipe and sometimes wedging it. An instant snap can't fight the swipe.
         LaunchedEffect(lines.size) {
-            if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+            if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
         }
         if (lines.isEmpty()) {
             Box(

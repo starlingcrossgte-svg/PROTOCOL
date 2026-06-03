@@ -341,15 +341,18 @@ class ProtocolViewModel : ViewModel() {
                 BusProtocol.KLine -> mgr.connectKline()
             }
             when (r) {
-                is ObdLinkBtManager.ConnectResult.Connected ->
+                is ObdLinkBtManager.ConnectResult.Connected -> {
                     setConnectionStatus(
                         ConnectionStatus.Connected(r.deviceLabel),
                         "Connected to ${r.deviceLabel} ($protocolLabel)"
                     )
+                    setAdapterPresent(true)
+                }
                 is ObdLinkBtManager.ConnectResult.Failure -> {
                     obdLinkManager?.disconnect()
                     obdLinkManager = null
                     setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+                    setAdapterPresent(false)
                 }
             }
         }
@@ -372,6 +375,7 @@ class ProtocolViewModel : ViewModel() {
                 isLogging = if (wasObd) false else _uiState.value.isLogging,
                 liveValues = if (wasObd) emptyMap() else _uiState.value.liveValues,
                 connectionStatus = ConnectionStatus.NoDevice,
+                adapterPresent = false,
                 statusMessage = "OBDLink disconnected"
             )
         }
@@ -530,6 +534,13 @@ class ProtocolViewModel : ViewModel() {
             connectionStatus = status,
             statusMessage = message
         )
+    }
+
+    /** Physical adapter presence — drives the status stripe (present = white,
+     *  absent = invisible). USB presence is set by the Activity on attach /
+     *  detach / launch; OBDLink presence is set here on connect / disconnect. */
+    fun setAdapterPresent(present: Boolean) {
+        _uiState.value = _uiState.value.copy(adapterPresent = present)
     }
 
     fun setOpenSession(session: OpenPort2UsbSession, deviceLabel: String) {
@@ -788,6 +799,15 @@ class ProtocolViewModel : ViewModel() {
                         }
                     }
                 }
+            } catch (_: com.protocol.app.openport2.NoEcuResponseException) {
+                // Adapter connected + channel open, but the ECU never answered.
+                // Stop instead of hammering the bus forever; the finally block
+                // clears the gauges and the reading/logging flags.
+                _uiState.value = _uiState.value.copy(
+                    statusMessage = "No ECU response — adapter connected, ECU not answering",
+                    noEcuEventId = _uiState.value.noEcuEventId + 1
+                )
+                return@launch
             } catch (_: UsbDisconnectedException) {
                 _uiState.value = _uiState.value.copy(
                     isReadingLive = false,

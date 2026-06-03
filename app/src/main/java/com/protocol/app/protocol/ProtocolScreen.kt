@@ -6,9 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.drawBehind
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -30,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
@@ -148,31 +147,23 @@ fun ProtocolScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Lock-mode visual feedback (Compose animation only, no new deps). The
-    // status-bar pulse rides the connection color — solid when idle/unlocked,
-    // slow pulse while streaming, fast pulse while logging. The edge bars sit
-    // dim-white on the screen edges while streaming/logging and flash bright on
-    // each tap. Animated values are read in the draw phase so the pager below
-    // never recomposes per frame.
-    val pulse = remember { Animatable(1f) }
-    val pulsePhase = when {
-        locked && uiState.isLogging -> 2       // logging -> fast pulse
-        locked && uiState.isReadingLive -> 1   // streaming -> slow pulse
-        else -> 0                              // idle / unlocked -> solid
-    }
-    LaunchedEffect(pulsePhase) {
-        when (pulsePhase) {
-            1 -> while (true) { pulse.animateTo(0.3f, tween(700)); pulse.animateTo(1f, tween(700)) }
-            2 -> while (true) { pulse.animateTo(0.3f, tween(180)); pulse.animateTo(1f, tween(180)) }
-            else -> pulse.snapTo(1f)
-        }
-    }
-    val tapFlash = remember { Animatable(0f) }
-    val flashScope = rememberCoroutineScope()
-    val onTapFeedback: () -> Unit = {
-        flashScope.launch {
-            tapFlash.snapTo(0.9f)
-            tapFlash.animateTo(0f, tween(450))
+    // No-ECU flash: when a live source reports the ECU stopped answering, auto-
+    // exit lock and flash ALL bars — top, bottom, and the side edges —
+    // white<->red ~20 cycles over ~6 s. When it ends, top/bottom settle via
+    // presence (white if still connected, invisible if dropped) and the sides
+    // go away (lock is no longer engaged). Read in the draw phase so nothing
+    // recomposes per frame. (Borders are otherwise solid white — no pulse.)
+    var noEcuFlashing by remember { mutableStateOf(false) }
+    val noEcuFlash = remember { Animatable(0f) }
+    LaunchedEffect(uiState.noEcuEventId) {
+        if (uiState.noEcuEventId > 0) {
+            locked = false
+            noEcuFlashing = true
+            repeat(20) {
+                noEcuFlash.animateTo(1f, tween(150))
+                noEcuFlash.animateTo(0f, tween(150))
+            }
+            noEcuFlashing = false
         }
     }
 
@@ -217,7 +208,7 @@ fun ProtocolScreen(
             // of the screen. Always visible across every page so the user
             // can tell at a glance whether the adapter is alive. Replaces
             // the old AdapterPill without occupying meaningful real estate.
-            ConnectionStatusStripe(uiState.connectionStatus) { pulse.value }
+            ConnectionStatusStripe(uiState.adapterPresent, noEcuFlashing, { noEcuFlash.value })
 
             // No header / close-X anywhere. The system back button closes
             // sub-pages (BackHandler above), so the body fills straight from
@@ -251,7 +242,6 @@ fun ProtocolScreen(
                                 uiState = uiState,
                                 locked = locked,
                                 onToggleLock = { if (locked) cancelLock() else { locked = true } },
-                                onTapFeedback = onTapFeedback,
                                 onStartReadingLive = onStartReadingLive,
                                 onStopReadingLive = onStopReadingLive,
                                 onStartLogging = onStartLogging,
@@ -316,33 +306,40 @@ fun ProtocolScreen(
                     SubPage.Notices -> NoticesBody()
                 }
 
-                // Lock-mode edge bars: dim white on the screen's left/right
-                // edges while streaming/logging, flashing bright on each tap.
-                // Placed in the edge margin (outside the gauges' padding) so
-                // they never compress or overlap the gauges. drawBehind reads
-                // the animated alpha in the draw phase (no recomposition).
-                if (locked) {
-                    val edgeBaseline = if (uiState.isReadingLive || uiState.isLogging) 0.25f else 0f
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterStart)
-                            .width(5.dp)
-                            .fillMaxHeight()
-                            .drawBehind { drawRect(Color.White, alpha = maxOf(edgeBaseline, tapFlash.value)) }
-                    )
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(5.dp)
-                            .fillMaxHeight()
-                            .drawBehind { drawRect(Color.White, alpha = maxOf(edgeBaseline, tapFlash.value)) }
-                    )
-                }
+                // Side edges: a 3 dp lock-mode indicator (matches the top/bottom
+                // thickness). Solid white while locked; during the no-ECU flash
+                // they flash white<->red too (even as lock exits), then vanish.
+                // In the edge margin (outside the gauge padding) so they never
+                // compress or overlap the gauges. Read in the draw phase.
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .drawBehind {
+                            when {
+                                noEcuFlashing -> drawRect(lerp(Color.White, Color.Red, noEcuFlash.value.coerceIn(0f, 1f)))
+                                locked -> drawRect(Color.White)
+                            }
+                        }
+                )
+                Box(
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .drawBehind {
+                            when {
+                                noEcuFlashing -> drawRect(lerp(Color.White, Color.Red, noEcuFlash.value.coerceIn(0f, 1f)))
+                                locked -> drawRect(Color.White)
+                            }
+                        }
+                )
             }
 
             // Matching status stripe pinned to the bottom of the screen — same
             // connection color and pulse as the top one.
-            ConnectionStatusStripe(uiState.connectionStatus) { pulse.value }
+            ConnectionStatusStripe(uiState.adapterPresent, noEcuFlashing, { noEcuFlash.value })
         }
     }
 }

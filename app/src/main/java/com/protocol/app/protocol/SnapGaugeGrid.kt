@@ -136,6 +136,7 @@ internal fun SnapGaugeGrid(
                     maxValue = uiState.liveValuesMax[entry.pidId],
                     active = active,
                     editMode = editMode,
+                    highlighted = uiState.isReadingLive,
                     cellUnitWidthPx = cellUnitWidthPx,
                     cellUnitHeightPx = cellUnitHeightPx,
                     onEnterEdit = onEnterEditMode,
@@ -159,6 +160,7 @@ private fun GaugeTile(
     maxValue: Double?,
     active: Boolean,
     editMode: Boolean,
+    highlighted: Boolean,
     cellUnitWidthPx: Float,
     cellUnitHeightPx: Float,
     onEnterEdit: () -> Unit,
@@ -168,7 +170,9 @@ private fun GaugeTile(
 ) {
     val haptic = LocalHapticFeedback.current
     val baseBg = if (active) SurfaceBg else SurfaceAlt
-    val borderColor = if (editMode) Accent else BorderGray
+    // White outline when in edit mode, or when "highlighted" (lock-mode
+    // streaming) — the lock tap loop lights the gauge outlines on tap 1.
+    val borderColor = if (editMode || highlighted) Accent else BorderGray
     val borderWidth = if (editMode) 2.dp else 1.dp
 
     // Value font scales by cell footprint. The abbreviation (display name)
@@ -262,8 +266,8 @@ private fun GaugeTile(
             // Title is small and top-aligned; value dominates the middle and
             // is right-padded by the unit; min/max row sits at the bottom.
             val moduleSuffix = when (pid.category) {
-                com.protocol.app.openport2.Ssm2PidCategory.ECU -> "\\E"
-                com.protocol.app.openport2.Ssm2PidCategory.TCM -> "\\T"
+                com.protocol.app.openport2.Ssm2PidCategory.ECU -> "|E"
+                com.protocol.app.openport2.Ssm2PidCategory.TCM -> "|T"
             }
             val formattedValue = rawValue?.let {
                 ProtocolLogFormatter.formatPidValueText(pid.id, it)

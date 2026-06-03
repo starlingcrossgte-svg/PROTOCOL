@@ -1,5 +1,6 @@
 package com.protocol.app.obdlink
 
+import com.protocol.app.openport2.NoEcuResponseException
 import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2Pid
 import com.protocol.app.openport2.Ssm2PidCategory
@@ -28,6 +29,8 @@ class ObdLinkLiveSource(
     @Volatile
     private var ecmPids: List<Ssm2Pid> = pids.filter { it.category == Ssm2PidCategory.ECU }
 
+    private var consecutiveNoReply = 0
+
     /** The ELM channel is already set up by [ObdLinkBtManager.connect]. */
     override fun initChannel(): Boolean = true
 
@@ -38,6 +41,7 @@ class ObdLinkLiveSource(
     override fun close() {}
 
     override fun startFlow(intervalMs: Long): Flow<PollSample> = flow {
+        consecutiveNoReply = 0
         while (true) {
             pollOnce()?.let { emit(it) }
             if (intervalMs > 0) delay(intervalMs)
@@ -68,8 +72,17 @@ class ObdLinkLiveSource(
             if (one != null) {
                 raw[i] = one[0]
                 anyOk = true
+                consecutiveNoReply = 0
+            } else {
+                // NO DATA / '?' — no ECU reply for this address. After a
+                // sustained run, conclude the ECU isn't on the bus.
+                consecutiveNoReply++
+                if (consecutiveNoReply >= MAX_CONSECUTIVE_NO_REPLY) {
+                    throw NoEcuResponseException(
+                        "No ECU response after $MAX_CONSECUTIVE_NO_REPLY consecutive requests"
+                    )
+                }
             }
-            // A failed address stays 0; its '?' / NO DATA is visible in the BT log.
         }
         if (!anyOk) return null
         return buildSample(pids, raw, wireStart)
@@ -93,5 +106,11 @@ class ObdLinkLiveSource(
             ecmOk = true,
             tcmOk = true
         )
+    }
+
+    private companion object {
+        // Consecutive no-reply requests before declaring "no ECU". A present
+        // ECU answers the first request, so a run this long = not on bus.
+        private const val MAX_CONSECUTIVE_NO_REPLY = 8
     }
 }

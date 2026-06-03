@@ -1,5 +1,6 @@
 package com.protocol.app.obdlink
 
+import com.protocol.app.openport2.NoEcuResponseException
 import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2AddressQuery
 import com.protocol.app.openport2.Ssm2FrameParser
@@ -50,9 +51,23 @@ class ObdLinkKlineSource(
     override fun close() {}
 
     override fun startFlow(intervalMs: Long): Flow<PollSample> = flow {
+        var consecutiveNoReply = 0
         while (true) {
             val cycleStart = System.currentTimeMillis()
-            pollOnce()?.let { emit(it) }
+            val sample = pollOnce()
+            if (sample != null) {
+                consecutiveNoReply = 0
+                emit(sample)
+            } else if (ecmPids.isNotEmpty()) {
+                // PIDs selected but no valid SSM2 reply this cycle (NO DATA /
+                // BUS ERROR / timeout). A sustained run = ECU not answering.
+                consecutiveNoReply++
+                if (consecutiveNoReply >= MAX_CONSECUTIVE_NO_REPLY) {
+                    throw NoEcuResponseException(
+                        "No ECU response after $MAX_CONSECUTIVE_NO_REPLY consecutive cycles"
+                    )
+                }
+            }
             // intervalMs is a MINIMUM period (idle floor), NOT additive idle:
             // the ~190 ms K-line round trip already paces us, so only sleep the
             // remainder. At the 100 ms floor this path is wire-bound (~5 Hz); a
@@ -133,5 +148,8 @@ class ObdLinkKlineSource(
         // STPX response-wait cap (ms). r:1 returns as soon as the ECU's single
         // reply lands, so this only bounds the no-reply case.
         private const val RESPONSE_TIMEOUT_MS = 300
+        // Consecutive no-reply cycles before declaring "no ECU". A present ECU
+        // answers the first cycle, so a run this long = not on bus.
+        private const val MAX_CONSECUTIVE_NO_REPLY = 8
     }
 }

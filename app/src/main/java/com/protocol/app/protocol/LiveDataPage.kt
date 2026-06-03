@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,7 +43,6 @@ internal fun LiveDataPage(
     uiState: ProtocolUiState,
     locked: Boolean,
     onToggleLock: () -> Unit,
-    onTapFeedback: () -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
@@ -83,7 +83,7 @@ internal fun LiveDataPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         // Scrolling area: gauges + Session Log. Takes all height not used by
         // the pinned bottom bar below.
@@ -125,16 +125,13 @@ internal fun LiveDataPage(
                     modifier = Modifier
                         .matchParentSize()
                         .pointerInput(Unit) {
-                            detectTapGestures(onTap = {
-                                currentCycleTap.value()
-                                onTapFeedback()
-                            })
+                            detectTapGestures(onTap = { currentCycleTap.value() })
                         }
                 )
             }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(5.dp))
 
         // Pinned to the bottom of the page — stays visible while the gauges
         // and Session Log scroll above it.
@@ -210,7 +207,7 @@ private fun ModeButtonsRow(
         // live poll/log). The stream -> log -> stop cycle itself is driven by
         // tapping the gauge area while locked (see the overlay above).
         ModeButton(
-            label = if (locked) "Cancel Lock and Tap" else "Lock and Tap",
+            label = AnnotatedString(if (locked) "Cancel Lock and Tap" else "Lock and Tap"),
             active = true,
             enabled = true,
             onClick = onToggleLock,
@@ -222,7 +219,7 @@ private fun ModeButtonsRow(
 
 @Composable
 private fun ModeButton(
-    label: String,
+    label: AnnotatedString,
     active: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -240,7 +237,7 @@ private fun ModeButton(
             .background(SurfaceBg, shape)
             .border(1.dp, lineColor, shape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(label, color = lineColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
@@ -267,7 +264,8 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
-        border = BorderStroke(1.dp, BorderGray),
+        // White outline while logging (lock tap 2 lights the log window).
+        border = BorderStroke(1.dp, if (uiState.isLogging) Accent else BorderGray),
         modifier = Modifier.fillMaxWidth()
     ) {
         // SelectionContainer wraps the scroll containers (not the inner Text)
