@@ -12,6 +12,7 @@ import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,6 +20,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
 import java.io.File
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -42,21 +44,32 @@ class Protocol : ComponentActivity() {
 
         // The app is the source of truth for its own scale — the OS "Screen
         // zoom" and "Font size" sliders are bypassed so the layout is identical
-        // regardless of where a user leaves those sliders. Pinned to the
-        // dialed-in look on the 1440px flagship panels we target: density 560
-        // (screen-zoom lowest) + font scale 0.9 (font second-from-lowest).
-        // Both 1440-wide panels render the same dp width (~411 dp) at 560, so
-        // the S23-class and S25-class devices match each other exactly.
-        private const val LOCKED_DENSITY_DPI = 560
+        // regardless of where a user leaves those sliders. The dialed-in look was
+        // captured on the 1440px flagship panels: density 560 (screen-zoom lowest)
+        // + font scale 0.9 (font second-from-lowest), giving ~411 dp of layout
+        // width. Rather than hardcoding 560, we anchor that reference and scale the
+        // density by the panel's pixel width so EVERY device lands on the same
+        // ~411 dp width: a 1440px panel resolves to 560 (flagships unchanged), a
+        // 1080px panel (A14 5G) resolves to 420. The flagship fleet is byte-for-
+        // byte identical to the old hardcode; only non-1440 panels adapt.
+        private const val REFERENCE_WIDTH_PX = 1440
+        private const val REFERENCE_DENSITY_DPI = 560
         private const val LOCKED_FONT_SCALE = 0.9f
     }
 
-    // Force our fixed density + font scale onto every context this Activity
-    // builds resources from. Runs on first create and again on any config-
-    // change recreation (e.g. the user moves an OS slider), so the lock holds.
+    // Force our derived density + fixed font scale onto every context this
+    // Activity builds resources from. Runs on first create and again on any
+    // config-change recreation (e.g. the user moves an OS slider), so the lock
+    // holds.
     override fun attachBaseContext(newBase: Context) {
         val config = Configuration(newBase.resources.configuration)
-        config.densityDpi = LOCKED_DENSITY_DPI
+        // Short edge = portrait width, robust to whatever orientation this
+        // context is built in. Pixel count is physical (density-independent), so
+        // anchoring 560 dpi @ 1440px yields the same dp width on any panel.
+        val metrics = newBase.resources.displayMetrics
+        val widthPx = minOf(metrics.widthPixels, metrics.heightPixels)
+        config.densityDpi =
+            Math.round(widthPx.toFloat() / REFERENCE_WIDTH_PX * REFERENCE_DENSITY_DPI)
         config.fontScale = LOCKED_FONT_SCALE
         super.attachBaseContext(newBase.createConfigurationContext(config))
     }
@@ -198,6 +211,40 @@ class Protocol : ComponentActivity() {
         // Backported to pre-Android-12 via androidx.core:core-splashscreen.
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // Edge-to-edge. Draw our background behind the system bars and the
+        // camera cutout. The chrome (status stripe, body, pinned buttons) is
+        // already wrapped in statusBarsPadding()/navigationBarsPadding() in
+        // ProtocolScreen, so it insets itself below the status bar and above
+        // whatever bottom nav affordance is active — a thin gap on gesture
+        // nav, a thick one on 3-button nav — while the background bleeds the
+        // full physical display.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Drop the translucent scrim the system otherwise paints behind the
+            // nav bar, so the background shows through cleanly under both
+            // gesture and 3-button nav.
+            window.isNavigationBarContrastEnforced = false
+        }
+        // Dark UI → light system-bar icons (clock/battery stay legible on top
+        // of our background).
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+        // Render into the display cutout (punch-hole / notch). ALWAYS on R+
+        // covers any orientation; SHORT_EDGES is the P/Q fallback.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
 
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
         usbPermissionHelper = UsbPermissionHelper(this, usbManager)

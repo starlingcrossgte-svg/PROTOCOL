@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +65,9 @@ internal fun HomePage(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // Keep the dev console / simulator-port fields above the keyboard
+            // when it opens (edge-to-edge stops the system auto-panning).
+            .imePadding()
             .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally

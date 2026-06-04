@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -34,6 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
@@ -118,6 +128,27 @@ fun ProtocolScreen(
     // is preserved when they pop into a sub-page and back.
     val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
 
+    // Immersive Live Data: hide the system status bar while the Live Data page
+    // (index 2) is the one on screen and no sub-page is over it, so the gauges
+    // can rise into the freed top band with no clock/battery to overlap. The
+    // root inset below falls back to the camera cutout when the bar is hidden,
+    // so nothing ever reaches the cutout. Status bar returns on Home/
+    // Diagnostics/sub-pages; a downward swipe reveals it transiently anywhere.
+    val liveDataActive = uiState.activeSubPage == null && pagerState.currentPage == 2
+    val view = LocalView.current
+    LaunchedEffect(liveDataActive) {
+        var ctx = view.context
+        while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) {
+            ctx = ctx.baseContext
+        }
+        val window = (ctx as? android.app.Activity)?.window ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (liveDataActive) controller.hide(WindowInsetsCompat.Type.statusBars())
+        else controller.show(WindowInsetsCompat.Type.statusBars())
+    }
+
     // Sub-page BackHandler. LiveDataPage's edit-mode BackHandler is nested
     // deeper and stacks above this one when both could be relevant — but
     // openSubPage clears editMode anyway, so the two never both fire.
@@ -201,7 +232,15 @@ fun ProtocolScreen(
 
         Column(modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
+            // Top inset = whichever is taller, the status bar or the camera
+            // cutout. On most pages the status bar is shown and wins (content
+            // clears the clock). On Live Data the status bar is hidden
+            // (immersive), so statusBars collapses to 0 and the cutout wins —
+            // gauges seat just under the camera with no clock to overlap.
+            .windowInsetsPadding(
+                WindowInsets.statusBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Top)
+            )
             .navigationBarsPadding()
         ) {
             // Connection status stripe — 3dp colored bar at the very top

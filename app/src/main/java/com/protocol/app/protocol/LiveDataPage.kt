@@ -83,7 +83,13 @@ internal fun LiveDataPage(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            // Live-Data only: trim the top gap so the gauges sit a bit higher.
+            // The status-bar inset (applied at the root, above the status stripe)
+            // is still the floor, so the gauges stay clear of both the status bar
+            // and the camera cutout on every device — this only reclaims the
+            // fixed gap that sat below that inset. Bottom stays 5dp for the
+            // pinned button.
+            .padding(start = 10.dp, end = 10.dp, top = 1.dp, bottom = 5.dp)
     ) {
         // Scrolling area: gauges + Session Log. Takes all height not used by
         // the pinned bottom bar below.
