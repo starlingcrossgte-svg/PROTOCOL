@@ -184,6 +184,15 @@ class ProtocolViewModel : ViewModel() {
         it.copy(simulatorPort = port.coerceIn(AppSettings.SIMULATOR_PORT_MIN, AppSettings.SIMULATOR_PORT_MAX))
     }
 
+    /** Persist the SAF folder URI the Lock-and-Tap auto-save writes CSVs into. */
+    fun setCsvFolderUri(uri: String?) = updateSettings { it.copy(csvFolderUri = uri) }
+
+    /** Base name for the auto-saved RAW BYTES CSV (enumerated on write). */
+    fun setRawLogName(name: String) = updateSettings { it.copy(rawLogName = name) }
+
+    /** Base name for the auto-saved session-log CSV (enumerated on write). */
+    fun setSessionLogName(name: String) = updateSettings { it.copy(sessionLogName = name) }
+
 
     /**
      * Routed from the BT-permission denial path. Drops the OBDLink selection
@@ -486,6 +495,17 @@ class ProtocolViewModel : ViewModel() {
     /** Toggle: add the gauge if absent, remove it if present. */
     fun toggleGaugeForPid(pidId: String) {
         updateLayout { if (it.contains(pidId)) it.withRemoved(pidId) else it.withAdded(pidId) }
+    }
+
+    /**
+     * Replace the whole Live Data layout with [PidPresets] entry [index] —
+     * clears the current gauges and lays out that preset's PIDs in order.
+     * Goes through [updateLayout] so a running poll picks up the new PID set
+     * mid-flight (gauges swap without tearing down the connection).
+     */
+    fun applyPreset(index: Int) {
+        val preset = PidPresets.PRESETS.getOrNull(index) ?: return
+        updateLayout { preset.pidIds.fold(GaugeLayout()) { acc, id -> acc.withAdded(id) } }
     }
 
     fun openSubPage(page: SubPage) {

@@ -30,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,7 +51,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 @Composable
@@ -71,7 +74,9 @@ internal fun LiveDataPage(
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit
+    onOpenLiveDataSettings: () -> Unit,
+    onApplyPreset: (Int) -> Unit,
+    onAutoSaveLogs: () -> Unit
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
@@ -82,18 +87,39 @@ internal fun LiveDataPage(
 
     val scrollState = rememberScrollState()
 
+    // Auto-save window: after tap 3 stops polling+logging, the save is "armed"
+    // and a cancel popup shows for 5 s. Any tap (the popup or anywhere else)
+    // cancels and returns to idle; if untouched, the save commits at timeout.
+    // Transient UI state owned here.
+    var autoSaveArmed by remember { mutableStateOf(false) }
+
     // Step 3 tap loop: while locked, a tap anywhere over the gauge area cycles
-    // stream -> +log -> stop both, then repeats. Routed through
-    // rememberUpdatedState so the gesture (registered once) always sees the
-    // current poll/log state instead of a stale snapshot.
+    // stream -> +log -> stop both (+ arm auto-save), then repeats. Routed
+    // through rememberUpdatedState so the gesture (registered once) always sees
+    // the current poll/log/armed state instead of a stale snapshot.
     val onCycleTap: () -> Unit = {
         when {
-            !uiState.isReadingLive -> onStartReadingLive()   // idle -> stream
-            !uiState.isLogging -> onStartLogging()           // stream -> +log
-            else -> onStopReadingLive()                      // stream+log -> stop both
+            autoSaveArmed -> autoSaveArmed = false           // any tap cancels pending save -> idle
+            !uiState.isReadingLive -> onStartReadingLive()   // tap 1: idle -> stream
+            !uiState.isLogging -> onStartLogging()           // tap 2: stream -> +log
+            else -> {                                        // tap 3: stop both + arm save
+                onStopReadingLive()
+                autoSaveArmed = true
+            }
         }
     }
     val currentCycleTap = rememberUpdatedState(onCycleTap)
+
+    // Commit the auto-save when the 5 s window elapses untouched. Cancelling
+    // (autoSaveArmed -> false) re-keys this effect, killing the delay so no
+    // file is written.
+    LaunchedEffect(autoSaveArmed) {
+        if (autoSaveArmed) {
+            kotlinx.coroutines.delay(5000)
+            onAutoSaveLogs()
+            autoSaveArmed = false
+        }
+    }
 
     // Lock/Tap flash: instead of a constant white outline, the gauges + log
     // outline flash white — 3x when entering lock mode, once per tap while
@@ -108,6 +134,9 @@ internal fun LiveDataPage(
             }
         } else {
             lockFlash.snapTo(0f)
+            // Unlocking (Cancel button / back / ON_STOP) also drops any pending
+            // auto-save so the popup can't linger after leaving lock mode.
+            autoSaveArmed = false
         }
     }
 
@@ -131,6 +160,14 @@ internal fun LiveDataPage(
                     .verticalScroll(scrollState, enabled = !uiState.editMode && !locked),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
+                // Dev-only quick PID presets — load a 10-PID group onto the
+                // gauges in one tap (ECU 1-7 / TCM 1-5). Picking another preset
+                // replaces the current gauges.
+                if (uiState.settings.devMode) {
+                    PresetSelector(onApplyPreset = onApplyPreset)
+                    Spacer(Modifier.height(6.dp))
+                }
+
                 SnapGaugeGrid(
                     uiState = uiState,
                     // Locked → swallow the long-press so the grid can't enter
@@ -175,6 +212,31 @@ internal fun LiveDataPage(
                             })
                         }
                 )
+            }
+            // Auto-save cancel popup — drawn on top of the lock overlay. Tapping
+            // it cancels; tapping anywhere else lands on the lock overlay above,
+            // which also cancels (onCycleTap sees autoSaveArmed). White text per
+            // the app's font rule.
+            if (autoSaveArmed) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .clip(y2kCornerShape())
+                        .background(SurfaceBg, y2kCornerShape())
+                        .border(2.dp, Accent, y2kCornerShape())
+                        .clickable { autoSaveArmed = false }
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Click here to cancel auto save",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -325,6 +387,69 @@ private fun SegmentDivider() {
 }
 
 // SmallLogButton moved to CommonWidgets.LogActionRow (shared across all logs).
+
+// Dev-only preset picker. A compact dropdown listing the 12 fixed PID presets
+// (ECU 1-7 / TCM 1-5). Selecting one calls onApplyPreset(index), which replaces
+// the Live Data gauges with that preset's parameters. Lives at the top of the
+// gauge area; hidden unless Developer Mode is on.
+@Composable
+private fun PresetSelector(onApplyPreset: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var selectedLabel by remember { mutableStateOf<String?>(null) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(y2kCornerShape())
+                .background(SurfaceBg, y2kCornerShape())
+                .border(1.dp, Accent, y2kCornerShape())
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = selectedLabel?.let { "Preset: $it" } ?: "Load PID Preset",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = "▾",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(SurfaceBg)
+                .border(BorderStroke(1.dp, Accent))
+        ) {
+            PidPresets.PRESETS.forEachIndexed { index, preset ->
+                Text(
+                    text = "${preset.label}  (${preset.pidIds.size})",
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onApplyPreset(index)
+                            selectedLabel = preset.label
+                            expanded = false
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+        }
+    }
+}
 
 // Session-log card height (dp): default, and the clamp the bottom-edge drag
 // handle is allowed to roam within.

@@ -27,9 +27,9 @@ data class TrafficEvent(
  *
  * Capped at [MAX_EVENTS] — older events drop off the front when the cap
  * is reached. At ~5 polls/sec × 4 events/poll (two writes, two reads),
- * 500 events is roughly the last 25 seconds of traffic. Good enough for
- * "what just happened on the wire" debugging; the user can clear to
- * narrow focus.
+ * 5000 events is roughly the last 4 minutes of traffic — enough headroom
+ * to capture a short rapid PID-verification log without the connect-time
+ * capability bitmap scrolling off. The user can clear to narrow focus.
  *
  * The UI subscribes via [events] (collectAsState in Compose). Mutation is
  * synchronous and lock-free — StateFlow's CAS handles the publish step.
@@ -37,7 +37,7 @@ data class TrafficEvent(
  * heavy contention; for diagnostic display that's acceptable.
  */
 object UsbTrafficLog {
-    private const val MAX_EVENTS = 500
+    private const val MAX_EVENTS = 5000
 
     private val _events = MutableStateFlow<List<TrafficEvent>>(emptyList())
     val events: StateFlow<List<TrafficEvent>> = _events.asStateFlow()

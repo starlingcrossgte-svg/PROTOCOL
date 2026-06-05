@@ -1,5 +1,6 @@
 package com.protocol.app.protocol
 
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -63,7 +64,10 @@ internal fun SettingsBody(
     onDevModeChange: (Boolean) -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
     onSelectVehicle: (id: String) -> Unit,
-    onDeleteVehicle: (id: String) -> Unit
+    onDeleteVehicle: (id: String) -> Unit,
+    onPickCsvFolder: () -> Unit,
+    onRawLogNameChange: (String) -> Unit,
+    onSessionLogNameChange: (String) -> Unit
 ) {
     val s = uiState.settings
     Column(
@@ -176,6 +180,31 @@ internal fun SettingsBody(
             SettingsButton(label = "Remove", shape = RectangleShape, onClick = onClearBackground)
         }
 
+        // ── CSV Output ─────────────────────────────────────────────
+        // Destination folder + base file names for the Lock-and-Tap
+        // auto-save. Both logs save into this one folder, each under its
+        // own name with a numeric suffix (rawbytes1.csv, rawbytes2.csv …).
+        CategoryHeader("CSV OUTPUT")
+        SettingsButton(label = "Choose CSV Folder", shape = RectangleShape, onClick = onPickCsvFolder)
+        val folderLabel = s.csvFolderUri?.let { CsvDestination.prettyFolderLabel(Uri.parse(it)) }
+        SettingsHelp(
+            if (folderLabel != null) "Saving to: $folderLabel"
+            else "No folder chosen — Lock-and-Tap auto-save is off until you pick one."
+        )
+
+        var rawNameField by remember(s.rawLogName) { mutableStateOf(s.rawLogName) }
+        NameField(
+            label = "RAW BYTE LOG NAME",
+            value = rawNameField,
+            onValueChange = { rawNameField = it; onRawLogNameChange(it) }
+        )
+        var sessionNameField by remember(s.sessionLogName) { mutableStateOf(s.sessionLogName) }
+        NameField(
+            label = "SESSION LOG NAME",
+            value = sessionNameField,
+            onValueChange = { sessionNameField = it; onSessionLogNameChange(it) }
+        )
+
         // ── Developer ──────────────────────────────────────────────
         CategoryHeader("DEVELOPER")
         Row(
@@ -227,6 +256,50 @@ private fun VehicleField(
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Characters,
             keyboardType = keyboardType
+        ),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(
+            fontFamily = FontFamily.Monospace,
+            color = Color.White
+        ),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedBorderColor = Accent,
+            unfocusedBorderColor = Accent.copy(alpha = 0.6f),
+            cursorColor = Accent,
+            focusedLabelColor = Accent,
+            unfocusedLabelColor = NeutralGray,
+            focusedContainerColor = SurfaceBg,
+            unfocusedContainerColor = SurfaceBg
+        )
+    )
+}
+
+// Free-form name field (no forced uppercase) for the CSV base names. Same
+// dark/accent styling as VehicleField; ASCII keyboard with autocorrect off so
+// file names aren't mangled by suggestions.
+@Composable
+private fun NameField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = {
+            Text(
+                label,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Ascii,
+            autoCorrect = false,
+            capitalization = KeyboardCapitalization.None
         ),
         textStyle = MaterialTheme.typography.bodyMedium.copy(
             fontFamily = FontFamily.Monospace,

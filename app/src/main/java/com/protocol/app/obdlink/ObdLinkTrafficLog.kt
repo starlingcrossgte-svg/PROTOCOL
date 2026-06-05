@@ -26,7 +26,9 @@ data class ObdLinkTrafficEvent(
  * the adapter paths stay isolated.
  */
 object ObdLinkTrafficLog {
-    private const val MAX_EVENTS = 1000
+    // Raised for short rapid PID-verification captures — older lines drop off
+    // the front once the cap is reached (~minutes of K-line/CAN ASCII traffic).
+    private const val MAX_EVENTS = 5000
 
     private val _events = MutableStateFlow<List<ObdLinkTrafficEvent>>(emptyList())
     val events: StateFlow<List<ObdLinkTrafficEvent>> = _events.asStateFlow()

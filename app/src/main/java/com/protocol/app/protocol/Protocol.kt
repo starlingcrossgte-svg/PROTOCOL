@@ -110,6 +110,26 @@ class Protocol : ComponentActivity() {
         } finally { pendingExportText = "" }
     }
 
+    // Settings → Choose CSV Folder. SAF tree picker; the chosen folder is
+    // persisted (with a read/write grant that survives reboot) and used by the
+    // Lock-and-Tap auto-save to drop enumerated CSVs without a per-file dialog.
+    private val pickCsvFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // Provider doesn't support persistable grants — the URI still works
+            // for this process; the user re-picks after a kill.
+        }
+        viewModel.setCsvFolderUri(uri.toString())
+        Toast.makeText(this, "CSV folder set", Toast.LENGTH_SHORT).show()
+    }
+
     // Settings → Choose Background. Android Photo Picker handles the
     // gallery selection — no runtime READ_EXTERNAL_STORAGE permission
     // needed. We take persistable read permission on the returned URI so
@@ -318,6 +338,11 @@ class Protocol : ComponentActivity() {
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
+                    onApplyPreset = { i -> viewModel.applyPreset(i) },
+                    onAutoSaveLogs = { autoSaveBothLogs() },
+                    onPickCsvFolder = { launchPickCsvFolder() },
+                    onRawLogNameChange = { name -> viewModel.setRawLogName(name) },
+                    onSessionLogNameChange = { name -> viewModel.setSessionLogName(name) },
                     onResetLayout = { viewModel.resetLayout() },
                     onResetAdapter = { viewModel.resetObdLinkAdapter(applicationContext) },
                     onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
@@ -592,5 +617,33 @@ class Protocol : ComponentActivity() {
         }
         pendingExportText = csv
         exportCsvLauncher.launch(ProtocolLogFormatter.suggestedCsvFileName())
+    }
+
+    private fun launchPickCsvFolder() {
+        pickCsvFolderLauncher.launch(null)
+    }
+
+    // Lock-and-Tap auto-save: write BOTH logs — the Live Data session log and
+    // the dev RAW BYTES stream — into the chosen folder, each under its own
+    // base name with a numeric suffix (session1.csv / rawbytes1.csv, then 2, 3…).
+    // No-op with a toast if no folder is set yet; skips a log that has no data.
+    private fun autoSaveBothLogs() {
+        val s = viewModel.uiState.value.settings
+        val folder = s.csvFolderUri?.let { Uri.parse(it) }
+        if (folder == null) {
+            Toast.makeText(this, "Set a CSV folder in Settings to auto-save", Toast.LENGTH_LONG).show()
+            return
+        }
+        val saved = ArrayList<String>()
+        val sessionCsv = ProtocolLogFormatter.formatSessionLogCsv(viewModel.uiState.value)
+        if (sessionCsv.isNotEmpty()) {
+            CsvDestination.writeEnumerated(this, folder, s.sessionLogName, sessionCsv)?.let { saved.add(it) }
+        }
+        val rawCsv = RawByteLog.formatCsv()
+        if (rawCsv.isNotEmpty()) {
+            CsvDestination.writeEnumerated(this, folder, s.rawLogName, rawCsv)?.let { saved.add(it) }
+        }
+        val msg = if (saved.isEmpty()) "Auto-save: nothing to write" else "Auto-saved: ${saved.joinToString(", ")}"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 }

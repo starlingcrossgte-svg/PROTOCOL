@@ -101,6 +101,11 @@ fun ProtocolScreen(
     onDevModeChange: (Boolean) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
+    onApplyPreset: (Int) -> Unit,
+    onAutoSaveLogs: () -> Unit,
+    onPickCsvFolder: () -> Unit,
+    onRawLogNameChange: (String) -> Unit,
+    onSessionLogNameChange: (String) -> Unit,
     onResetLayout: () -> Unit,
     onResetAdapter: () -> Unit,
     onSaveVehicle: (year: String, make: String, model: String, subModel: String) -> Unit,
@@ -262,7 +267,9 @@ fun ProtocolScreen(
                                 onResizeGauge = onResizeGauge,
                                 onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
                                 onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
-                                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) }
+                                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
+                                onApplyPreset = onApplyPreset,
+                                onAutoSaveLogs = onAutoSaveLogs
                             )
                         }
                     }
@@ -294,7 +301,10 @@ fun ProtocolScreen(
                         onDevModeChange = onDevModeChange,
                         onSaveVehicle = onSaveVehicle,
                         onSelectVehicle = onSelectVehicle,
-                        onDeleteVehicle = onDeleteVehicle
+                        onDeleteVehicle = onDeleteVehicle,
+                        onPickCsvFolder = onPickCsvFolder,
+                        onRawLogNameChange = onRawLogNameChange,
+                        onSessionLogNameChange = onSessionLogNameChange
                     )
                     SubPage.Flash -> FlashPage(
                         state = flashState,
