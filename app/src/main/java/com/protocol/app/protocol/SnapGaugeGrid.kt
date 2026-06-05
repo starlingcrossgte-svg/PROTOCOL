@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -68,7 +69,8 @@ internal fun SnapGaugeGrid(
     onEnterEditMode: () -> Unit,
     onExitEditMode: () -> Unit,
     onRemoveGauge: (String) -> Unit,
-    onResizeGauge: (String, Int, Int, Int, Int) -> Boolean
+    onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
+    flash: Float = 0f
 ) {
     val layout = uiState.gaugeLayout
     val editMode = uiState.editMode
@@ -136,7 +138,7 @@ internal fun SnapGaugeGrid(
                     maxValue = uiState.liveValuesMax[entry.pidId],
                     active = active,
                     editMode = editMode,
-                    highlighted = uiState.isReadingLive,
+                    flash = flash,
                     cellUnitWidthPx = cellUnitWidthPx,
                     cellUnitHeightPx = cellUnitHeightPx,
                     onEnterEdit = onEnterEditMode,
@@ -160,7 +162,7 @@ private fun GaugeTile(
     maxValue: Double?,
     active: Boolean,
     editMode: Boolean,
-    highlighted: Boolean,
+    flash: Float,
     cellUnitWidthPx: Float,
     cellUnitHeightPx: Float,
     onEnterEdit: () -> Unit,
@@ -170,9 +172,10 @@ private fun GaugeTile(
 ) {
     val haptic = LocalHapticFeedback.current
     val baseBg = if (active) SurfaceBg else SurfaceAlt
-    // White outline when in edit mode, or when "highlighted" (lock-mode
-    // streaming) — the lock tap loop lights the gauge outlines on tap 1.
-    val borderColor = if (editMode || highlighted) Accent else BorderGray
+    // Edit mode → solid white outline (2 dp). Otherwise the outline flashes
+    // white — 3x on entering lock mode and once per tap while locked — driven
+    // by the lock-flash value; it rests at BorderGray when flash == 0.
+    val borderColor = if (editMode) Accent else lerp(BorderGray, Accent, flash.coerceIn(0f, 1f))
     val borderWidth = if (editMode) 2.dp else 1.dp
 
     // Value font scales by cell footprint. The abbreviation (display name)

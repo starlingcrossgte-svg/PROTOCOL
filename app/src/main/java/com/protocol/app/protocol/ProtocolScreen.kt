@@ -16,10 +16,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
@@ -40,10 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
@@ -128,27 +122,6 @@ fun ProtocolScreen(
     // is preserved when they pop into a sub-page and back.
     val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
 
-    // Immersive Live Data: hide the system status bar while the Live Data page
-    // (index 2) is the one on screen and no sub-page is over it, so the gauges
-    // can rise into the freed top band with no clock/battery to overlap. The
-    // root inset below falls back to the camera cutout when the bar is hidden,
-    // so nothing ever reaches the cutout. Status bar returns on Home/
-    // Diagnostics/sub-pages; a downward swipe reveals it transiently anywhere.
-    val liveDataActive = uiState.activeSubPage == null && pagerState.currentPage == 2
-    val view = LocalView.current
-    LaunchedEffect(liveDataActive) {
-        var ctx = view.context
-        while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) {
-            ctx = ctx.baseContext
-        }
-        val window = (ctx as? android.app.Activity)?.window ?: return@LaunchedEffect
-        val controller = WindowCompat.getInsetsController(window, view)
-        controller.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (liveDataActive) controller.hide(WindowInsetsCompat.Type.statusBars())
-        else controller.show(WindowInsetsCompat.Type.statusBars())
-    }
-
     // Sub-page BackHandler. LiveDataPage's edit-mode BackHandler is nested
     // deeper and stacks above this one when both could be relevant — but
     // openSubPage clears editMode anyway, so the two never both fire.
@@ -190,9 +163,11 @@ fun ProtocolScreen(
         if (uiState.noEcuEventId > 0) {
             locked = false
             noEcuFlashing = true
+            // 75 ms half-cycles: ~2x the old frequency and, across the same
+            // 20 cycles, ~half the old total duration (≈3 s instead of ≈6 s).
             repeat(20) {
-                noEcuFlash.animateTo(1f, tween(150))
-                noEcuFlash.animateTo(0f, tween(150))
+                noEcuFlash.animateTo(1f, tween(75))
+                noEcuFlash.animateTo(0f, tween(75))
             }
             noEcuFlashing = false
         }
@@ -232,23 +207,16 @@ fun ProtocolScreen(
 
         Column(modifier = Modifier
             .fillMaxSize()
-            // Top inset = whichever is taller, the status bar or the camera
-            // cutout. On most pages the status bar is shown and wins (content
-            // clears the clock). On Live Data the status bar is hidden
-            // (immersive), so statusBars collapses to 0 and the cutout wins —
-            // gauges seat just under the camera with no clock to overlap.
+            // Top inset = the status bar height, so content (and the gauges)
+            // always seats just below the clock/battery. The status bar stays
+            // visible on every page — including Live Data — so it never slides
+            // away. On these punch-hole panels the status bar spans past the
+            // camera cutout, so this also keeps content clear of the cutout.
             .windowInsetsPadding(
-                WindowInsets.statusBars.union(WindowInsets.displayCutout)
-                    .only(WindowInsetsSides.Top)
+                WindowInsets.statusBars.only(WindowInsetsSides.Top)
             )
             .navigationBarsPadding()
         ) {
-            // Connection status stripe — 3dp colored bar at the very top
-            // of the screen. Always visible across every page so the user
-            // can tell at a glance whether the adapter is alive. Replaces
-            // the old AdapterPill without occupying meaningful real estate.
-            ConnectionStatusStripe(uiState.adapterPresent, noEcuFlashing, { noEcuFlash.value })
-
             // No header / close-X anywhere. The system back button closes
             // sub-pages (BackHandler above), so the body fills straight from
             // the status stripe down — nothing clips at an old header line.
@@ -344,41 +312,42 @@ fun ProtocolScreen(
                         StubBody(page = uiState.activeSubPage!!)
                     SubPage.Notices -> NoticesBody()
                 }
-
-                // Side edges: a 3 dp lock-mode indicator (matches the top/bottom
-                // thickness). Solid white while locked; during the no-ECU flash
-                // they flash white<->red too (even as lock exits), then vanish.
-                // In the edge margin (outside the gauge padding) so they never
-                // compress or overlap the gauges. Read in the draw phase.
-                Box(
-                    Modifier
-                        .align(Alignment.CenterStart)
-                        .width(3.dp)
-                        .fillMaxHeight()
-                        .drawBehind {
-                            when {
-                                noEcuFlashing -> drawRect(lerp(Color.White, Color.Red, noEcuFlash.value.coerceIn(0f, 1f)))
-                                locked -> drawRect(Color.White)
-                            }
-                        }
-                )
-                Box(
-                    Modifier
-                        .align(Alignment.CenterEnd)
-                        .width(3.dp)
-                        .fillMaxHeight()
-                        .drawBehind {
-                            when {
-                                noEcuFlashing -> drawRect(lerp(Color.White, Color.Red, noEcuFlash.value.coerceIn(0f, 1f)))
-                                locked -> drawRect(Color.White)
-                            }
-                        }
-                )
             }
-
-            // Matching status stripe pinned to the bottom of the screen — same
-            // connection color and pulse as the top one.
-            ConnectionStatusStripe(uiState.adapterPresent, noEcuFlashing, { noEcuFlash.value })
         }
+
+        // Side edges: the connection-status + lock indicator (3 dp, replaces
+        // the old top/bottom stripes). Solid white whenever an adapter is
+        // present OR the page is locked; during the no-ECU flash they flash
+        // white<->red, then settle by presence. Anchored to the ROOT box (not
+        // the inset-padded body) so they run truly edge-to-edge: full physical
+        // height, up behind the transparent status bar and down behind the nav
+        // bar, with the screen's rounded corners clipping the ends. The status
+        // bar is never hidden — we only draw behind it (no immersive toggle).
+        // 3 dp at the extreme edges, clear of the gauges' 10 dp page padding.
+        // Read in the draw phase so nothing recomposes per frame.
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .width(3.dp)
+                .fillMaxHeight()
+                .drawBehind {
+                    when {
+                        noEcuFlashing -> drawRect(lerp(Color.White, Color.Red, noEcuFlash.value.coerceIn(0f, 1f)))
+                        locked || uiState.adapterPresent -> drawRect(Color.White)
+                    }
+                }
+        )
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .width(3.dp)
+                .fillMaxHeight()
+                .drawBehind {
+                    when {
+                        noEcuFlashing -> drawRect(lerp(Color.White, Color.Red, noEcuFlash.value.coerceIn(0f, 1f)))
+                        locked || uiState.adapterPresent -> drawRect(Color.White)
+                    }
+                }
+        )
     }
 }

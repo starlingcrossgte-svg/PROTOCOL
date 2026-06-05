@@ -357,9 +357,9 @@ class Protocol : ComponentActivity() {
     /**
      * Connected path: kick off the action immediately. Disconnected path:
      * route to the right adapter's connect flow (USB for OpenPort, BT for
-     * OBDLink). For OpenPort, ProtocolViewModel.setOpenSession replays the
-     * stashed pending action once the session opens; OBDLink doesn't yet
-     * replay (the user just taps Read Live again after the BT toast).
+     * OBDLink) — connecting only brings the link up; it never auto-runs the
+     * action. Once connected (status stripes update), the user taps again to
+     * start, so a plug-in can't auto-start a stale action.
      */
     private fun runActionOrDiscover(action: PendingAction) {
         val s = viewModel.uiState.value.settings
@@ -371,10 +371,7 @@ class Protocol : ComponentActivity() {
             }
         } else {
             when (s.adapter) {
-                Adapter.OpenPort -> {
-                    viewModel.setPendingAction(action)
-                    discoverAndConnect()
-                }
+                Adapter.OpenPort -> discoverAndConnect()
                 Adapter.OBDLink -> ensureBtPermissionThenConnect()
                 null -> viewModel.setConnectionStatus(
                     ConnectionStatus.NoDevice,

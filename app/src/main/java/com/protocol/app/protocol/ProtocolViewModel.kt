@@ -95,12 +95,6 @@ class ProtocolViewModel : ViewModel() {
     // storage at 5 Hz on long-running logs.
     private var samplesSinceLastAutosave: Int = 0
 
-    // Action the user requested while the adapter wasn't yet connected.
-    // setOpenSession replays this once a session is open so the user
-    // doesn't have to tap the button a second time after granting USB
-    // permission.
-    private var pendingAction: PendingAction? = null
-
     fun attachSessionManager(manager: OpenPort2UsbSessionManager) {
         sessionManager = manager
     }
@@ -546,31 +540,14 @@ class ProtocolViewModel : ViewModel() {
     fun setOpenSession(session: OpenPort2UsbSession, deviceLabel: String) {
         openSession = session
         tactrixClient = TactrixClient(TactrixBulkIo(session))
+        // Connecting only updates the status (drives the presence stripes) —
+        // it never auto-starts reading/logging/probing. The user always taps to
+        // begin, so plugging the adapter in can't leave the UI in a half-started
+        // "highlighted but idle" state.
         _uiState.value = _uiState.value.copy(
             connectionStatus = ConnectionStatus.Connected(deviceLabel),
             statusMessage = "Connected to $deviceLabel"
         )
-        // Replay whatever action the user kicked off while we were
-        // discovering / waiting for USB permission. Cleared first so a
-        // failed action doesn't loop.
-        val pending = pendingAction
-        pendingAction = null
-        when (pending) {
-            PendingAction.Probe -> runProbe()
-            PendingAction.ReadLive -> startReadingLive(recordToLog = false)
-            PendingAction.LogLive -> startLogging()
-            null -> Unit
-        }
-    }
-
-    /**
-     * Action the user requested but couldn't run yet because the adapter
-     * wasn't connected. [setOpenSession] consumes this once the session is
-     * up. Stays unset on success — caller is responsible for triggering
-     * discovery alongside this call.
-     */
-    fun setPendingAction(action: PendingAction) {
-        pendingAction = action
     }
 
     fun isConnected(): Boolean =

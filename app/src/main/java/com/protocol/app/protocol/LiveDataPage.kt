@@ -1,22 +1,28 @@
 package com.protocol.app.protocol
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -27,16 +33,25 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun LiveDataPage(
@@ -80,6 +95,22 @@ internal fun LiveDataPage(
     }
     val currentCycleTap = rememberUpdatedState(onCycleTap)
 
+    // Lock/Tap flash: instead of a constant white outline, the gauges + log
+    // outline flash white — 3x when entering lock mode, once per tap while
+    // locked. One shared value drives both the gauge tiles and the log card.
+    val lockFlash = remember { Animatable(0f) }
+    val flashScope = rememberCoroutineScope()
+    LaunchedEffect(locked) {
+        if (locked) {
+            repeat(3) {
+                lockFlash.animateTo(1f, tween(90))
+                lockFlash.animateTo(0f, tween(150))
+            }
+        } else {
+            lockFlash.snapTo(0f)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -107,31 +138,41 @@ internal fun LiveDataPage(
                     onEnterEditMode = { if (!locked) onEnterEditMode() },
                     onExitEditMode = onExitEditMode,
                     onRemoveGauge = onRemoveGauge,
-                    onResizeGauge = onResizeGauge
+                    onResizeGauge = onResizeGauge,
+                    flash = lockFlash.value
                 )
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(9.dp))
 
-                LogActionRow(
-                    title = "Session Log",
-                    onClear = onClearSessionLog,
-                    onExportCsv = onExportSessionLog,
-                    titleAsHeader = true
+                // Clear Log / Export CSV moved to the pinned bottom action bar;
+                // only the section header stays above the log card here.
+                CategoryHeader("Session Log")
+
+                Spacer(Modifier.height(9.dp))
+
+                SessionLogCard(
+                    uiState = uiState,
+                    locked = locked,
+                    onEnterEditMode = onEnterEditMode,
+                    flash = lockFlash.value
                 )
-
-                Spacer(Modifier.height(6.dp))
-
-                SessionLogCard(uiState)
             }
             // While locked, a transparent overlay captures every tap over the
             // gauge area and drives the loop; it also swallows drags, which
-            // reinforces "no scrolling while locked".
+            // reinforces "no scrolling while locked". Each tap also fires a
+            // single white flash on the gauges + log.
             if (locked) {
                 Box(
                     modifier = Modifier
                         .matchParentSize()
                         .pointerInput(Unit) {
-                            detectTapGestures(onTap = { currentCycleTap.value() })
+                            detectTapGestures(onTap = {
+                                currentCycleTap.value()
+                                flashScope.launch {
+                                    lockFlash.snapTo(1f)
+                                    lockFlash.animateTo(0f, tween(220))
+                                }
+                            })
                         }
                 )
             }
@@ -144,6 +185,8 @@ internal fun LiveDataPage(
         ModeButtonsRow(
             locked = locked,
             onToggleLock = onToggleLock,
+            onClearSessionLog = onClearSessionLog,
+            onExportSessionLog = onExportSessionLog,
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenLiveDataSettings = onOpenLiveDataSettings
@@ -190,6 +233,8 @@ private fun StatusLine(uiState: ProtocolUiState) {
 private fun ModeButtonsRow(
     locked: Boolean,
     onToggleLock: () -> Unit,
+    onClearSessionLog: () -> Unit,
+    onExportSessionLog: () -> Unit,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenLiveDataSettings: () -> Unit
@@ -199,7 +244,7 @@ private fun ModeButtonsRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Always present so the button keeps a fixed width whether or not the
+        // Always present so the bar keeps a fixed width whether or not the
         // page is locked; dimmed + non-clickable while locked so there's no
         // exit through the menu mid-session.
         HamburgerMenu(
@@ -208,52 +253,92 @@ private fun ModeButtonsRow(
             onOpenLiveDataSettings = onOpenLiveDataSettings,
             enabled = !locked
         )
-        // The single action button. Unlocked: "Lock and Tap" -> locks. Locked:
-        // "Cancel Lock and Tap" -> cancels the lock (the caller also stops any
-        // live poll/log). The stream -> log -> stop cycle itself is driven by
-        // tapping the gauge area while locked (see the overlay above).
-        ModeButton(
-            label = AnnotatedString(if (locked) "Cancel Lock and Tap" else "Lock and Tap"),
-            active = true,
-            enabled = true,
-            onClick = onToggleLock,
-            shape = y2kCornerShape(),
-            modifier = Modifier.weight(1f)
+        // Combined action bar filling the slot the lone "Lock and Tap" button
+        // used to (weight 1f, same height): three segments — Lock and Tap |
+        // Clear Log | Export CSV — split by 1 dp solid-white dividers instead
+        // of gaps. Lock and Tap takes the remaining width (longest label);
+        // Clear Log / Export CSV size to their content.
+        //   Unlocked: "Lock and Tap" -> locks. Locked: "Cancel Lock and Tap" ->
+        //   cancels the lock (caller also stops any live poll/log). The
+        //   stream -> log -> stop cycle is driven by tapping the gauge area
+        //   while locked (see the overlay above).
+        val shape = y2kCornerShape()
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(IntrinsicSize.Min)
+                .clip(shape)
+                .background(SurfaceBg, shape)
+                .border(1.dp, Accent, shape),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SegmentButton(
+                label = if (locked) "Cancel Lock and Tap" else "Lock and Tap",
+                onClick = onToggleLock,
+                modifier = Modifier.weight(1f)
+            )
+            SegmentDivider()
+            SegmentButton(label = "Clear Log", onClick = onClearSessionLog)
+            SegmentDivider()
+            SegmentButton(label = "Export CSV", onClick = onExportSessionLog)
+        }
+    }
+}
+
+// One tappable segment of the combined bottom action bar. Transparent
+// container (the parent Row draws the dark surface + white border); white
+// label centered, one line. fillMaxHeight so every segment and the dividers
+// span the bar's full height.
+@Composable
+private fun SegmentButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = Accent,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1
         )
     }
 }
 
+// 1 dp solid-white divider spanning the bar's height — the separator the user
+// asked for in place of the gap between segments.
 @Composable
-private fun ModeButton(
-    label: AnnotatedString,
-    active: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    shape: androidx.compose.ui.graphics.Shape = y2kCornerShape(),
-    modifier: Modifier = Modifier
-) {
-    // Reactive button: dim outline + dim text when inactive, full-bright
-    // Accent (white) when active (reading/logging). Disabled dims further.
-    // Container stays dark in every state so brightness alone carries it.
-    val baseColor = if (active) Accent else AccentDim
-    val lineColor = if (enabled) baseColor else baseColor.copy(alpha = 0.4f)
+private fun SegmentDivider() {
     Box(
-        modifier = modifier
-            .clip(shape)
-            .background(SurfaceBg, shape)
-            .border(1.dp, lineColor, shape)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(label, color = lineColor, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-    }
+        Modifier
+            .width(1.dp)
+            .fillMaxHeight()
+            .background(Color.White)
+    )
 }
 
 // SmallLogButton moved to CommonWidgets.LogActionRow (shared across all logs).
 
+// Session-log card height (dp): default, and the clamp the bottom-edge drag
+// handle is allowed to roam within.
+private const val DEFAULT_LOG_HEIGHT_DP = 300f
+private const val MIN_LOG_HEIGHT_DP = 120f
+private const val MAX_LOG_HEIGHT_DP = 800f
+
 @Composable
-private fun SessionLogCard(uiState: ProtocolUiState) {
+private fun SessionLogCard(
+    uiState: ProtocolUiState,
+    locked: Boolean,
+    onEnterEditMode: () -> Unit,
+    flash: Float
+) {
     // Reformat the entire session log only when the row count or the PID
     // set actually changes. Without this, every 200ms poll sample
     // triggered a full ~1000-row × ~10-PID reformat — wasteful even on
@@ -267,23 +352,37 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
     ) {
         ProtocolLogFormatter.formatSessionLogCleanText(sessionLog, pidIds)
     }
+
+    // User-resizable height, but only in edit mode (same long-press gesture
+    // the gauges use) so the log isn't freely draggable during normal use.
+    // Kept as a saveable Float (dp) so it survives rotation / activity recreation.
+    val density = LocalDensity.current.density
+    var logHeightDp by rememberSaveable { mutableStateOf(DEFAULT_LOG_HEIGHT_DP) }
+
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
-        // White outline while logging (lock tap 2 lights the log window).
-        border = BorderStroke(1.dp, if (uiState.isLogging) Accent else BorderGray),
+        // Outline flashes white together with the gauges (3x on lock entry,
+        // once per tap while locked); rests at BorderGray otherwise.
+        border = BorderStroke(1.dp, lerp(BorderGray, Accent, flash.coerceIn(0f, 1f))),
         modifier = Modifier.fillMaxWidth()
     ) {
-        // SelectionContainer wraps the scroll containers (not the inner Text)
-        // so the long-press-to-select gesture wins over the vertical/horizontal
-        // scroll drag — same pattern the Run Log / USB Traffic cards use. With
-        // it nested inside the scrolls, the scrolls swallowed the long-press and
-        // tap-hold highlight never started.
-        androidx.compose.foundation.text.selection.SelectionContainer {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(logHeightDp.dp)
+                // Long-press the log to enter edit mode, same as the gauges.
+                // Disabled while locked (no edit entry mid lock-and-tap). This
+                // replaces long-press text-selection on the log.
+                .pointerInput(locked) {
+                    if (!locked) {
+                        detectTapGestures(onLongPress = { onEnterEditMode() })
+                    }
+                }
+        ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(300.dp)
+                    .fillMaxSize()
                     .padding(10.dp)
                     .verticalScroll(rememberScrollState())
             ) {
@@ -294,6 +393,33 @@ private fun SessionLogCard(uiState: ProtocolUiState) {
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         softWrap = false
+                    )
+                }
+            }
+            // Resize grip — shown only in edit mode. Sits inside the card on its
+            // bottom edge; drag it vertically to grow/shrink the log.
+            // detectVerticalDragGestures consumes the drag, and the page scroll
+            // is already frozen in edit mode, so nothing fights it.
+            if (uiState.editMode) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(22.dp)
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures { _, dragAmount ->
+                                logHeightDp = (logHeightDp + dragAmount / density)
+                                    .coerceIn(MIN_LOG_HEIGHT_DP, MAX_LOG_HEIGHT_DP)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        Modifier
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Accent)
                     )
                 }
             }
