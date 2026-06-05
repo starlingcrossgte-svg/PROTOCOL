@@ -147,11 +147,13 @@ object Ssm2Pids {
         id = "fbkc",
         displayName = "FB KC",
         unit = "°",
+        // Feedback Knock Correction = 4-byte RAM float at 0xFF8184 on this ECU.
+        // (Feedback and Fine Learning addresses were previously swapped.)
         addresses = listOf(
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x68.toByte()),
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x69.toByte()),
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x6A.toByte()),
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x6B.toByte())
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x84.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x85.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x86.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x87.toByte())
         ),
         decode = { raw -> decodeFloatBE(raw) },
         longName = "Feedback Knock Correction"
@@ -190,11 +192,12 @@ object Ssm2Pids {
         id = "flkc",
         displayName = "FL KC",
         unit = "°",
+        // Fine Learning Knock Correction = 4-byte RAM float at 0xFF8168 on this ECU.
         addresses = listOf(
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x84.toByte()),
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x85.toByte()),
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x86.toByte()),
-            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x87.toByte())
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x68.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x69.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x6A.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x81.toByte(), 0x6B.toByte())
         ),
         decode = { raw -> decodeFloatBE(raw) },
         longName = "Fine Learning Knock Correction"
@@ -204,13 +207,17 @@ object Ssm2Pids {
         id = "iam",
         displayName = "IAM",
         unit = "x",
-        // Ignition Advance Multiplier: standard single-byte parameter at
-        // 0x0000F9, value = raw / 16 (16/16 = 1.0 = full advance on a healthy
-        // engine). Previously pointed at the 0xFF2578 4-byte RAM float — that
-        // was a wrong-ECU (2.5L turbo) address and read a bogus ~0.41 on this
-        // EZ30R while the engine was perfectly healthy.
-        addresses = listOf(Ssm2Address(0x00, 0x00, 0xF9.toByte())),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 16.0 },
+        // Ignition Advance Multiplier. On this EZ30R (cal 451A354006) IAM is a
+        // 4-byte RAM float at 0xFF2578, read big-endian, value used as-is
+        // (1.0 = full advance on a healthy engine). The standard single-byte
+        // form at 0x0000F9 (raw/16) is unsupported on this ECU and returns 0xFF.
+        addresses = listOf(
+            Ssm2Address(0xFF.toByte(), 0x25.toByte(), 0x78.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x25.toByte(), 0x79.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x25.toByte(), 0x7A.toByte()),
+            Ssm2Address(0xFF.toByte(), 0x25.toByte(), 0x7B.toByte())
+        ),
+        decode = { raw -> decodeFloatBE(raw) },
         longName = "IAM (Ignition Advance Multiplier)"
     )
 
@@ -379,15 +386,6 @@ object Ssm2Pids {
         addresses = listOf(Ssm2Address(0x00, 0x00, 0x24)),
         decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) * 37.0 / 255.0 },
         longName = "Manifold Relative Pressure"
-    )
-
-    val LEARNED_IGNITION_TIMING = Ssm2Pid(
-        id = "learn_ign",
-        displayName = "Learn Ign",
-        unit = "°",
-        addresses = listOf(Ssm2Address(0x00, 0x00, 0x28)),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else (raw[0] - 128) / 2.0 },
-        longName = "Learned Ignition Timing"
     )
 
     val FUEL_TEMPERATURE = Ssm2Pid(
@@ -588,24 +586,6 @@ object Ssm2Pids {
         longName = "A/F Sensor #2"
     )
 
-    val AFS1_HEATER_CURRENT = Ssm2Pid(
-        id = "afs1_htr",
-        displayName = "AFS1 Htr",
-        unit = "A",
-        addresses = listOf(Ssm2Address(0x00, 0x00, 0x53)),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 10.0 },
-        longName = "A/F Sensor #1 Heater Current"
-    )
-
-    val AFS2_HEATER_CURRENT = Ssm2Pid(
-        id = "afs2_htr",
-        displayName = "AFS2 Htr",
-        unit = "A",
-        addresses = listOf(Ssm2Address(0x00, 0x00, 0x54)),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 10.0 },
-        longName = "A/F Sensor #2 Heater Current"
-    )
-
     val CYL1_ROUGHNESS = Ssm2Pid(
         id = "cyl1_rough",
         displayName = "C1 Rough",
@@ -714,41 +694,6 @@ object Ssm2Pids {
         longName = "Main Accelerator Sensor"
     )
 
-    val EGT_1 = Ssm2Pid(
-        id = "egt",
-        displayName = "EGT",
-        unit = "°F",
-        addresses = listOf(Ssm2Address(0x00, 0x01, 0x06)),
-        // °F expr = 32 + 9*(x+40) — direct conversion, no /5.
-        decode = { raw -> if (raw.isEmpty()) 0.0 else 32.0 + 9.0 * (raw[0] + 40) },
-        longName = "Exhaust Gas Temperature"
-    )
-
-    val EGT_2 = Ssm2Pid(
-        id = "egt2",
-        displayName = "EGT 2",
-        unit = "°F",
-        addresses = listOf(Ssm2Address(0x00, 0x01, 0x07)),
-        // °F expr = 32 + 9*(x*5+200)/5
-        decode = { raw -> if (raw.isEmpty()) 0.0 else 32.0 + 9.0 * (raw[0] * 5.0 + 200.0) / 5.0 },
-        longName = "Exhaust Gas Temperature 2"
-    )
-
-    val ODOMETER = Ssm2Pid(
-        id = "odom",
-        displayName = "Odometer",
-        unit = "mi",
-        addresses = listOf(
-            Ssm2Address(0x00, 0x01, 0x0E),
-            Ssm2Address(0x00, 0x01, 0x0F)
-        ),
-        decode = { raw ->
-            if (raw.size < 2) 0.0
-            else ((raw[0] shl 8) or raw[1]) * 1.242742384
-        },
-        longName = "Estimated Odometer"
-    )
-
     val OSV_DUTY_R = Ssm2Pid(
         id = "osv_dr",
         displayName = "OSV D-R",
@@ -783,33 +728,6 @@ object Ssm2Pids {
         addresses = listOf(Ssm2Address(0x00, 0x01, 0x17)),
         decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] * 32.0 },
         longName = "Oil Switching Solenoid Valve Current (Left)"
-    )
-
-    val TPS_CLOSED_VOLTAGE = Ssm2Pid(
-        id = "tps_closed",
-        displayName = "TPS Cls V",
-        unit = "V",
-        addresses = listOf(Ssm2Address(0x00, 0x01, 0x6B)),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0] / 50.0 },
-        longName = "Throttle Sensor Closed Voltage"
-    )
-
-    val OVERSPEED_VERY_HIGH = Ssm2Pid(
-        id = "overspd_vh",
-        displayName = "Ovr Spd VH",
-        unit = "ct",
-        addresses = listOf(Ssm2Address(0x00, 0x02, 0x98.toByte())),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
-        longName = "Overspeed Count (Very High RPM)"
-    )
-
-    val OVERSPEED_HIGH = Ssm2Pid(
-        id = "overspd_h",
-        displayName = "Ovr Spd H",
-        unit = "ct",
-        addresses = listOf(Ssm2Address(0x00, 0x02, 0x99.toByte())),
-        decode = { raw -> if (raw.isEmpty()) 0.0 else raw[0].toDouble() },
-        longName = "Overspeed Count (High RPM)"
     )
 
     // ───── Calculated PIDs (mirror P201, P202, P203) ─────
@@ -1395,7 +1313,6 @@ object Ssm2Pids {
         INJ2_PULSE_WIDTH,
         ATMOSPHERIC_PRESSURE,
         MANIFOLD_RELATIVE_PRESSURE,
-        LEARNED_IGNITION_TIMING,
         FUEL_TEMPERATURE,
         RADIATOR_FAN_CONTROL,
         CPC_VALVE_DUTY,
@@ -1418,8 +1335,6 @@ object Ssm2Pids {
         AFS1_RESISTANCE,
         AFS2_RESISTANCE,
         AF_SENSOR_2,
-        AFS1_HEATER_CURRENT,
-        AFS2_HEATER_CURRENT,
         CYL1_ROUGHNESS,
         CYL2_ROUGHNESS,
         CYL3_ROUGHNESS,
@@ -1432,16 +1347,10 @@ object Ssm2Pids {
         TPS_MAIN,
         PEDAL_SUB,
         PEDAL_MAIN,
-        EGT_1,
-        EGT_2,
-        ODOMETER,
         OSV_DUTY_R,
         OSV_DUTY_L,
         OSV_CURRENT_R,
         OSV_CURRENT_L,
-        TPS_CLOSED_VOLTAGE,
-        OVERSPEED_VERY_HIGH,
-        OVERSPEED_HIGH,
         INJECTOR_DUTY_CYCLE,
         MRP_CORRECTED,
         FUEL_CONSUMPTION,

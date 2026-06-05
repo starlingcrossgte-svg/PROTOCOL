@@ -217,9 +217,9 @@ object ProtocolLogFormatter {
         "fo2_1", "fo2_2", "ro2" -> "%.3f".format(value)
         "maf_v", "tps_v", "tps_sub", "tps_main",
         "pedal_sub", "pedal_main", "tumble_r", "tumble_l",
-        "tm_v", "tps_closed" -> "%.2f".format(value)
+        "tm_v" -> "%.2f".format(value)
         "inj1_pw", "inj2_pw" -> "%.2f".format(value)
-        "learn_ign", "learn_ign_corr" -> "%.1f".format(value)
+        "learn_ign_corr" -> "%.1f".format(value)
         "fuel_t"          -> "%.0f".format(value)
         "fan_ctrl", "cpc_duty", "iscv_duty", "af_lean",
         "af_heater", "alt_duty", "fp_duty",
@@ -229,12 +229,8 @@ object ProtocolLogFormatter {
         "ocv_cr", "ocv_cl", "osv_cr", "osv_cl" -> "%.0f".format(value)
         "afs1_curr", "afs2_curr" -> "%.2f".format(value)
         "afs1_res", "afs2_res" -> "%.0f".format(value)
-        "afs1_htr", "afs2_htr" -> "%.2f".format(value)
         "cyl1_rough", "cyl2_rough", "cyl3_rough",
         "cyl4_rough", "cyl5_rough", "cyl6_rough" -> "%.0f".format(value)
-        "egt", "egt2"     -> "%.0f".format(value)
-        "odom"            -> "%.0f".format(value)
-        "overspd_vh", "overspd_h" -> "%.0f".format(value)
         "idc"             -> "%.1f".format(value)
         "mpg"             -> "%.1f".format(value)
         // TCM
@@ -293,21 +289,17 @@ object ProtocolLogFormatter {
         "fo2_1", "fo2_2", "ro2" -> 5  // "1.234"
         "maf_v", "tps_v", "tps_sub", "tps_main",
         "pedal_sub", "pedal_main", "tumble_r", "tumble_l",
-        "tm_v", "tps_closed" -> 4  // "5.00"
+        "tm_v" -> 4  // "5.00"
         "inj1_pw", "inj2_pw" -> 5  // "12.34"
-        "learn_ign", "learn_ign_corr" -> 5
+        "learn_ign_corr" -> 5
         "fuel_t"          -> 3   // up to "240"
         "iscv_step"       -> 4   // up to "500"
         "avcs_r", "avcs_l" -> 3  // "0..50"
         "ocv_cr", "ocv_cl", "osv_cr", "osv_cl" -> 5  // mA up to 8160
         "afs1_curr", "afs2_curr" -> 6  // signed mA
         "afs1_res", "afs2_res" -> 3
-        "afs1_htr", "afs2_htr" -> 5
         "cyl1_rough", "cyl2_rough", "cyl3_rough",
         "cyl4_rough", "cyl5_rough", "cyl6_rough" -> 3
-        "egt", "egt2"     -> 4   // up to "2800"
-        "odom"            -> 6   // up to "300000"
-        "overspd_vh", "overspd_h" -> 4
         "idc"             -> 5   // "100.0"
         "mpg"             -> 5   // "99.9"
         // TCM
@@ -373,9 +365,9 @@ object ProtocolLogFormatter {
         "fo2_1", "fo2_2", "ro2" -> "%.4f".format(value)
         "maf_v", "tps_v", "tps_sub", "tps_main",
         "pedal_sub", "pedal_main", "tumble_r", "tumble_l",
-        "tm_v", "tps_closed" -> "%.3f".format(value)
+        "tm_v" -> "%.3f".format(value)
         "inj1_pw", "inj2_pw" -> "%.3f".format(value)
-        "learn_ign", "learn_ign_corr" -> "%.2f".format(value)
+        "learn_ign_corr" -> "%.2f".format(value)
         "fuel_t"          -> "%.1f".format(value)
         "fan_ctrl", "cpc_duty", "iscv_duty", "af_lean",
         "af_heater", "alt_duty", "fp_duty",
@@ -385,12 +377,8 @@ object ProtocolLogFormatter {
         "ocv_cr", "ocv_cl", "osv_cr", "osv_cl" -> "%.1f".format(value)
         "afs1_curr", "afs2_curr" -> "%.3f".format(value)
         "afs1_res", "afs2_res" -> "%.1f".format(value)
-        "afs1_htr", "afs2_htr" -> "%.3f".format(value)
         "cyl1_rough", "cyl2_rough", "cyl3_rough",
         "cyl4_rough", "cyl5_rough", "cyl6_rough" -> "%.0f".format(value)
-        "egt", "egt2"     -> "%.1f".format(value)
-        "odom"            -> "%.1f".format(value)
-        "overspd_vh", "overspd_h" -> "%.0f".format(value)
         "idc"             -> "%.2f".format(value)
         "mpg"             -> "%.2f".format(value)
         // TCM
