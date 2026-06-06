@@ -98,6 +98,9 @@ internal fun SettingsBody(
                 SelectorButton("OBDLink MX+", selected = s.adapter == Adapter.OBDLink) {
                     onAdapterChange(if (s.adapter == Adapter.OBDLink) null else Adapter.OBDLink)
                 }
+                SelectorButton("OBDLink EX", selected = s.adapter == Adapter.OBDLinkEx) {
+                    onAdapterChange(if (s.adapter == Adapter.OBDLinkEx) null else Adapter.OBDLinkEx)
+                }
             }
             Column(
                 modifier = Modifier.weight(1f),

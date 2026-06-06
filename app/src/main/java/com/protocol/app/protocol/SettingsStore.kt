@@ -2,7 +2,7 @@ package com.protocol.app.protocol
 
 import android.content.Context
 
-enum class Adapter { OpenPort, OBDLink }
+enum class Adapter { OpenPort, OBDLink, OBDLinkEx }
 enum class BusProtocol { KLine, CAN }
 enum class SsmVariant { SSM2, SSM3 }
 
@@ -31,12 +31,17 @@ data class AppSettings(
     val sessionLogHeightDp: Float = DEFAULT_SESSION_LOG_HEIGHT_DP,
     /** Index into PidPresets.PRESETS of the last preset loaded onto the Live
      *  Data gauges, or [NO_PRESET] if none. Dev-only. */
-    val selectedPresetIndex: Int = NO_PRESET
+    val selectedPresetIndex: Int = NO_PRESET,
+    /** When true, OBDLink connects using [selectedInitSequenceId] from the
+     *  command library instead of the built-in default init. Dev/experimental. */
+    val autoInitEnabled: Boolean = false,
+    /** Id of the chosen AdapterCommandLibrary sequence (null = library default). */
+    val selectedInitSequenceId: String? = null
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
         const val DEFAULT_SESSION_LOG_MAX = 1000
-        const val POLL_INTERVAL_MIN = 100
+        const val POLL_INTERVAL_MIN = 10
         const val POLL_INTERVAL_MAX = 500
         const val SESSION_LOG_MIN = 500
         const val SESSION_LOG_MAX = 5000
@@ -74,7 +79,9 @@ class SettingsStore(context: Context) {
         sessionLogName = prefs.getString(KEY_SESSION_LOG_NAME, AppSettings.DEFAULT_SESSION_LOG_NAME)
             ?: AppSettings.DEFAULT_SESSION_LOG_NAME,
         sessionLogHeightDp = prefs.getFloat(KEY_SESSION_LOG_HEIGHT, AppSettings.DEFAULT_SESSION_LOG_HEIGHT_DP),
-        selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET)
+        selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET),
+        autoInitEnabled = prefs.getBoolean(KEY_AUTO_INIT, false),
+        selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null)
     )
 
     fun save(s: AppSettings) {
@@ -94,6 +101,8 @@ class SettingsStore(context: Context) {
             .putString(KEY_SESSION_LOG_NAME, s.sessionLogName)
             .putFloat(KEY_SESSION_LOG_HEIGHT, s.sessionLogHeightDp)
             .putInt(KEY_SELECTED_PRESET, s.selectedPresetIndex)
+            .putBoolean(KEY_AUTO_INIT, s.autoInitEnabled)
+            .putString(KEY_INIT_SEQ, s.selectedInitSequenceId)
             .apply()
     }
 
@@ -114,5 +123,7 @@ class SettingsStore(context: Context) {
         private const val KEY_SESSION_LOG_NAME = "csv_session_log_name"
         private const val KEY_SESSION_LOG_HEIGHT = "session_log_height_dp"
         private const val KEY_SELECTED_PRESET = "selected_preset_index"
+        private const val KEY_AUTO_INIT = "auto_init_enabled"
+        private const val KEY_INIT_SEQ = "selected_init_sequence_id"
     }
 }

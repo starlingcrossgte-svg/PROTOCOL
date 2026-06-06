@@ -59,7 +59,10 @@ internal fun HomePage(
     onHuntKlineInit: () -> Unit,
     onSendManualCommand: (String) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
-    onSimulatorPortChange: (Int) -> Unit
+    onSimulatorPortChange: (Int) -> Unit,
+    onAutoInitChange: (Boolean) -> Unit,
+    onSelectInitSequence: (String) -> Unit,
+    onKlineContinuousTest: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -171,6 +174,9 @@ internal fun HomePage(
                 onSendManualCommand = onSendManualCommand,
                 onSimulatorModeChange = onSimulatorModeChange,
                 onSimulatorPortChange = onSimulatorPortChange,
+                onAutoInitChange = onAutoInitChange,
+                onSelectInitSequence = onSelectInitSequence,
+                onKlineContinuousTest = onKlineContinuousTest,
             )
         }
     }

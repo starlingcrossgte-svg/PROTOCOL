@@ -7,4 +7,10 @@
       in Protocol.kt (TACTRIX_VENDOR_ID = 1027, TACTRIX_PRODUCT_ID = 52301).
     -->
     <usb-device vendor-id="1027" product-id="52301" />
+    <!--
+      OBDLink EX. FTDI FT231X in VCP mode: VID=0x0403 (FTDI, 1027),
+      PID=0x6015 (24597). Same STN2120 command set as the MX+, reached over
+      a hand-rolled FTDI USB-serial transport (FtdiUsbSerial).
+    -->
+    <usb-device vendor-id="1027" product-id="24597" />
 </resources>

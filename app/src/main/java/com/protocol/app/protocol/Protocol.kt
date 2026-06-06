@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModelProvider
 import com.protocol.app.UsbPermissionHelper
 import com.protocol.app.flash.FlashViewModel
+import com.protocol.app.obdlink.FtdiUsbSerial
 import com.protocol.app.openport2.OpenPort2SessionResult
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import java.nio.charset.StandardCharsets
@@ -184,7 +185,11 @@ class Protocol : ComponentActivity() {
         when (adapter) {
             Adapter.OpenPort -> discoverAndConnect()
             Adapter.OBDLink -> ensureBtPermissionThenConnect()
-            null -> viewModel.disconnectObdLink()
+            Adapter.OBDLinkEx -> connectObdLinkEx()
+            null -> {
+                viewModel.disconnectObdLink()
+                viewModel.disconnectObdLinkEx()
+            }
         }
     }
 
@@ -200,6 +205,10 @@ class Protocol : ComponentActivity() {
         if (s.adapter == Adapter.OBDLink && protocol != null) {
             viewModel.disconnectObdLink()
             ensureBtPermissionThenConnect()
+        }
+        if (s.adapter == Adapter.OBDLinkEx && protocol != null) {
+            viewModel.disconnectObdLinkEx()
+            connectObdLinkEx()
         }
     }
 
@@ -341,6 +350,9 @@ class Protocol : ComponentActivity() {
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
+                    onAutoInitChange = { on -> viewModel.setAutoInitEnabled(on) },
+                    onSelectInitSequence = { id -> viewModel.setSelectedInitSequence(id) },
+                    onKlineContinuousTest = { viewModel.runKlineContinuousTest(applicationContext) },
                     onApplyPreset = { i -> viewModel.applyPreset(i) },
                     onResizeSessionLog = { dp -> viewModel.setSessionLogHeightDp(dp) },
                     onAutoSaveLogs = { autoSaveBothLogs() },
@@ -402,6 +414,7 @@ class Protocol : ComponentActivity() {
             when (s.adapter) {
                 Adapter.OpenPort -> discoverAndConnect()
                 Adapter.OBDLink -> ensureBtPermissionThenConnect()
+                Adapter.OBDLinkEx -> connectObdLinkEx()
                 null -> viewModel.setConnectionStatus(
                     ConnectionStatus.NoDevice,
                     "Pick ADAPTER and PROTOCOL in Settings before reading live data"
@@ -449,34 +462,108 @@ class Protocol : ComponentActivity() {
         }
     }
 
+    // The OBDLink EX is an FTDI USB-serial device (shares the FTDI vendor id
+    // with the Tactrix, distinct product id). It does NOT use the Tactrix bulk
+    // session — only the raw UsbDeviceConnection, which the VM hands to
+    // ObdLinkUsbManager / FtdiUsbSerial.
+    private fun findObdLinkExDevice(): UsbDevice? =
+        usbManager.deviceList.values.firstOrNull {
+            it.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
+                it.productId == FtdiUsbSerial.OBDLINK_EX_PRODUCT_ID
+        }
+
+    /**
+     * Tap on the OBDLink EX adapter (or Read Live with EX selected). Mirrors the
+     * OpenPort USB flow — discover the FTDI device, request USB permission if
+     * needed — but on grant opens a plain connection and hands it to the VM's
+     * OBDLink-EX connect instead of opening a Tactrix bulk session.
+     */
+    private fun connectObdLinkEx() {
+        val device = findObdLinkExDevice()
+        if (device == null) {
+            viewModel.setAdapterPresent(false)
+            viewModel.setConnectionStatus(
+                ConnectionStatus.NoDevice,
+                "OBDLink EX (FTDI VID=${FtdiUsbSerial.FTDI_VENDOR_ID} " +
+                    "PID=${FtdiUsbSerial.OBDLINK_EX_PRODUCT_ID}) not detected"
+            )
+            return
+        }
+        viewModel.setAdapterPresent(true)
+        if (!usbManager.hasPermission(device)) {
+            viewModel.setConnectionStatus(
+                ConnectionStatus.PermissionRequired(deviceLabel(device)),
+                "Requesting USB permission for OBDLink EX..."
+            )
+            usbPermissionHelper.requestUsbPermission(device, ACTION_USB_PERMISSION)
+            return
+        }
+        openObdLinkExForDevice(device)
+    }
+
+    private fun openObdLinkExForDevice(device: UsbDevice) {
+        val connection = usbManager.openDevice(device)
+        if (connection == null) {
+            viewModel.setConnectionStatus(
+                ConnectionStatus.Error("openDevice returned null"),
+                "OBDLink EX: USB openDevice failed"
+            )
+            return
+        }
+        viewModel.connectObdLinkEx(connection, device)
+    }
+
     private fun handlePermissionResult(intent: Intent) {
         val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
         val device = usbPermissionHelper.getUsbDeviceFromIntent(intent)
 
+        if (device == null) {
+            viewModel.setConnectionStatus(
+                ConnectionStatus.Error("Permission callback missing device"),
+                "Permission callback returned no device"
+            )
+            return
+        }
+
+        // Tactrix and the OBDLink EX share the FTDI vendor id, so dispatch on the
+        // full VID+PID. Both come back through this one ACTION_USB_PERMISSION.
+        val isEx = device.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
+            device.productId == FtdiUsbSerial.OBDLINK_EX_PRODUCT_ID
+        val isTactrix = device.vendorId == TACTRIX_VENDOR_ID &&
+            device.productId == TACTRIX_PRODUCT_ID
+
         if (!granted) {
             viewModel.setConnectionStatus(
                 ConnectionStatus.Error("USB permission denied"),
-                "User denied USB permission for Tactrix device"
+                if (isEx) "User denied USB permission for OBDLink EX"
+                else "User denied USB permission for Tactrix device"
             )
             return
         }
 
-        if (device == null ||
-            device.vendorId != TACTRIX_VENDOR_ID ||
-            device.productId != TACTRIX_PRODUCT_ID
-        ) {
-            viewModel.setConnectionStatus(
-                ConnectionStatus.Error("Permission callback missing expected Tactrix device"),
+        when {
+            isEx -> openObdLinkExForDevice(device)
+            isTactrix -> openSessionForDevice(device)
+            else -> viewModel.setConnectionStatus(
+                ConnectionStatus.Error("Permission callback returned an unexpected device"),
                 "Permission callback returned a different device"
             )
-            return
         }
-
-        openSessionForDevice(device)
     }
 
     private fun handleDetached(intent: Intent) {
         val device = usbPermissionHelper.getUsbDeviceFromIntent(intent) ?: return
+        if (device.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
+            device.productId == FtdiUsbSerial.OBDLINK_EX_PRODUCT_ID
+        ) {
+            viewModel.disconnectObdLinkEx()
+            viewModel.setAdapterPresent(false)
+            viewModel.setConnectionStatus(
+                ConnectionStatus.NoDevice,
+                "OBDLink EX detached"
+            )
+            return
+        }
         if (device.vendorId != TACTRIX_VENDOR_ID || device.productId != TACTRIX_PRODUCT_ID) {
             return
         }
@@ -536,7 +623,9 @@ class Protocol : ComponentActivity() {
         if (device != null) {
             viewModel.setAdapterPresent(true)
             if (!viewModel.isConnected()) onAdapterChanged(Adapter.OpenPort)
-        } else if (viewModel.uiState.value.settings.adapter != Adapter.OBDLink) {
+        } else if (viewModel.uiState.value.settings.adapter != Adapter.OBDLink &&
+            viewModel.uiState.value.settings.adapter != Adapter.OBDLinkEx
+        ) {
             viewModel.setAdapterPresent(false)
             viewModel.setConnectionStatus(
                 ConnectionStatus.NoDevice,

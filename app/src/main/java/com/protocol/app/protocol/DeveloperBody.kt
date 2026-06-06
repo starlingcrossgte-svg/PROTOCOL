@@ -86,7 +86,10 @@ internal fun DeveloperBody(
     onHuntKlineInit: () -> Unit,
     onSendManualCommand: (String) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
-    onSimulatorPortChange: (Int) -> Unit
+    onSimulatorPortChange: (Int) -> Unit,
+    onAutoInitChange: (Boolean) -> Unit,
+    onSelectInitSequence: (String) -> Unit,
+    onKlineContinuousTest: () -> Unit
 ) {
     val s = uiState.settings
     val trafficEvents by UsbTrafficLog.events.collectAsState()
@@ -142,6 +145,58 @@ internal fun DeveloperBody(
         // or init/protocol probing) without a code change.
         CategoryHeader("ELM327 MANUAL COMMANDS", startPadding = 8.dp)
         ManualCommandRow(onSend = onSendManualCommand)
+
+        // Adapter init — choose a saved command-library sequence and toggle
+        // whether the OBDLink connects with it instead of the built-in default.
+        CategoryHeader("ADAPTER INIT", startPadding = 8.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Switch(
+                checked = s.autoInitEnabled,
+                onCheckedChange = onAutoInitChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = AccentDim,
+                    uncheckedThumbColor = InkMuted,
+                    uncheckedTrackColor = SurfaceAlt,
+                    uncheckedBorderColor = BorderGray
+                )
+            )
+            Text(
+                if (s.autoInitEnabled) "Auto Init ON — uses selected sequence"
+                else "Auto Init OFF — built-in default init",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        SequenceSelector(selectedId = s.selectedInitSequenceId, onSelect = onSelectInitSequence)
+
+        // K-line CONTINUOUS test — fires the on-page A8 01 burst (built from the
+        // poller's own addresses, so no typos) and reports how many frames the
+        // STN streamed back. >1 = continuous works (the OpenPort path). Result
+        // lands in the RAW BYTES log above.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(SurfaceBg)
+                .border(1.dp, Accent, RoundedCornerShape(8.dp))
+                .clickable { onKlineContinuousTest() }
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "K-LINE CONTINUOUS TEST",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
 
         // Simulator — routes the live-data flow over a localhost TCP socket to
         // the host-side VIPER emulator (adb reverse tcp:<port> tcp:<port>).
@@ -205,10 +260,17 @@ internal fun DeveloperBody(
 @Composable
 private fun ManualCommandRow(onSend: (String) -> Unit) {
     var cmd by remember { mutableStateOf("") }
+    var paletteOpen by remember { mutableStateOf(false) }
     // ONE bordered bar split by a solid white divider, like the Live Data action
     // bar but with plain rounded corners (no angular cutouts): [ SEND | type box ].
     // The input is borderless so the bar's Accent border is the only outline.
+    // The tappable command palette sits directly beneath it: tap a command and
+    // it drops straight into the box so you can fire them one-by-one rapidly.
     val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -275,6 +337,157 @@ private fun ManualCommandRow(onSend: (String) -> Unit) {
                     inner()
                 }
             )
+        }
+    }
+        CommandPalette(
+            open = paletteOpen,
+            onToggle = { paletteOpen = !paletteOpen },
+            onPick = { cmd = it }
+        )
+    }
+}
+
+// Scrollable, tappable command palette beneath the manual command box. A tap
+// drops the command straight into the box (it does NOT auto-send and does NOT
+// close, so you can pick → SEND → pick again rapidly). Sourced from
+// AdapterCommandLibrary.QUICK_COMMANDS — add entries there to grow the list.
+@Composable
+private fun CommandPalette(
+    open: Boolean,
+    onToggle: () -> Unit,
+    onPick: (String) -> Unit
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, BorderGray, shape)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle)
+                .background(SurfaceAlt)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "QUICK COMMANDS",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                if (open) "▴" else "▾",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (open) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+                    .background(SurfaceBg)
+            ) {
+                items(com.protocol.app.obdlink.AdapterCommandLibrary.QUICK_COMMANDS) { qc ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(qc.command) }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            qc.command,
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            qc.label,
+                            color = NeutralGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Expandable single-select dropdown for the init-sequence library. Shows the
+// selected sequence's name; tapping expands the list (name + description), and
+// picking one persists it and collapses. Small list (4), so a plain Column.
+@Composable
+private fun SequenceSelector(selectedId: String?, onSelect: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val all = com.protocol.app.obdlink.AdapterCommandLibrary.ALL
+    val selected = com.protocol.app.obdlink.AdapterCommandLibrary.byId(selectedId)
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, Accent, shape)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { open = !open }
+                .background(SurfaceBg)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                selected?.name ?: "Select init sequence",
+                color = if (selected != null) Color.White else NeutralGray,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                if (open) "▴" else "▾",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (open) {
+            Column(
+                modifier = Modifier.fillMaxWidth().background(SurfaceAlt)
+            ) {
+                all.forEach { seq ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(seq.id); open = false }
+                            .padding(horizontal = 14.dp, vertical = 9.dp)
+                    ) {
+                        Text(
+                            seq.name,
+                            color = if (seq.id == selectedId) Accent else Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            seq.description,
+                            color = NeutralGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
         }
     }
 }

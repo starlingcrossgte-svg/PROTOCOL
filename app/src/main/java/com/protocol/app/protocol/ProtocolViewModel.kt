@@ -2,11 +2,13 @@ package com.protocol.app.protocol
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.protocol.app.obdlink.AdapterCommandLibrary
 import com.protocol.app.obdlink.LiveSampleSource
 import com.protocol.app.obdlink.ObdLinkBtManager
 import com.protocol.app.obdlink.ObdLinkKlineSource
 import com.protocol.app.obdlink.ObdLinkLiveSource
 import com.protocol.app.obdlink.ObdLinkTcpManager
+import com.protocol.app.obdlink.ObdLinkUsbManager
 import com.protocol.app.openport2.OpenPort2UsbSession
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import com.protocol.app.openport2.OpenPortCanLiveSource
@@ -78,6 +80,14 @@ class ProtocolViewModel : ViewModel() {
     // updateLayout can hand any of the three concrete impls a fresh PID set.
     private var runningLiveSource: LiveSampleSource? = null
     private var obdLinkManager: ObdLinkBtManager? = null
+    // USB-backed OBDLink EX. Sibling of obdLinkManager (BT) / simulatorObdLink
+    // (TCP) — same STN/SSM2 stack, reached over an FTDI USB serial. Built from a
+    // UsbDeviceConnection the Activity opens after USB permission is granted.
+    private var obdLinkUsbManager: ObdLinkUsbManager? = null
+    // True while an EX connect coroutine is in flight. Repeated Read-Live taps
+    // during the (slow, timeout-bound) connect would otherwise stack concurrent
+    // opens on the same FTDI device — the storm seen in the first bench log.
+    @Volatile private var obdLinkExConnecting = false
     // TCP transport for simulator mode (OpenPort paths). Held across the
     // coroutine so stop / disconnect can close the socket and drop the
     // reference.
@@ -156,6 +166,19 @@ class ProtocolViewModel : ViewModel() {
     }
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
+
+    /** When on, OBDLink connects using [setSelectedInitSequence] from the
+     *  command library instead of the built-in default init. */
+    fun setAutoInitEnabled(on: Boolean) = updateSettings { it.copy(autoInitEnabled = on) }
+
+    /** Pick the active AdapterCommandLibrary init sequence (by id). */
+    fun setSelectedInitSequence(id: String?) = updateSettings { it.copy(selectedInitSequenceId = id) }
+
+    /** True when Auto Init is on and the streaming K-line sequence is selected,
+     *  so the OBDLink K-line poller streams (A8 01) instead of re-asking. */
+    private fun klineContinuousSelected(): Boolean = _uiState.value.settings.let {
+        it.autoInitEnabled && it.selectedInitSequenceId == AdapterCommandLibrary.KLINE_CONTINUOUS.id
+    }
 
     fun setAdapter(adapter: Adapter?) {
         // Switching adapter / protocol invalidates any cached K-line channel
@@ -265,8 +288,39 @@ class ProtocolViewModel : ViewModel() {
      * reboots after ATZ, so the manager is discarded; the next connect builds a fresh one.
      */
     fun resetObdLinkAdapter(appContext: android.content.Context) {
-        setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Resetting OBDLink adapter…")
+        val isEx = _uiState.value.settings.adapter == Adapter.OBDLinkEx
+        setConnectionStatus(
+            ConnectionStatus.PermissionRequired(if (isEx) "OBDLink EX" else "OBDLink"),
+            "Resetting adapter…"
+        )
         viewModelScope.launch(Dispatchers.IO) {
+            if (isEx) {
+                // The EX can't reopen its own USB link — it must already be
+                // connected for the reset to reach the STN.
+                val mgr = obdLinkUsbManager
+                if (mgr?.transport == null) {
+                    setConnectionStatus(
+                        ConnectionStatus.Error("OBDLink EX not connected"),
+                        "Connect the EX first (Settings → OBDLink EX), then reset."
+                    )
+                    return@launch
+                }
+                val r = mgr.resetAdapter()
+                // ATZ reboots the STN; the manager is torn down so the next
+                // connect re-runs the baud sweep against the reset adapter.
+                obdLinkUsbManager?.disconnect()
+                obdLinkUsbManager = null
+                when (r) {
+                    is ObdLinkUsbManager.ConnectResult.Connected ->
+                        setConnectionStatus(
+                            ConnectionStatus.NoDevice,
+                            "OBDLink EX factory reset sent (ATPP FF OFF / ATD / ATZ) — reconnect from Settings."
+                        )
+                    is ObdLinkUsbManager.ConnectResult.Failure ->
+                        setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+                }
+                return@launch
+            }
             val mgr = obdLinkManager
                 ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
             val r = mgr.resetAdapter()
@@ -296,6 +350,7 @@ class ProtocolViewModel : ViewModel() {
     fun sendManualCommand(command: String, appContext: android.content.Context) {
         val cmd = command.trim()
         if (cmd.isEmpty()) return
+        val isEx = _uiState.value.settings.adapter == Adapter.OBDLinkEx
         viewModelScope.launch(Dispatchers.IO) {
             // Take over the link: stop any running poll/log loop and WAIT for it
             // to fully finish before we write, so the two can't collide.
@@ -305,8 +360,17 @@ class ProtocolViewModel : ViewModel() {
             active?.join()
 
             com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· manual: $cmd")
-            var transport = obdLinkManager?.transport
+            // Route to whichever OBDLink link is active: USB (EX) or Bluetooth.
+            var transport = if (isEx) obdLinkUsbManager?.transport else obdLinkManager?.transport
             if (transport == null) {
+                if (isEx) {
+                    // The USB connection can only be opened by the Activity (USB
+                    // permission), so the console can't bring the EX up itself.
+                    com.protocol.app.obdlink.ObdLinkTrafficLog.record(
+                        "OUT", "· OBDLink EX not connected — Settings → tap OBDLink EX first"
+                    )
+                    return@launch
+                }
                 com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· opening raw channel…")
                 val mgr = obdLinkManager ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
                 when (val r = mgr.connectBasic()) {
@@ -349,9 +413,17 @@ class ProtocolViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val mgr = obdLinkManager
                 ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
+            // Auto-init: same resolution as the EX — selected library sequence
+            // when enabled (falling back to the protocol default if it doesn't
+            // match), else null = the built-in init.
+            val seq = if (s.autoInitEnabled) {
+                val isKline = protocol == BusProtocol.KLine
+                AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
+                    ?: AdapterCommandLibrary.defaultFor(isKline)
+            } else null
             val r = when (protocol) {
-                BusProtocol.CAN -> mgr.connect()
-                BusProtocol.KLine -> mgr.connectKline()
+                BusProtocol.CAN -> mgr.connect(seq)
+                BusProtocol.KLine -> mgr.connectKline(seq)
             }
             when (r) {
                 is ObdLinkBtManager.ConnectResult.Connected -> {
@@ -390,6 +462,151 @@ class ProtocolViewModel : ViewModel() {
                 connectionStatus = ConnectionStatus.NoDevice,
                 adapterPresent = false,
                 statusMessage = "OBDLink disconnected"
+            )
+        }
+    }
+
+    /**
+     * One-shot K-line CONTINUOUS test. Builds the on-page ECM A8 **01**
+     * (respond-continuously) frame from the same PIDs the poller uses — no
+     * hand-typed hex to fat-finger — and fires it through STPX with a burst
+     * response count, so the ECU streams many replies off a SINGLE request. The
+     * stream lands in the BYTES log; a wall of `80 F0 10 .. E8` frames = the STN
+     * holds continuous (the OpenPort path). One frame / STOPPED = it doesn't.
+     * Does NOT touch the live poller; takes over the link for the test only.
+     */
+    fun runKlineContinuousTest(appContext: android.content.Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val active = runJob
+            runJob = null
+            active?.cancel(); active?.join()
+
+            fun log(m: String) = com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· $m")
+            val state = _uiState.value
+            val transport = when (state.settings.adapter) {
+                Adapter.OBDLinkEx -> obdLinkUsbManager?.transport
+                Adapter.OBDLink -> obdLinkManager?.transport
+                else -> null
+            }
+            if (transport == null) {
+                log("continuous test: connect an OBDLink on K-line first"); return@launch
+            }
+            val addrs = Ssm2Pids.DEFAULT_DEMO_PIDS
+                .filter { it.id in state.gaugeLayout.pidIds && it.category == com.protocol.app.openport2.Ssm2PidCategory.ECU }
+                .flatMap { it.addresses }
+            if (addrs.isEmpty()) { log("continuous test: no ECM params on the page"); return@launch }
+
+            val frame = com.protocol.app.openport2.Ssm2AddressQuery.buildA8Query(
+                addrs, com.protocol.app.openport2.Ssm2AddressQuery.DEST_ECM, flags = 0x01
+            )
+            val hex = com.protocol.app.obdlink.ObdLinkSsm2Can.toElmHex(frame)
+            log("continuous test: A8 01 burst (${addrs.size} addrs, r:25) — watch for a wall of E8 frames")
+            try {
+                val reply = transport.sendAscii("STPX d:$hex,r:25,t:3000", timeoutMs = 4000L)
+                val frames = reply.replace(" ", "").replace("\r", "").replace("\n", "")
+                    .split("80F010").size - 1
+                log("continuous test: ~$frames frames streamed (>1 = continuous WORKS)")
+                transport.drain()
+            } catch (e: Exception) {
+                log("continuous test failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Connect the OBDLink EX over USB. The Activity opens the [connection] for
+     * the FTDI device after USB permission is granted, then hands it here. We
+     * build an [ObdLinkUsbManager] (which takes ownership of the connection) and
+     * run the same STN init the BT/TCP managers use, picking K-line vs CAN from
+     * the user's selected protocol. No-op unless OBDLink EX is the live adapter
+     * (defense against stale permission callbacks).
+     */
+    fun connectObdLinkEx(
+        connection: android.hardware.usb.UsbDeviceConnection,
+        device: android.hardware.usb.UsbDevice
+    ) {
+        val s = _uiState.value.settings
+        if (s.adapter != Adapter.OBDLinkEx) {
+            try { connection.close() } catch (_: Exception) {}
+            return
+        }
+        if (obdLinkExConnecting) {
+            // A connect is already running — drop this duplicate so repeated taps
+            // can't stack concurrent opens (and steal the interface) on the EX.
+            try { connection.close() } catch (_: Exception) {}
+            return
+        }
+        val protocol = s.protocol ?: run {
+            try { connection.close() } catch (_: Exception) {}
+            setConnectionStatus(
+                ConnectionStatus.Error("PROTOCOL not picked"),
+                "Pick K-Line or CAN in Settings before connecting OBDLink EX"
+            )
+            return
+        }
+        val protocolLabel = if (protocol == BusProtocol.KLine) "K-line" else "CAN"
+        obdLinkExConnecting = true
+        setConnectionStatus(
+            ConnectionStatus.PermissionRequired("OBDLink EX"),
+            "Connecting OBDLink EX ($protocolLabel)..."
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                obdLinkUsbManager?.disconnect()
+                val mgr = ObdLinkUsbManager(connection, device)
+                obdLinkUsbManager = mgr
+                // Auto-init: when enabled, connect with the user's selected
+                // library sequence (falling back to the protocol default if the
+                // pick doesn't match); otherwise null = the built-in init.
+                val seq = if (s.autoInitEnabled) {
+                    val isKline = protocol == BusProtocol.KLine
+                    AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
+                        ?: AdapterCommandLibrary.defaultFor(isKline)
+                } else null
+                val r = when (protocol) {
+                    BusProtocol.CAN -> mgr.connect(seq)
+                    BusProtocol.KLine -> mgr.connectKline(seq)
+                }
+                when (r) {
+                    is ObdLinkUsbManager.ConnectResult.Connected -> {
+                        setConnectionStatus(
+                            ConnectionStatus.Connected(r.deviceLabel),
+                            "Connected to ${r.deviceLabel} ($protocolLabel)"
+                        )
+                        setAdapterPresent(true)
+                    }
+                    is ObdLinkUsbManager.ConnectResult.Failure -> {
+                        obdLinkUsbManager?.disconnect()
+                        obdLinkUsbManager = null
+                        setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+                        setAdapterPresent(false)
+                    }
+                }
+            } finally {
+                obdLinkExConnecting = false
+            }
+        }
+    }
+
+    /** Tear down the OBDLink EX USB link. Safe whether or not it's connected;
+     *  leaves a live OpenPort USB session (if any) untouched. */
+    fun disconnectObdLinkEx() {
+        val wasEx = runningLiveSource != null && _uiState.value.settings.adapter == Adapter.OBDLinkEx
+        if (wasEx) {
+            runJob?.cancel()
+            runJob = null
+            runningLiveSource = null
+        }
+        obdLinkUsbManager?.disconnect()
+        obdLinkUsbManager = null
+        if (openSession == null) {
+            _uiState.value = _uiState.value.copy(
+                isReadingLive = if (wasEx) false else _uiState.value.isReadingLive,
+                isLogging = if (wasEx) false else _uiState.value.isLogging,
+                liveValues = if (wasEx) emptyMap() else _uiState.value.liveValues,
+                connectionStatus = ConnectionStatus.NoDevice,
+                adapterPresent = false,
+                statusMessage = "OBDLink EX disconnected"
             )
         }
     }
@@ -686,6 +903,12 @@ class ProtocolViewModel : ViewModel() {
                     )
                     return
                 }
+                Adapter.OBDLinkEx -> if (obdLinkUsbManager?.isConnected() != true) {
+                    _uiState.value = state.copy(
+                        statusMessage = "OBDLink EX not connected — Settings → tap OBDLink EX to grant USB permission"
+                    )
+                    return
+                }
             }
         }
 
@@ -704,6 +927,8 @@ class ProtocolViewModel : ViewModel() {
             adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> "Initializing OpenPort CAN @ 500 kbps..."
             adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> "Polling OBDLink K-line @ 4800..."
             adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> "Polling OBDLink CAN @ 500k..."
+            adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> "Polling OBDLink EX K-line @ 4800..."
+            adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> "Polling OBDLink EX CAN @ 500k..."
             else -> "Connecting..."
         }
 
@@ -734,6 +959,8 @@ class ProtocolViewModel : ViewModel() {
                     adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> startOpenPortCanFlow(pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> startObdLinkKlineFlow(pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> startObdLinkCanFlow(pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> startObdLinkExKlineFlow(pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> startObdLinkExCanFlow(pidsOnPage, pollIntervalMs)
                     else -> null
                 }
             } catch (e: UsbDisconnectedException) {
@@ -992,7 +1219,7 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val transport = obdLinkManager?.transport ?: return null
-        val src = ObdLinkKlineSource(transport, pidsOnPage)
+        val src = ObdLinkKlineSource(transport, pidsOnPage, klineContinuousSelected())
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
     }
@@ -1003,6 +1230,28 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val transport = obdLinkManager?.transport ?: return null
+        val src = ObdLinkLiveSource(transport, pidsOnPage)
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
+    /** OBDLink EX (USB) + K-line: identical to the BT K-line path, transport from the USB manager. */
+    private fun startObdLinkExKlineFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val transport = obdLinkUsbManager?.transport ?: return null
+        val src = ObdLinkKlineSource(transport, pidsOnPage, klineContinuousSelected())
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
+    /** OBDLink EX (USB) + CAN: identical to the BT CAN path, transport from the USB manager. */
+    private fun startObdLinkExCanFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val transport = obdLinkUsbManager?.transport ?: return null
         val src = ObdLinkLiveSource(transport, pidsOnPage)
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
@@ -1168,6 +1417,16 @@ class ProtocolViewModel : ViewModel() {
                         if (t == null) { dtcFail("OBDLink not connected — pair it in Settings first"); return@launch }
                         com.protocol.app.openport2.Ssm2DtcRead.readObdLinkCan(t)
                     }
+                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> {
+                        val t = obdLinkUsbManager?.transport
+                        if (t == null) { dtcFail("OBDLink EX not connected — tap it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcRead.readObdLinkKline(t)
+                    }
+                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> {
+                        val t = obdLinkUsbManager?.transport
+                        if (t == null) { dtcFail("OBDLink EX not connected — tap it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcRead.readObdLinkCan(t)
+                    }
                     adapter == Adapter.OpenPort && protocol == BusProtocol.KLine -> {
                         val client = tactrixClient
                         if (client == null) { dtcFail("OpenPort not connected — tap OpenPort 2.0 in Settings"); return@launch }
@@ -1237,6 +1496,10 @@ class ProtocolViewModel : ViewModel() {
     override fun onCleared() {
         runJob?.cancel()
         clearOpenSession()
+        // Release the FTDI interface claim so the EX isn't left wedged for the
+        // next process (a leaked USB claim is harder to recover than a socket).
+        obdLinkUsbManager?.disconnect()
+        obdLinkUsbManager = null
         super.onCleared()
     }
 }

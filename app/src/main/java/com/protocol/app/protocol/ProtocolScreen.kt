@@ -104,6 +104,9 @@ fun ProtocolScreen(
     onDevModeChange: (Boolean) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
+    onAutoInitChange: (Boolean) -> Unit,
+    onSelectInitSequence: (String) -> Unit,
+    onKlineContinuousTest: () -> Unit,
     onApplyPreset: (Int) -> Unit,
     onResizeSessionLog: (Float) -> Unit,
     onAutoSaveLogs: () -> Unit,
@@ -258,6 +261,9 @@ fun ProtocolScreen(
                                 onSendManualCommand = onSendManualCommand,
                                 onSimulatorModeChange = onSimulatorModeChange,
                                 onSimulatorPortChange = onSimulatorPortChange,
+                                onAutoInitChange = onAutoInitChange,
+                                onSelectInitSequence = onSelectInitSequence,
+                                onKlineContinuousTest = onKlineContinuousTest,
                             )
                             else -> LiveDataPage(
                                 uiState = uiState,

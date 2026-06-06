@@ -40,7 +40,7 @@ class ObdLinkBtManager(context: Context) {
      * call again after a [disconnect].
      */
     @SuppressLint("MissingPermission") // caller guarantees BLUETOOTH_CONNECT is granted
-    fun connect(): ConnectResult {
+    fun connect(sequence: CommandSequence? = null): ConnectResult {
         // Every phase is logged to the BT log so a failed/hung connect is
         // visible on the Developer page instead of a silent "nothing happened".
         fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
@@ -83,7 +83,7 @@ class ObdLinkBtManager(context: Context) {
                 log = { dir, text -> ObdLinkTrafficLog.record(dir, text) }
             )
             transport = t
-            initElmForSsm2Can(t)
+            if (sequence != null) runSequence(t, sequence) else initElmForSsm2Can(t)
             ConnectResult.Connected(device.name ?: "OBDLink")
         } catch (e: Exception) {
             disconnect()
@@ -145,7 +145,7 @@ class ObdLinkBtManager(context: Context) {
      *   ATAT 2      aggressive adaptive timing (trims post-reply wait)
      */
     @SuppressLint("MissingPermission")
-    fun connectKline(): ConnectResult {
+    fun connectKline(sequence: CommandSequence? = null): ConnectResult {
         fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
         val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
             ?: return ConnectResult.Failure("No Bluetooth adapter on this device")
@@ -167,13 +167,17 @@ class ObdLinkBtManager(context: Context) {
         transport = t
         return try {
             t.drain()
-            for (cmd in listOf("ATE0", "ATL0", "ATS0")) t.sendAscii(cmd, 800L)
-            for (cmd in KLINE_INIT_COMMANDS) {
-                val reply = t.sendAscii(cmd, timeoutMs = 1500L)
-                if (reply.contains("?")) {
-                    info("K-line init '$cmd' rejected (?)")
-                    disconnect()
-                    return ConnectResult.Failure("STN rejected '$cmd' during K-line init")
+            if (sequence != null) {
+                runSequence(t, sequence)
+            } else {
+                for (cmd in listOf("ATE0", "ATL0", "ATS0")) t.sendAscii(cmd, 800L)
+                for (cmd in KLINE_INIT_COMMANDS) {
+                    val reply = t.sendAscii(cmd, timeoutMs = 1500L)
+                    if (reply.contains("?")) {
+                        info("K-line init '$cmd' rejected (?)")
+                        disconnect()
+                        return ConnectResult.Failure("STN rejected '$cmd' during K-line init")
+                    }
                 }
             }
             info("K-line raw mode open — ready to send SSM2 frames")
@@ -297,6 +301,22 @@ class ObdLinkBtManager(context: Context) {
             if (reply.contains("?")) {
                 EcuLogger.comm("OBDLink ELM '$cmd' rejected ('?') — see Developer BT log")
             }
+        }
+    }
+
+    /**
+     * Run a library [CommandSequence] in place of the hardcoded init: send each
+     * step, log a '?' rejection but keep going (experimental). [InitStep.switchBaudAfter]
+     * is FTDI/USB-only and ignored here — there's no host UART over Bluetooth.
+     */
+    private fun runSequence(t: ObdLinkBtTransport, seq: CommandSequence) {
+        fun info(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
+        for (step in seq.steps) {
+            val reply = t.sendAscii(
+                step.command,
+                timeoutMs = if (step.command.equals("ATZ", ignoreCase = true)) 1500L else 1200L
+            )
+            if (reply.contains("?")) info("seq '${step.command}' rejected (?) — continuing")
         }
     }
 

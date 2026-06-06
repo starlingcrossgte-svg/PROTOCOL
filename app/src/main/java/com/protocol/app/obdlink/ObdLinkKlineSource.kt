@@ -41,14 +41,24 @@ import kotlinx.coroutines.flow.flow
  * self-checksummed frame verbatim and doesn't verify the reply's checksum (we
  * do, in [extractLatestA8]).
  *
- * Continuous mode (A8 flag 0x01) was tried on-car and does NOT work over the
- * STN: the flag hangs the adapter's one-shot tx/rx state machine (no prompt),
- * which then storms STOPPED / BUS ERROR. Continuous stays an OpenPort-only
- * capability.
+ * ## Continuous mode (A8 flag 0x01) via monitor
+ *
+ * The A8 01 flag tells the ECU to RESPOND CONTINUOUSLY — once it receives one
+ * A8 01 it streams E8 frames on the K-line by itself, indefinitely. We send A8
+ * 01 once (STPX r:1, to arm it and grab the first frame), then hand the wire to
+ * the STN's all-frame monitor (STMA) and ride the stream, emitting a sample per
+ * frame as it arrives. A repeated STPX r:N can't do this smoothly: it's a
+ * transaction that wants to "complete", so on an endless stream the STN aborts
+ * each burst (FB ERROR) and we re-arm, leaving a ~200 ms hole every ~10 frames.
+ * The monitor has no transaction — it just forwards the wire — so the stream is
+ * gap-free. Needs the tight STIP1X timing from the "K-line · Continuous" init.
  */
 class ObdLinkKlineSource(
     private val transport: ObdLinkBtTransport,
-    pids: List<Ssm2Pid>
+    pids: List<Ssm2Pid>,
+    /** When true (the "K-line · Continuous" init is active), ECM-only pages
+     *  STREAM via one A8 01 request instead of re-asking each cycle. */
+    private val continuous: Boolean = false
 ) : LiveSampleSource {
 
     @Volatile
@@ -67,6 +77,73 @@ class ObdLinkKlineSource(
     override fun close() {}
 
     override fun startFlow(intervalMs: Long): Flow<PollSample> = flow {
+        // Continuous streaming (A8 01), ECM-only: arm the ECU's OWN stream once,
+        // then ride it via the STN's all-frame monitor (STMA) and emit a sample
+        // per streamed reply (~35-40 Hz on-car). No per-cycle re-asking, and —
+        // unlike a repeated STPX r:N — no transaction to abort (FB ERROR) and
+        // re-arm, so no ~200 ms holes. We only re-arm if the stream truly stalls
+        // or the monitor dies. Needs the tight STIP1X timing from the
+        // "K-line · Continuous" init.
+        if (continuous && tcmPids.isEmpty() && ecmPids.isNotEmpty()) {
+            val pids = ecmPids
+            val addresses = pids.flatMap { it.addresses }
+            val a8 = Ssm2AddressQuery.buildA8Query(addresses, Ssm2AddressQuery.DEST_ECM, flags = 0x01)
+            // STPX r:1: send A8 01 once and return on the FIRST streamed frame —
+            // that both confirms the ECU is now streaming and hands us frame #1.
+            val arm = "STPX d:${ObdLinkSsm2Can.toElmHex(a8)},r:1,t:$CONTINUOUS_ARM_MS"
+            val pending = StringBuilder()
+
+            // Arm the ECU stream (grabs frame #1, leaves it buffered), then start
+            // the monitor. beginMonitor flips the transport into no-'>'-expected
+            // state; stopMonitor (inside, via the next sendAscii) sends the 0x0D.
+            fun armAndMonitor() {
+                pending.setLength(0)
+                transport.stopMonitor()                              // no-op if not monitoring
+                transport.sendAscii(arm, timeoutMs = CONTINUOUS_ARM_MS + 500L)
+                transport.beginMonitor(MONITOR_CMD)                  // STMA — no '>' until 0x0D
+            }
+            armAndMonitor()
+
+            var idleMs = 0L
+            var stalls = 0
+            try {
+                while (true) {
+                    kotlinx.coroutines.delay(STREAM_POLL_MS)
+                    val raw = transport.takeBuffered()
+                    if (raw.isEmpty()) {
+                        idleMs += STREAM_POLL_MS
+                        if (idleMs >= STREAM_STALL_MS) {
+                            stalls++
+                            if (stalls >= MAX_CONSECUTIVE_NO_REPLY) {
+                                throw NoEcuResponseException("continuous: stream stalled")
+                            }
+                            armAndMonitor()                          // ECU went quiet → restart it
+                            idleMs = 0
+                        }
+                        continue
+                    }
+                    idleMs = 0
+                    // The monitor died (stray byte / bus glitch) if the STN printed
+                    // STOPPED / an error / a '?'. Emit whatever good frames came
+                    // first, then re-arm.
+                    val died = raw.contains("STOPPED") || raw.contains("ERROR") ||
+                        raw.contains("?")
+                    // Keep only hex; integrity (header + length + checksum) is
+                    // validated per frame in extractFramesFromHex.
+                    for (c in raw) if (c in '0'..'9' || c in 'A'..'F' || c in 'a'..'f') pending.append(c)
+                    val frames = extractFramesFromHex(pending, addresses.size)
+                    if (frames.isNotEmpty()) {
+                        stalls = 0
+                        for (fr in frames) emit(buildEcmSample(pids, fr))
+                    }
+                    if (died) armAndMonitor()
+                }
+            } finally {
+                // Leave the channel clean for the next command / disconnect.
+                transport.stopMonitor()
+            }
+        }
+
         var consecutiveNoReply = 0
         while (true) {
             val cycleStart = System.currentTimeMillis()
@@ -157,6 +234,10 @@ class ObdLinkKlineSource(
     private fun queryModule(addresses: List<Ssm2Address>, destination: Byte): IntArray? {
         if (addresses.isEmpty()) return null
         val frame = Ssm2AddressQuery.buildA8Query(addresses, destination)
+        // NOTE: do NOT add x:<len> here. It makes the STN do a strict ISO-9141
+        // length check that rejects the valid SSM2 reply with "<DATA ERROR" (the
+        // bytes are fine — verified on-car — but the STN flags them). r:1 already
+        // returns the instant the one reply lands, which is the win we wanted.
         val command = "STPX d:${ObdLinkSsm2Can.toElmHex(frame)},r:1,t:$RESPONSE_TIMEOUT_MS"
         val ascii = try {
             transport.sendAscii(command, timeoutMs = 1500L)
@@ -203,6 +284,62 @@ class ObdLinkKlineSource(
         return result
     }
 
+    /**
+     * Pull every COMPLETE 80 F0 10 frame off the front of [pending] (a running
+     * hex-char buffer for the continuous stream), parse each to one byte per
+     * address, and consume it. Leaves any partial trailing frame for the next
+     * chunk, so frames split across reads reassemble correctly.
+     */
+    private fun extractFramesFromHex(pending: StringBuilder, addressCount: Int): List<IntArray> {
+        val out = ArrayList<IntArray>()
+        while (true) {
+            val start = pending.indexOf("80F010")
+            if (start < 0) {
+                // no header; keep at most a partial-header tail for next time
+                if (pending.length > 6) pending.delete(0, pending.length - 6)
+                break
+            }
+            if (start > 0) pending.delete(0, start)
+            if (pending.length < 8) break // need 80 F0 10 LL to read the length
+            val len = Integer.parseInt(pending.substring(6, 8), 16)
+            // Length sanity: a valid E8 reply is LL = E8 byte + one byte per
+            // address. A corrupt LL can't be trusted to frame the next packet, so
+            // drop this header byte and re-sync on the following 80F010 instead of
+            // letting a bad length swallow a good frame.
+            if (len != addressCount + 1) {
+                pending.delete(0, 2)
+                continue
+            }
+            val totalChars = (len + 5) * 2
+            if (pending.length < totalChars) break // frame not fully arrived yet
+            val frameHex = pending.substring(0, totalChars)
+            pending.delete(0, totalChars)
+            val bytes = ByteArray(len + 5) {
+                Integer.parseInt(frameHex.substring(it * 2, it * 2 + 2), 16).toByte()
+            }
+            val parsed = Ssm2FrameParser.parseSsm2Frame(bytes)
+            if (parsed != null && !parsed.truncated && parsed.checksumValid) {
+                Ssm2AddressQuery.parseA8Response(parsed, addressCount)?.let { out.add(it) }
+            }
+        }
+        return out
+    }
+
+    /** Build an ECM-only [PollSample] from one streamed frame's raw bytes. */
+    private fun buildEcmSample(pids: List<Ssm2Pid>, raw: IntArray): PollSample {
+        val values = HashMap<String, Double>()
+        val rawValues = ArrayList<Int>()
+        decodeInto(pids, raw, values, rawValues)
+        return PollSample(
+            timestampMs = System.currentTimeMillis(),
+            values = values,
+            rawValues = rawValues.toIntArray(),
+            wireMs = 0,
+            ecmOk = true,
+            tcmOk = true
+        )
+    }
+
     private companion object {
         // STPX response-wait cap (ms). r:1 returns as soon as the ECU's single
         // reply lands, so this only bounds the no-reply case.
@@ -210,5 +347,14 @@ class ObdLinkKlineSource(
         // Consecutive no-reply cycles before declaring "no ECU". A present ECU
         // answers the first cycle, so a run this long = not on bus.
         private const val MAX_CONSECUTIVE_NO_REPLY = 8
+        // Continuous mode: the STN monitor command that rides the ECU's stream,
+        // and the t: cap on the one A8 01 arming request (r:1 returns on frame #1,
+        // so this only bounds the no-reply case at arm time).
+        private const val MONITOR_CMD = "STMA"
+        private const val CONTINUOUS_ARM_MS = 1000
+        // How often to drain the stream buffer, and how long with no bytes before
+        // we conclude the stream stalled and re-arm A8 01.
+        private const val STREAM_POLL_MS = 8L
+        private const val STREAM_STALL_MS = 250L
     }
 }
