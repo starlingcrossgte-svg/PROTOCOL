@@ -275,6 +275,7 @@ fun ProtocolScreen(
                                 onResizeGauge = onResizeGauge,
                                 onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
                                 onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
+                                onOpenUnverified = { onOpenSubPage(SubPage.Unverified) },
                                 onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
                                 onApplyPreset = onApplyPreset,
                                 onAutoSaveLogs = onAutoSaveLogs
@@ -290,6 +291,12 @@ fun ProtocolScreen(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.TCM,
                         onTogglePid = onToggleGaugeForPid
+                    )
+                    SubPage.Unverified -> ParametersBody(
+                        uiState = uiState,
+                        category = com.protocol.app.openport2.Ssm2PidCategory.ECU,
+                        onTogglePid = onToggleGaugeForPid,
+                        showUnverified = true
                     )
                     SubPage.LiveDataSettings -> LiveDataSettingsBody(
                         uiState = uiState,

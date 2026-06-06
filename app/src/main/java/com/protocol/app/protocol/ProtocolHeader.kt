@@ -65,6 +65,7 @@ internal fun ConnectionStatusStripe(
 internal fun HamburgerMenu(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
+    onOpenUnverified: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     enabled: Boolean = true,
     modifier: Modifier = Modifier
@@ -135,6 +136,20 @@ internal fun HamburgerMenu(
                 onClick = {
                     expanded = false
                     onOpenTcmParameters()
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "Unverified",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onOpenUnverified()
                 }
             )
         }

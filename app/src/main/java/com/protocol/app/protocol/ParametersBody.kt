@@ -43,7 +43,11 @@ import com.protocol.app.openport2.Ssm2Pids
 internal fun ParametersBody(
     uiState: ProtocolUiState,
     category: Ssm2PidCategory,
-    onTogglePid: (String) -> Unit
+    onTogglePid: (String) -> Unit,
+    // When true this is the Unverified page: it shows every candidate PID
+    // (verified == false) regardless of [category], kept apart from the
+    // trusted lists. The category pages instead show only verified PIDs.
+    showUnverified: Boolean = false
 ) {
     Column(
         modifier = Modifier
@@ -53,13 +57,16 @@ internal fun ParametersBody(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         val onLiveData = uiState.pidIdsOnLiveData
-        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == category }
+        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter {
+            if (showUnverified) !it.verified else it.category == category && it.verified
+        }
 
         if (pids.isEmpty()) {
             EmptyCategoryRow(
-                when (category) {
-                    Ssm2PidCategory.ECU -> "No ECU parameters available."
-                    Ssm2PidCategory.TCM -> "No TCM parameters available yet."
+                when {
+                    showUnverified -> "No unverified parameters."
+                    category == Ssm2PidCategory.ECU -> "No ECU parameters available."
+                    else -> "No TCM parameters available yet."
                 }
             )
         } else {

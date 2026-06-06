@@ -74,6 +74,7 @@ internal fun LiveDataPage(
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
+    onOpenUnverified: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     onApplyPreset: (Int) -> Unit,
     onAutoSaveLogs: () -> Unit
@@ -251,6 +252,7 @@ internal fun LiveDataPage(
             onExportSessionLog = onExportSessionLog,
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
+            onOpenUnverified = onOpenUnverified,
             onOpenLiveDataSettings = onOpenLiveDataSettings
         )
     }
@@ -299,6 +301,7 @@ private fun ModeButtonsRow(
     onExportSessionLog: () -> Unit,
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
+    onOpenUnverified: () -> Unit,
     onOpenLiveDataSettings: () -> Unit
 ) {
     Row(
@@ -312,6 +315,7 @@ private fun ModeButtonsRow(
         HamburgerMenu(
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
+            onOpenUnverified = onOpenUnverified,
             onOpenLiveDataSettings = onOpenLiveDataSettings,
             enabled = !locked
         )

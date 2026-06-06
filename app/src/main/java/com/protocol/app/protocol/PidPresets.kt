@@ -31,8 +31,10 @@ object PidPresets {
     val PRESETS: List<PidPreset> = build()
 
     private fun build(): List<PidPreset> {
-        val ecu = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.ECU }
-        val tcm = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.TCM }
+        // Only trusted PIDs feed the quick presets — unverified candidates are
+        // kept out so the presets stay clean.
+        val ecu = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.ECU && it.verified }
+        val tcm = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.TCM && it.verified }
         val out = ArrayList<PidPreset>()
         chunk(ecu).forEachIndexed { i, group ->
             out.add(PidPreset("ECU ${i + 1}", group.map { it.id }))
