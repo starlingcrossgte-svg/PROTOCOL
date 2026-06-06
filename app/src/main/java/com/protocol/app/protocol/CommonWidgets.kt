@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -31,14 +32,14 @@ import androidx.compose.ui.unit.dp
  * bold. Single source so the visual stays consistent if we tweak it.
  */
 @Composable
-internal fun CategoryHeader(label: String) {
+internal fun CategoryHeader(label: String, startPadding: Dp = 0.dp) {
     Text(
         "── $label ──",
         color = SectionGray,
         fontFamily = FontFamily.Monospace,
         style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+        modifier = Modifier.padding(start = startPadding, top = 4.dp, bottom = 4.dp)
     )
 }
 

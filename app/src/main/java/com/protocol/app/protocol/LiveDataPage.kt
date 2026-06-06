@@ -30,7 +30,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,7 +39,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,7 +51,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 @Composable
@@ -77,6 +74,7 @@ internal fun LiveDataPage(
     onOpenUnverified: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
     onApplyPreset: (Int) -> Unit,
+    onResizeSessionLog: (Float) -> Unit,
     onAutoSaveLogs: () -> Unit
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
@@ -161,14 +159,6 @@ internal fun LiveDataPage(
                     .verticalScroll(scrollState, enabled = !uiState.editMode && !locked),
                 verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                // Dev-only quick PID presets — load a 10-PID group onto the
-                // gauges in one tap (ECU 1-7 / TCM 1-5). Picking another preset
-                // replaces the current gauges.
-                if (uiState.settings.devMode) {
-                    PresetSelector(onApplyPreset = onApplyPreset)
-                    Spacer(Modifier.height(6.dp))
-                }
-
                 SnapGaugeGrid(
                     uiState = uiState,
                     // Locked → swallow the long-press so the grid can't enter
@@ -192,6 +182,7 @@ internal fun LiveDataPage(
                     uiState = uiState,
                     locked = locked,
                     onEnterEditMode = onEnterEditMode,
+                    onResizeSessionLog = onResizeSessionLog,
                     flash = lockFlash.value
                 )
             }
@@ -253,7 +244,10 @@ internal fun LiveDataPage(
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenUnverified = onOpenUnverified,
-            onOpenLiveDataSettings = onOpenLiveDataSettings
+            onOpenLiveDataSettings = onOpenLiveDataSettings,
+            onApplyPreset = onApplyPreset,
+            devMode = uiState.settings.devMode,
+            selectedPresetIndex = uiState.settings.selectedPresetIndex
         )
     }
 }
@@ -302,7 +296,10 @@ private fun ModeButtonsRow(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenUnverified: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit
+    onOpenLiveDataSettings: () -> Unit,
+    onApplyPreset: (Int) -> Unit,
+    devMode: Boolean,
+    selectedPresetIndex: Int
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -317,6 +314,9 @@ private fun ModeButtonsRow(
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenUnverified = onOpenUnverified,
             onOpenLiveDataSettings = onOpenLiveDataSettings,
+            onApplyPreset = onApplyPreset,
+            devMode = devMode,
+            selectedPresetIndex = selectedPresetIndex,
             enabled = !locked
         )
         // Combined action bar filling the slot the lone "Lock and Tap" button
@@ -392,80 +392,18 @@ private fun SegmentDivider() {
 
 // SmallLogButton moved to CommonWidgets.LogActionRow (shared across all logs).
 
-// Dev-only preset picker. A compact dropdown listing the 12 fixed PID presets
-// (ECU 1-7 / TCM 1-5). Selecting one calls onApplyPreset(index), which replaces
-// the Live Data gauges with that preset's parameters. Lives at the top of the
-// gauge area; hidden unless Developer Mode is on.
-@Composable
-private fun PresetSelector(onApplyPreset: (Int) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    var selectedLabel by remember { mutableStateOf<String?>(null) }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(y2kCornerShape())
-                .background(SurfaceBg, y2kCornerShape())
-                .border(1.dp, Accent, y2kCornerShape())
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = selectedLabel?.let { "Preset: $it" } ?: "Load PID Preset",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = "▾",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
-            )
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .background(SurfaceBg)
-                .border(BorderStroke(1.dp, Accent))
-        ) {
-            PidPresets.PRESETS.forEachIndexed { index, preset ->
-                Text(
-                    text = "${preset.label}  (${preset.pidIds.size})",
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onApplyPreset(index)
-                            selectedLabel = preset.label
-                            expanded = false
-                        }
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-            }
-        }
-    }
-}
-
-// Session-log card height (dp): default, and the clamp the bottom-edge drag
-// handle is allowed to roam within.
-private const val DEFAULT_LOG_HEIGHT_DP = 300f
-private const val MIN_LOG_HEIGHT_DP = 120f
-private const val MAX_LOG_HEIGHT_DP = 800f
+// Session-log card height clamp (dp) for the bottom-edge drag handle. The
+// default + bounds live in AppSettings so the persisted value and the UI clamp
+// can't drift apart.
+private const val MIN_LOG_HEIGHT_DP = AppSettings.SESSION_LOG_HEIGHT_MIN
+private const val MAX_LOG_HEIGHT_DP = AppSettings.SESSION_LOG_HEIGHT_MAX
 
 @Composable
 private fun SessionLogCard(
     uiState: ProtocolUiState,
     locked: Boolean,
     onEnterEditMode: () -> Unit,
+    onResizeSessionLog: (Float) -> Unit,
     flash: Float
 ) {
     // Reformat the entire session log only when the row count or the PID
@@ -484,9 +422,12 @@ private fun SessionLogCard(
 
     // User-resizable height, but only in edit mode (same long-press gesture
     // the gauges use) so the log isn't freely draggable during normal use.
-    // Kept as a saveable Float (dp) so it survives rotation / activity recreation.
+    // Seeded from the persisted setting (re-keyed if it changes) so a resize
+    // survives an app restart, not just rotation.
     val density = LocalDensity.current.density
-    var logHeightDp by rememberSaveable { mutableStateOf(DEFAULT_LOG_HEIGHT_DP) }
+    var logHeightDp by remember(uiState.settings.sessionLogHeightDp) {
+        mutableStateOf(uiState.settings.sessionLogHeightDp)
+    }
 
     Card(
         shape = RoundedCornerShape(8.dp),
@@ -536,7 +477,11 @@ private fun SessionLogCard(
                         .fillMaxWidth()
                         .height(22.dp)
                         .pointerInput(Unit) {
-                            detectVerticalDragGestures { _, dragAmount ->
+                            detectVerticalDragGestures(
+                                // Persist once per gesture (not per delta) so we
+                                // don't hammer SharedPreferences mid-drag.
+                                onDragEnd = { onResizeSessionLog(logHeightDp) }
+                            ) { _, dragAmount ->
                                 logHeightDp = (logHeightDp + dragAmount / density)
                                     .coerceIn(MIN_LOG_HEIGHT_DP, MAX_LOG_HEIGHT_DP)
                             }

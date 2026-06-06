@@ -342,6 +342,7 @@ class Protocol : ComponentActivity() {
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
                     onApplyPreset = { i -> viewModel.applyPreset(i) },
+                    onResizeSessionLog = { dp -> viewModel.setSessionLogHeightDp(dp) },
                     onAutoSaveLogs = { autoSaveBothLogs() },
                     onPickCsvFolder = { launchPickCsvFolder() },
                     onRawLogNameChange = { name -> viewModel.setRawLogName(name) },

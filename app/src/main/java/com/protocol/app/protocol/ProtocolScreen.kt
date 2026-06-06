@@ -105,6 +105,7 @@ fun ProtocolScreen(
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
     onApplyPreset: (Int) -> Unit,
+    onResizeSessionLog: (Float) -> Unit,
     onAutoSaveLogs: () -> Unit,
     onPickCsvFolder: () -> Unit,
     onRawLogNameChange: (String) -> Unit,
@@ -278,6 +279,7 @@ fun ProtocolScreen(
                                 onOpenUnverified = { onOpenSubPage(SubPage.Unverified) },
                                 onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
                                 onApplyPreset = onApplyPreset,
+                                onResizeSessionLog = onResizeSessionLog,
                                 onAutoSaveLogs = onAutoSaveLogs
                             )
                         }

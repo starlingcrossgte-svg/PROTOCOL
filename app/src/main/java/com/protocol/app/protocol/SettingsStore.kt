@@ -25,7 +25,13 @@ data class AppSettings(
     val rawLogName: String = DEFAULT_RAW_LOG_NAME,
     /** Base name for the Live Data session-log auto-save file; enumerated on
      *  write ("session1.csv", "session2.csv", …). */
-    val sessionLogName: String = DEFAULT_SESSION_LOG_NAME
+    val sessionLogName: String = DEFAULT_SESSION_LOG_NAME,
+    /** Height (dp) of the Live Data session-log card. Persisted so a resize
+     *  survives an app restart, not just rotation. */
+    val sessionLogHeightDp: Float = DEFAULT_SESSION_LOG_HEIGHT_DP,
+    /** Index into PidPresets.PRESETS of the last preset loaded onto the Live
+     *  Data gauges, or [NO_PRESET] if none. Dev-only. */
+    val selectedPresetIndex: Int = NO_PRESET
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -39,6 +45,10 @@ data class AppSettings(
         const val SIMULATOR_PORT_MAX = 65535
         const val DEFAULT_RAW_LOG_NAME = "rawbytes"
         const val DEFAULT_SESSION_LOG_NAME = "session"
+        const val DEFAULT_SESSION_LOG_HEIGHT_DP = 300f
+        const val SESSION_LOG_HEIGHT_MIN = 120f
+        const val SESSION_LOG_HEIGHT_MAX = 800f
+        const val NO_PRESET = -1
     }
 }
 
@@ -62,7 +72,9 @@ class SettingsStore(context: Context) {
         rawLogName = prefs.getString(KEY_RAW_LOG_NAME, AppSettings.DEFAULT_RAW_LOG_NAME)
             ?: AppSettings.DEFAULT_RAW_LOG_NAME,
         sessionLogName = prefs.getString(KEY_SESSION_LOG_NAME, AppSettings.DEFAULT_SESSION_LOG_NAME)
-            ?: AppSettings.DEFAULT_SESSION_LOG_NAME
+            ?: AppSettings.DEFAULT_SESSION_LOG_NAME,
+        sessionLogHeightDp = prefs.getFloat(KEY_SESSION_LOG_HEIGHT, AppSettings.DEFAULT_SESSION_LOG_HEIGHT_DP),
+        selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET)
     )
 
     fun save(s: AppSettings) {
@@ -80,6 +92,8 @@ class SettingsStore(context: Context) {
             .putString(KEY_CSV_FOLDER, s.csvFolderUri)
             .putString(KEY_RAW_LOG_NAME, s.rawLogName)
             .putString(KEY_SESSION_LOG_NAME, s.sessionLogName)
+            .putFloat(KEY_SESSION_LOG_HEIGHT, s.sessionLogHeightDp)
+            .putInt(KEY_SELECTED_PRESET, s.selectedPresetIndex)
             .apply()
     }
 
@@ -98,5 +112,7 @@ class SettingsStore(context: Context) {
         private const val KEY_CSV_FOLDER = "csv_folder_uri"
         private const val KEY_RAW_LOG_NAME = "csv_raw_log_name"
         private const val KEY_SESSION_LOG_NAME = "csv_session_log_name"
+        private const val KEY_SESSION_LOG_HEIGHT = "session_log_height_dp"
+        private const val KEY_SELECTED_PRESET = "selected_preset_index"
     }
 }

@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,6 +69,9 @@ internal fun HamburgerMenu(
     onOpenTcmParameters: () -> Unit,
     onOpenUnverified: () -> Unit,
     onOpenLiveDataSettings: () -> Unit,
+    onApplyPreset: (Int) -> Unit = {},
+    devMode: Boolean = false,
+    selectedPresetIndex: Int = -1,
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -152,6 +157,37 @@ internal fun HamburgerMenu(
                     onOpenUnverified()
                 }
             )
+            // Dev-only: quick PID presets, one row each. Selecting one replaces
+            // the Live Data gauges with that preset's parameters; the active
+            // preset is marked (▸) and remembered across restarts.
+            if (devMode && PidPresets.PRESETS.isNotEmpty()) {
+                Text(
+                    "PID PRESETS",
+                    color = AccentDim,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+                PidPresets.PRESETS.forEachIndexed { index, preset ->
+                    val isSelected = index == selectedPresetIndex
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (isSelected) "▸ " else "    ") +
+                                    "${preset.label}  (${preset.pidIds.size})",
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
+                            )
+                        },
+                        onClick = {
+                            expanded = false
+                            onApplyPreset(index)
+                        }
+                    )
+                }
+            }
         }
     }
 }

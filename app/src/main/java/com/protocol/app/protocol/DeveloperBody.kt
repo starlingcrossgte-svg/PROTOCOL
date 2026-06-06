@@ -7,12 +7,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -40,13 +44,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -87,7 +92,6 @@ internal fun DeveloperBody(
     val trafficEvents by UsbTrafficLog.events.collectAsState()
     val btEvents by ObdLinkTrafficLog.events.collectAsState()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     // SAF "create document" save: Export writes the log to a folder the user
     // picks (Downloads/Files) via the system dialog. pendingCsv holds it until
     // the picker returns.
@@ -120,36 +124,30 @@ internal fun DeveloperBody(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Combined raw log (USB + OBDLink), newest at the bottom.
-        LogActionRow(
-            title = "RAW BYTES",
+        // Combined raw log (USB + OBDLink), newest at the bottom. Title sits
+        // above the log; Clear / Export are a tab on the log's inner top-right.
+        CategoryHeader("RAW BYTES", startPadding = 8.dp)
+        CombinedLogCard(
+            lines = merged,
             onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
-            onCopy = {
-                clipboard.setText(AnnotatedString(formatCombined(merged)))
-                android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-            },
             onExportCsv = {
                 pendingCsv = formatCombined(merged)
                 saveCsvLauncher.launch("protocol-traffic.csv")
-            },
-            titleAsHeader = true,
-            clearShape = y2kLeftCutShape(),
-            exportShape = y2kRightCutShape()
+            }
         )
-        CombinedLogCard(merged)
 
         // Manual command console — type any raw AT/ST/SSM2 command; it's sent to
         // the OBDLink and the reply shows in the RAW BYTES log above. Lets you
         // drive the adapter one command at a time (resets/wake like ATWS·ATZ·ATI,
         // or init/protocol probing) without a code change.
-        CategoryHeader("ELM327 MANUAL COMMANDS")
+        CategoryHeader("ELM327 MANUAL COMMANDS", startPadding = 8.dp)
         ManualCommandRow(onSend = onSendManualCommand)
 
         // Simulator — routes the live-data flow over a localhost TCP socket to
         // the host-side VIPER emulator (adb reverse tcp:<port> tcp:<port>).
         // Header sits right under the log; the toggle and the TCP PORT field
         // share one row so the whole section stays on a single screen.
-        CategoryHeader("SIMULATOR")
+        CategoryHeader("SIMULATOR", startPadding = 8.dp)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -207,63 +205,99 @@ internal fun DeveloperBody(
 @Composable
 private fun ManualCommandRow(onSend: (String) -> Unit) {
     var cmd by remember { mutableStateOf("") }
-    // SEND lives INSIDE the command field on the left (leadingIcon). Typed text
-    // is kept after sending so you can edit one variable and fire again — handy
-    // for trying init/protocol combinations.
-    OutlinedTextField(
-        value = cmd,
-        onValueChange = { cmd = it },
-        label = {
+    // ONE bordered bar split by a solid white divider, like the Live Data action
+    // bar but with plain rounded corners (no angular cutouts): [ SEND | type box ].
+    // The input is borderless so the bar's Accent border is the only outline.
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .clip(shape)
+            .background(SurfaceBg, shape)
+            .border(1.dp, Accent, shape),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .clickable { if (cmd.isNotBlank()) onSend(cmd.trim()) }
+                .padding(horizontal = 20.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
-                "COMMAND",
+                "SEND",
+                color = Color.White,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall
             )
-        },
-        leadingIcon = {
-            Box(
-                modifier = Modifier
-                    .padding(start = 6.dp)
-                    .background(SurfaceBg, RoundedCornerShape(6.dp))
-                    .border(1.dp, Accent, RoundedCornerShape(6.dp))
-                    .clickable { if (cmd.isNotBlank()) onSend(cmd.trim()) }
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    "SEND",
+        }
+        // Solid white divider — the Live Data action bar's segment separator.
+        Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            BasicTextField(
+                value = cmd,
+                onValueChange = { cmd = it },
+                singleLine = true,
+                textStyle = TextStyle(
                     color = Color.White,
                     fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-            }
-        },
-        singleLine = true,
-        // Raw command box: kill autocorrect / autocapitalize / suggestions so
-        // terse AT/ST commands with spaces and punctuation (e.g.
-        // "STPX d:...,r:1,x:7") reach the adapter verbatim instead of mangled.
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Ascii,
-            autoCorrect = false,
-            capitalization = KeyboardCapitalization.None
-        ),
-        modifier = Modifier.fillMaxWidth(),
-        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                ),
+                cursorBrush = SolidColor(Accent),
+                // Raw command box: kill autocorrect / autocapitalize so terse
+                // AT/ST commands with spaces/punctuation (e.g. "STPX d:...,r:1,x:7")
+                // reach the adapter verbatim instead of mangled.
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Ascii,
+                    autoCorrect = false,
+                    capitalization = KeyboardCapitalization.None
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                decorationBox = { inner ->
+                    if (cmd.isEmpty()) {
+                        Text(
+                            "COMMAND",
+                            color = NeutralGray,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                    }
+                    inner()
+                }
+            )
+        }
+    }
+}
+
+// One thin segment of the RAW BYTES log's top-right action tab. White label,
+// small padding so the tab stays slim. Mirrors the Live Data SegmentButton.
+@Composable
+private fun LogTabButton(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            color = Color.White,
             fontFamily = FontFamily.Monospace,
-            color = Color.White
-        ),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
-            focusedBorderColor = Accent,
-            unfocusedBorderColor = Accent.copy(alpha = 0.6f),
-            cursorColor = Accent,
-            focusedLabelColor = Accent,
-            unfocusedLabelColor = NeutralGray,
-            focusedContainerColor = SurfaceBg,
-            unfocusedContainerColor = SurfaceBg
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodySmall
         )
-    )
+    }
 }
 
 private data class LogLine(
@@ -275,17 +309,42 @@ private data class LogLine(
 )
 
 @Composable
-private fun CombinedLogCard(lines: List<LogLine>) {
-    // Fill (almost) the whole screen so the RAW BYTES stream is the body of the
-    // page and only the ELM327 command box sits below it at the bottom of the
-    // view. Adaptive to screen height so it lands right on the S25 and S23.
-    val logHeight = (LocalConfiguration.current.screenHeightDp - 340).coerceAtLeast(300).dp
+private fun CombinedLogCard(
+    lines: List<LogLine>,
+    onClear: () -> Unit,
+    onExportCsv: () -> Unit
+) {
+    // Sized so the RAW BYTES stream is the page body with the ELM327 MANUAL
+    // COMMANDS title (but not the command box) just visible below it without
+    // scrolling. The extra subtraction vs the old layout is the height the RAW
+    // BYTES title now occupies above the card. Adaptive to screen height.
+    val logHeight = (LocalConfiguration.current.screenHeightDp - 374).coerceAtLeast(300).dp
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
         border = BorderStroke(1.dp, BorderGray),
         modifier = Modifier.fillMaxWidth()
     ) {
+        // Clear / Export as one folder-tab attached to the log's inner top-right
+        // corner: only the bottom-left corner is rounded, the top + right edges
+        // sit flush against the log. Filled (no border) so it reads clean.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            val tabShape = RoundedCornerShape(bottomStart = 10.dp)
+            Row(
+                modifier = Modifier
+                    .height(IntrinsicSize.Min)
+                    .clip(tabShape)
+                    .background(SurfaceAlt, tabShape),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LogTabButton("Clear", onClear)
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White))
+                LogTabButton("Export", onExportCsv)
+            }
+        }
         val listState = rememberLazyListState()
         // Snap (no animation) to the newest line so the live tail is always
         // visible. An animated scroll races through the whole accumulated list

@@ -13,16 +13,18 @@ import com.protocol.app.openport2.Ssm2Pids
 data class PidPreset(val label: String, val pidIds: List<String>)
 
 /**
- * The 12 presets, derived from [Ssm2Pids.DEFAULT_DEMO_PIDS] in declaration
+ * Quick PID presets, derived from [Ssm2Pids.DEFAULT_DEMO_PIDS] in declaration
  * order. ECU and TCM parameters are kept in SEPARATE presets (never mixed) —
  * an ECU preset holds only ECU PIDs, a TCM preset only TCM PIDs.
  *
+ * The ECU presets ("Unverified N") are built from the UNVERIFIED ECU candidates
+ * — the on-car promotion batch. The verified ECU params are already confirmed,
+ * so the quick-preset tool now targets what still needs checking. The TCM
+ * presets stay on the verified TCM params (left alone).
+ *
  * Each preset targets [TARGET] PIDs. When a category's final chunk would be
  * tiny (< [MIN_TAIL]) it's folded into the previous preset so no preset is
- * orphaned with one or two gauges. With the current list that yields:
- *   - ECU (71) -> 7 presets  (six of 10, one of 11)
- *   - TCM (46) -> 5 presets  (four of 10, one of 6)
- * = 12 presets total.
+ * orphaned with one or two gauges.
  */
 object PidPresets {
     private const val TARGET = 10
@@ -31,13 +33,13 @@ object PidPresets {
     val PRESETS: List<PidPreset> = build()
 
     private fun build(): List<PidPreset> {
-        // Only trusted PIDs feed the quick presets — unverified candidates are
-        // kept out so the presets stay clean.
-        val ecu = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.ECU && it.verified }
+        // ECU presets page through the UNVERIFIED ECU candidates; TCM presets
+        // stay on the verified TCM params.
+        val ecu = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.ECU && !it.verified }
         val tcm = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.category == Ssm2PidCategory.TCM && it.verified }
         val out = ArrayList<PidPreset>()
         chunk(ecu).forEachIndexed { i, group ->
-            out.add(PidPreset("ECU ${i + 1}", group.map { it.id }))
+            out.add(PidPreset("Unverified ${i + 1}", group.map { it.id }))
         }
         chunk(tcm).forEachIndexed { i, group ->
             out.add(PidPreset("TCM ${i + 1}", group.map { it.id }))

@@ -193,6 +193,16 @@ class ProtocolViewModel : ViewModel() {
     /** Base name for the auto-saved session-log CSV (enumerated on write). */
     fun setSessionLogName(name: String) = updateSettings { it.copy(sessionLogName = name) }
 
+    /** Persist the Live Data session-log card height (dp) after a resize drag. */
+    fun setSessionLogHeightDp(dp: Float) = updateSettings {
+        it.copy(
+            sessionLogHeightDp = dp.coerceIn(
+                AppSettings.SESSION_LOG_HEIGHT_MIN,
+                AppSettings.SESSION_LOG_HEIGHT_MAX
+            )
+        )
+    }
+
 
     /**
      * Routed from the BT-permission denial path. Drops the OBDLink selection
@@ -506,6 +516,9 @@ class ProtocolViewModel : ViewModel() {
     fun applyPreset(index: Int) {
         val preset = PidPresets.PRESETS.getOrNull(index) ?: return
         updateLayout { preset.pidIds.fold(GaugeLayout()) { acc, id -> acc.withAdded(id) } }
+        // Remember which preset is active so the hamburger picker can mark it
+        // and the choice survives a restart.
+        updateSettings { it.copy(selectedPresetIndex = index) }
     }
 
     fun openSubPage(page: SubPage) {

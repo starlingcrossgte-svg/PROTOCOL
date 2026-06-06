@@ -68,7 +68,7 @@ internal fun HomePage(
             // Keep the dev console / simulator-port fields above the keyboard
             // when it opens (edge-to-edge stops the system auto-panning).
             .imePadding()
-            .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 18.dp),
+            .padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -100,7 +100,7 @@ internal fun HomePage(
                     modifier = Modifier.scale(scaleX = -1f, scaleY = 1f)
                 )
                 Text(
-                    text = "Diagnostics",
+                    text = "DTC Scan",
                     color = Color.White,
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
@@ -130,7 +130,7 @@ internal fun HomePage(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Live Data",
+                    text = "Real Time",
                     color = Color.White,
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
