@@ -60,6 +60,14 @@ data class ProtocolUiState(
     /** True if the most recent poll's TCM query succeeded. Stays true when there are no TCM PIDs on the page. */
     val tcmReplying: Boolean = true,
     val sessionLog: List<PollSample> = emptyList(),
+    /** True while a one-shot DTC read is in flight (Diagnostics page). */
+    val isReadingDtc: Boolean = false,
+    /** Human-readable status line for the Diagnostics page DTC read. */
+    val dtcStatus: String = "",
+    /** Current (temporary) trouble codes from the last read, "P0xxx  DESCRIPTION". */
+    val dtcCurrent: List<String> = emptyList(),
+    /** Stored (memorized) trouble codes from the last read. */
+    val dtcStored: List<String> = emptyList(),
     val gaugeLayout: GaugeLayout = GaugeLayout(),
     val activeSubPage: SubPage? = null,
     /** True while the user is moving/resizing/removing gauges. Transient — not persisted. */

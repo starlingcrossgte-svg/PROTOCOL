@@ -318,6 +318,9 @@ class Protocol : ComponentActivity() {
                     onRunProbe = { runActionOrDiscover(PendingAction.Probe) },
                     onHuntKlineInit = { viewModel.huntKlineInit(applicationContext) },
                     onSendManualCommand = { cmd -> viewModel.sendManualCommand(cmd, applicationContext) },
+                    onReadDtc = { viewModel.readDtcs() },
+                    onCopyDtc = { copyDtcToClipboard() },
+                    onExportDtc = { launchExportDtc() },
                     onStartReadingLive = { runActionOrDiscover(PendingAction.ReadLive) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
                     onStartLogging = { runActionOrDiscover(PendingAction.LogLive) },
@@ -617,6 +620,48 @@ class Protocol : ComponentActivity() {
         }
         pendingExportText = csv
         exportCsvLauncher.launch(ProtocolLogFormatter.suggestedCsvFileName())
+    }
+
+    // Diagnostics page: copy the decoded DTC list (current + stored) to the
+    // clipboard as plain text.
+    private fun copyDtcToClipboard() {
+        val s = viewModel.uiState.value
+        if (s.dtcCurrent.isEmpty() && s.dtcStored.isEmpty()) {
+            Toast.makeText(this, "No codes to copy — run READ CODES first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sb = StringBuilder()
+        if (s.dtcStatus.isNotEmpty()) sb.append(s.dtcStatus).append("\n\n")
+        sb.append("CURRENT (").append(s.dtcCurrent.size).append(")\n")
+        s.dtcCurrent.forEach { sb.append("  ").append(it).append('\n') }
+        sb.append("\nSTORED (").append(s.dtcStored.size).append(")\n")
+        s.dtcStored.forEach { sb.append("  ").append(it).append('\n') }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("PROTOCOL DTCs", sb.toString()))
+        Toast.makeText(this, "Codes copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
+
+    // Diagnostics page: export the decoded DTC list to a CSV via the SAF
+    // save-as picker (Type,Code,Description). Description is quoted so a stray
+    // comma can't shift columns.
+    private fun launchExportDtc() {
+        val s = viewModel.uiState.value
+        if (s.dtcCurrent.isEmpty() && s.dtcStored.isEmpty()) {
+            Toast.makeText(this, "No codes to export — run READ CODES first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sb = StringBuilder("Type,Code,Description\n")
+        fun row(type: String, line: String) {
+            val i = line.indexOf("  ")
+            val code = if (i >= 0) line.substring(0, i) else line
+            val desc = if (i >= 0) line.substring(i).trim() else ""
+            sb.append(type).append(',').append(code).append(",\"")
+                .append(desc.replace("\"", "\"\"")).append("\"\n")
+        }
+        s.dtcCurrent.forEach { row("CURRENT", it) }
+        s.dtcStored.forEach { row("STORED", it) }
+        pendingExportText = sb.toString()
+        exportCsvLauncher.launch("dtc.csv")
     }
 
     private fun launchPickCsvFolder() {

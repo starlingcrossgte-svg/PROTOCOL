@@ -81,6 +81,9 @@ fun ProtocolScreen(
     onRunProbe: () -> Unit,
     onHuntKlineInit: () -> Unit,
     onSendManualCommand: (String) -> Unit,
+    onReadDtc: () -> Unit,
+    onCopyDtc: () -> Unit,
+    onExportDtc: () -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
@@ -237,7 +240,12 @@ fun ProtocolScreen(
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (page) {
-                            0 -> DiagnosticsPage()
+                            0 -> DiagnosticsPage(
+                                uiState = uiState,
+                                onReadDtc = onReadDtc,
+                                onCopyDtc = onCopyDtc,
+                                onExportDtc = onExportDtc
+                            )
                             1 -> HomePage(
                                 uiState = uiState,
                                 onOpenSubPage = onOpenSubPage,

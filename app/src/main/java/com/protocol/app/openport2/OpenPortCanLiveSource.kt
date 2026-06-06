@@ -130,6 +130,43 @@ class OpenPortCanLiveSource(
         return buildSample(pids, raw, wireStart)
     }
 
+    /**
+     * One-shot read of [addresses] over the (already-open) CAN channel — one
+     * att6 request per address, single CAN frame each, mirroring [pollOnce]'s
+     * read but without PID decoding. Returns one unsigned byte per address in
+     * order, or null if NONE answered (so a single-address caller treats a
+     * no-reply as a miss). Caller must have run [initChannel] first.
+     *
+     * Used by the read-only DTC read; the live poll path stays on [pollOnce].
+     */
+    fun readAddressesOnce(addresses: List<Ssm2Address>): IntArray? {
+        if (addresses.isEmpty()) return null
+        val raw = IntArray(addresses.size)
+        var anyOk = false
+        for ((i, addr) in addresses.withIndex()) {
+            val ssm2Payload = ObdLinkSsm2Can.buildReadPayload(listOf(addr))
+            val tail = CAN_ID_REQUEST + ssm2Payload
+            val reqId = nextReqId.getAndIncrement()
+            val asciiLine = "att$CHANNEL ${tail.size} $TX_FLAGS $DEFAULT_TX_TIMEOUT_MICROS $reqId\r\n"
+            val packet = asciiLine.toByteArray(StandardCharsets.US_ASCII) + tail
+            try {
+                io.write(packet)
+                val rr = io.readUntil(READ_TIMEOUT_MS) { buf ->
+                    extractVehicleData(buf) != null || hasAreError(buf, reqId)
+                }
+                val data = extractVehicleData(rr.bytes)
+                if (data != null && data.size >= 2 && (data[0].toInt() and 0xFF) == 0xE8) {
+                    raw[i] = data[1].toInt() and 0xFF
+                    anyOk = true
+                }
+            } catch (e: UsbDisconnectedException) {
+                channelOpened = false
+                return if (anyOk) raw else null
+            }
+        }
+        return if (anyOk) raw else null
+    }
+
     private fun buildSample(pids: List<Ssm2Pid>, raw: IntArray, wireStart: Long): PollSample {
         val values = HashMap<String, Double>()
         val rawValues = ArrayList<Int>(raw.size)

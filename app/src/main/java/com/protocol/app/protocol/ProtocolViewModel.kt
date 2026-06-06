@@ -1110,6 +1110,102 @@ class ProtocolViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Read-only DTC read for the Diagnostics page. Reuses the same A8
+     * read-address transport the live-data path uses (no transport changes),
+     * pointed at the ECU's diagnostic status bytes, then decodes the set bits
+     * against [com.protocol.app.openport2.DtcCatalog].
+     *
+     * Stops any running live poll first and waits for it to finish — the DTC
+     * read and a poll loop share one socket and must not interleave (same rule
+     * the manual console follows). ECM only; clear/reset are intentionally NOT
+     * here (write commands live in the THRESHOLD project).
+     */
+    fun readDtcs() {
+        val state = _uiState.value
+        if (state.isReadingDtc) return
+        val adapter = state.settings.adapter
+        val protocol = state.settings.protocol
+        if (adapter == null || protocol == null) {
+            _uiState.value = state.copy(dtcStatus = "Pick ADAPTER and PROTOCOL in Settings first")
+            return
+        }
+        _uiState.value = state.copy(
+            isReadingDtc = true,
+            dtcStatus = "Reading codes…",
+            dtcCurrent = emptyList(),
+            dtcStored = emptyList()
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            // Take over the shared link: stop any running poll/log loop and wait
+            // for it to fully finish so the DTC read can't collide on the socket.
+            val active = runJob
+            runJob = null
+            active?.cancel()
+            active?.join()
+            try {
+                val result = when {
+                    adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> {
+                        val t = obdLinkManager?.transport
+                        if (t == null) { dtcFail("OBDLink not connected — pair it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcRead.readObdLinkKline(t)
+                    }
+                    adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> {
+                        val t = obdLinkManager?.transport
+                        if (t == null) { dtcFail("OBDLink not connected — pair it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcRead.readObdLinkCan(t)
+                    }
+                    adapter == Adapter.OpenPort && protocol == BusProtocol.KLine -> {
+                        val client = tactrixClient
+                        if (client == null) { dtcFail("OpenPort not connected — tap OpenPort 2.0 in Settings"); return@launch }
+                        if (!client.channelInitialized) {
+                            client.drainResponseBuffer()
+                            client.resetRequestIdCounter(startFrom = 2)
+                            if (!Ssm2EcmProbe(client).initializeChannel(mutableListOf())) {
+                                dtcFail("OpenPort K-line init failed — check the OBD connection"); return@launch
+                            }
+                        }
+                        com.protocol.app.openport2.Ssm2DtcRead.readOpenPortKline(client)
+                    }
+                    adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> {
+                        val session = openSession
+                        if (session == null) { dtcFail("OpenPort not connected — tap OpenPort 2.0 in Settings"); return@launch }
+                        val src = OpenPortCanLiveSource(TactrixBulkIo(session), emptyList())
+                        com.protocol.app.openport2.Ssm2DtcRead.readOpenPortCan(src)
+                    }
+                    else -> {
+                        dtcFail("Unsupported adapter/protocol combination for DTC read."); return@launch
+                    }
+                }
+                applyDtcResult(result)
+            } catch (e: Exception) {
+                dtcFail("DTC read failed: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    private fun dtcFail(message: String) {
+        _uiState.value = _uiState.value.copy(isReadingDtc = false, dtcStatus = message)
+    }
+
+    private fun applyDtcResult(r: com.protocol.app.openport2.Ssm2DtcRead.Result) {
+        val status = if (!r.reachedEcu) {
+            "No response from the ECU — check the connection and that the key is on."
+        } else {
+            val cur = if (r.current.isEmpty()) "No current codes" else "${r.current.size} current"
+            val sto = if (r.stored.isEmpty()) "no stored codes" else "${r.stored.size} stored"
+            val missed = (r.currentChunks - r.currentOkChunks) + (r.storedChunks - r.storedOkChunks)
+            val partial = if (missed > 0) "  (partial — $missed block(s) didn't answer)" else ""
+            "$cur · $sto$partial"
+        }
+        _uiState.value = _uiState.value.copy(
+            isReadingDtc = false,
+            dtcStatus = status,
+            dtcCurrent = r.current.map { "${it.code}  ${it.description}" },
+            dtcStored = r.stored.map { "${it.code}  ${it.description}" }
+        )
+    }
+
     fun clearLog() {
         _uiState.value = _uiState.value.copy(
             log = emptyList(),
