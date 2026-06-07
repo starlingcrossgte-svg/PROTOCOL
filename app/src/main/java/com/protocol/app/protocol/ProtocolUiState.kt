@@ -76,9 +76,7 @@ data class ProtocolUiState(
     /** URI of the user-chosen background image. Null = default Y2K dark surface. */
     val backgroundUri: String? = null,
     /** Tunable preferences from the Settings sub-page. */
-    val settings: AppSettings = AppSettings(),
-    /** User's saved vehicles + currently selected one. Drives future vehicle-specific PID profiles, diagnostic codes, flash recipes. */
-    val garage: GarageState = GarageState()
+    val settings: AppSettings = AppSettings()
 ) {
     /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
     val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds

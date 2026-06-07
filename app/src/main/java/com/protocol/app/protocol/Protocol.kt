@@ -289,7 +289,6 @@ class Protocol : ComponentActivity() {
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
         viewModel.attachSettingsStore(SettingsStore(applicationContext))
-        viewModel.attachGarageStore(GarageStore(applicationContext))
         sessionLogStore = SessionLogStore(applicationContext)
         viewModel.attachSessionLogStore(sessionLogStore)
 
@@ -361,9 +360,6 @@ class Protocol : ComponentActivity() {
                     onSessionLogNameChange = { name -> viewModel.setSessionLogName(name) },
                     onResetLayout = { viewModel.resetLayout() },
                     onResetAdapter = { viewModel.resetObdLinkAdapter(applicationContext) },
-                    onSaveVehicle = { y, mk, md, sm -> viewModel.addVehicle(y, mk, md, sm) },
-                    onSelectVehicle = { id -> viewModel.selectVehicle(id) },
-                    onDeleteVehicle = { id -> viewModel.deleteVehicle(id) },
                     onShareSavedSession = { launchShareSavedSession() },
                     flashState = flashState,
                     onFlashTestConnection = { flashViewModel.testConnection() },

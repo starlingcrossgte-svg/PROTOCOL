@@ -39,7 +39,7 @@ import com.protocol.app.R
 
 // Page 0 — Home / main menu. Layout (top to bottom):
 //   - One-line app subtitle + version
-//   - Menu buttons: Garage, Settings, Flash, Diagnostics, Tuning,
+//   - Menu buttons: Settings, Flash, Diagnostics, Tuning,
 //     and Developer (only when devMode is on)
 //   - Swipe hint at the bottom
 //
