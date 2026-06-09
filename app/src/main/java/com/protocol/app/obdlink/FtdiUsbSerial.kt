@@ -160,9 +160,19 @@ class FtdiUsbSerial private constructor(
     companion object {
         const val FTDI_VENDOR_ID = 0x0403          // 1027
         const val OBDLINK_EX_PRODUCT_ID = 0x6015   // 24597 (FT231X)
+        // VAG-KKL raw K-line cable: a plain FT232RL behind FTDI's generic
+        // FT232R product id. Same FTDI VCP layer as the EX — only the product
+        // id and the open baud differ (the KKL UART IS the K-line, so it runs at
+        // the SSM2 K-line rate directly; the EX UART runs at 115200 to the STN,
+        // which does 4800 on its own K-line side).
+        const val FT232RL_PRODUCT_ID = 0x6001      // 24577 (FT232R)
         // OBDLink USB default UART baud. If the EX never answers, this is the
         // first thing to try changing (the FRPM lists alternates).
         const val DEFAULT_BAUD = 115200
+        // SSM2 K-line bit rate. For the dumb KKL cable the FTDI UART speaks this
+        // directly (no smart adapter translating). SSM2 needs no 5-baud / fast
+        // init — open 4800 8N1 and send the frame.
+        const val KLINE_BAUD = 4800
 
         private const val REQTYPE_OUT = 0x40       // USB_TYPE_VENDOR | USB_DIR_OUT
         private const val REQ_RESET = 0

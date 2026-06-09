@@ -186,10 +186,79 @@ class Protocol : ComponentActivity() {
             Adapter.OpenPort -> discoverAndConnect()
             Adapter.OBDLink -> ensureBtPermissionThenConnect()
             Adapter.OBDLinkEx -> connectObdLinkEx()
+            Adapter.Ft232rl -> connectFt232rl()
             null -> {
                 viewModel.disconnectObdLink()
                 viewModel.disconnectObdLinkEx()
+                viewModel.disconnectFt232rl()
             }
+        }
+    }
+
+    /**
+     * Tap on the FT232RL (VAG-KKL raw K-line) adapter, or Connect with it
+     * selected. Mirrors the OBDLink EX USB flow — discover the FTDI device,
+     * request USB permission if needed — but on grant hands the raw connection
+     * to the VM's KKL connect, which opens the FTDI serial at 4800 and probes
+     * the ECU over the bare K-line.
+     */
+    private fun connectFt232rl() {
+        val device = findFt232rlDevice()
+        if (device == null) {
+            viewModel.setAdapterPresent(false)
+            viewModel.setConnectionStatus(
+                ConnectionStatus.NoDevice,
+                "FT232RL (KKL, FTDI VID=${FtdiUsbSerial.FTDI_VENDOR_ID} " +
+                    "PID=${FtdiUsbSerial.FT232RL_PRODUCT_ID}) not detected — plug the cable in"
+            )
+            return
+        }
+        viewModel.setAdapterPresent(true)
+        if (!usbManager.hasPermission(device)) {
+            viewModel.setConnectionStatus(
+                ConnectionStatus.PermissionRequired(deviceLabel(device)),
+                "Requesting USB permission for FT232RL..."
+            )
+            usbPermissionHelper.requestUsbPermission(device, ACTION_USB_PERMISSION)
+            return
+        }
+        openFt232rlForDevice(device)
+    }
+
+    private fun openFt232rlForDevice(device: UsbDevice) {
+        val connection = usbManager.openDevice(device)
+        if (connection == null) {
+            viewModel.setConnectionStatus(
+                ConnectionStatus.Error("openDevice returned null"),
+                "FT232RL: USB openDevice failed"
+            )
+            return
+        }
+        viewModel.connectFt232rl(connection, device)
+    }
+
+    /** Dev-page Connect button: connect whatever adapter is currently selected.
+     *  The dev dropdown only selects; this performs the actual handshake. */
+    private fun connectSelectedAdapter() {
+        val s = viewModel.uiState.value.settings
+        // Emulator armed → CONNECT primes it; the VIPER TCP session opens on
+        // Read Live (the simulator path doesn't touch real hardware).
+        if (s.simulatorMode) {
+            viewModel.setConnectionStatus(
+                ConnectionStatus.Connected("Emulator"),
+                "Emulator armed on port ${s.simulatorPort} — Read Live to start the VIPER session"
+            )
+            return
+        }
+        when (s.adapter) {
+            Adapter.OpenPort -> discoverAndConnect()
+            Adapter.OBDLink -> ensureBtPermissionThenConnect()
+            Adapter.OBDLinkEx -> connectObdLinkEx()
+            Adapter.Ft232rl -> connectFt232rl()
+            null -> viewModel.setConnectionStatus(
+                ConnectionStatus.NoDevice,
+                "Pick an adapter in the dropdown first"
+            )
         }
     }
 
@@ -349,9 +418,14 @@ class Protocol : ComponentActivity() {
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
-                    onAutoInitChange = { on -> viewModel.setAutoInitEnabled(on) },
                     onSelectInitSequence = { id -> viewModel.setSelectedInitSequence(id) },
                     onKlineContinuousTest = { viewModel.runKlineContinuousTest(applicationContext) },
+                    onStartCanMonitor = { viewModel.startCanMonitor(applicationContext) },
+                    onStopCanMonitor = { viewModel.stopCanMonitor() },
+                    onSelectAdapter = { a -> viewModel.setAdapter(a) },
+                    onSelectProtocol = { p -> viewModel.setProtocol(p) },
+                    onConnectAdapter = { connectSelectedAdapter() },
+                    onRunSequence = { cmds, delays, cb -> viewModel.runManualSequence(cmds, delays, cb) },
                     onApplyPreset = { i -> viewModel.applyPreset(i) },
                     onResizeSessionLog = { dp -> viewModel.setSessionLogHeightDp(dp) },
                     onAutoSaveLogs = { autoSaveBothLogs() },
@@ -411,6 +485,7 @@ class Protocol : ComponentActivity() {
                 Adapter.OpenPort -> discoverAndConnect()
                 Adapter.OBDLink -> ensureBtPermissionThenConnect()
                 Adapter.OBDLinkEx -> connectObdLinkEx()
+                Adapter.Ft232rl -> connectFt232rl()
                 null -> viewModel.setConnectionStatus(
                     ConnectionStatus.NoDevice,
                     "Pick ADAPTER and PROTOCOL in Settings before reading live data"
@@ -468,6 +543,15 @@ class Protocol : ComponentActivity() {
                 it.productId == FtdiUsbSerial.OBDLINK_EX_PRODUCT_ID
         }
 
+    // The VAG-KKL cable is a plain FT232RL behind FTDI's generic FT232R product
+    // id — distinct from the EX's FT231X (0x6015) and the Tactrix (0xCC4D), so
+    // it dispatches cleanly on VID+PID like the others.
+    private fun findFt232rlDevice(): UsbDevice? =
+        usbManager.deviceList.values.firstOrNull {
+            it.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
+                it.productId == FtdiUsbSerial.FT232RL_PRODUCT_ID
+        }
+
     /**
      * Tap on the OBDLink EX adapter (or Read Live with EX selected). Mirrors the
      * OpenPort USB flow — discover the FTDI device, request USB permission if
@@ -521,24 +605,31 @@ class Protocol : ComponentActivity() {
             return
         }
 
-        // Tactrix and the OBDLink EX share the FTDI vendor id, so dispatch on the
-        // full VID+PID. Both come back through this one ACTION_USB_PERMISSION.
+        // Tactrix, the OBDLink EX, and the KKL cable all share the FTDI vendor
+        // id, so dispatch on the full VID+PID. All come back through this one
+        // ACTION_USB_PERMISSION.
         val isEx = device.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
             device.productId == FtdiUsbSerial.OBDLINK_EX_PRODUCT_ID
+        val isFt232rl = device.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
+            device.productId == FtdiUsbSerial.FT232RL_PRODUCT_ID
         val isTactrix = device.vendorId == TACTRIX_VENDOR_ID &&
             device.productId == TACTRIX_PRODUCT_ID
 
         if (!granted) {
             viewModel.setConnectionStatus(
                 ConnectionStatus.Error("USB permission denied"),
-                if (isEx) "User denied USB permission for OBDLink EX"
-                else "User denied USB permission for Tactrix device"
+                when {
+                    isEx -> "User denied USB permission for OBDLink EX"
+                    isFt232rl -> "User denied USB permission for FT232RL"
+                    else -> "User denied USB permission for Tactrix device"
+                }
             )
             return
         }
 
         when {
             isEx -> openObdLinkExForDevice(device)
+            isFt232rl -> openFt232rlForDevice(device)
             isTactrix -> openSessionForDevice(device)
             else -> viewModel.setConnectionStatus(
                 ConnectionStatus.Error("Permission callback returned an unexpected device"),
@@ -557,6 +648,17 @@ class Protocol : ComponentActivity() {
             viewModel.setConnectionStatus(
                 ConnectionStatus.NoDevice,
                 "OBDLink EX detached"
+            )
+            return
+        }
+        if (device.vendorId == FtdiUsbSerial.FTDI_VENDOR_ID &&
+            device.productId == FtdiUsbSerial.FT232RL_PRODUCT_ID
+        ) {
+            viewModel.disconnectFt232rl()
+            viewModel.setAdapterPresent(false)
+            viewModel.setConnectionStatus(
+                ConnectionStatus.NoDevice,
+                "FT232RL detached"
             )
             return
         }

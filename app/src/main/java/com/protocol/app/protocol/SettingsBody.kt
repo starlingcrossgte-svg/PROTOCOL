@@ -58,7 +58,6 @@ internal fun SettingsBody(
     onSsmVariantChange: (SsmVariant?) -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
-    onDevModeChange: (Boolean) -> Unit,
     onPickCsvFolder: () -> Unit,
     onRawLogNameChange: (String) -> Unit,
     onSessionLogNameChange: (String) -> Unit
@@ -157,32 +156,8 @@ internal fun SettingsBody(
             onValueChange = { sessionNameField = it; onSessionLogNameChange(it) }
         )
 
-        // ── Developer ──────────────────────────────────────────────
-        CategoryHeader("DEVELOPER")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "Developer Mode",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f)
-            )
-            Switch(
-                checked = s.devMode,
-                onCheckedChange = onDevModeChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = AccentDim,
-                    uncheckedThumbColor = InkMuted,
-                    uncheckedTrackColor = SurfaceAlt,
-                    uncheckedBorderColor = BorderGray
-                )
-            )
-        }
+        // Developer Mode moved to its own page (Home → DEV MODE); the master
+        // ON/OFF lives at the top of that page now.
     }
 }
 

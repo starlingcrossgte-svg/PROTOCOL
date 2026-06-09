@@ -2,7 +2,10 @@ package com.protocol.app.protocol
 
 import android.content.Context
 
-enum class Adapter { OpenPort, OBDLink, OBDLinkEx }
+// Ft232rl = VAG-KKL raw-K-line cable (FT232RL chip). Appended last so existing
+// persisted ordinals (OpenPort=0, OBDLink=1, OBDLinkEx=2) are unchanged. Its
+// transport is not wired yet — connect is stubbed.
+enum class Adapter { OpenPort, OBDLink, OBDLinkEx, Ft232rl }
 enum class BusProtocol { KLine, CAN }
 enum class SsmVariant { SSM2, SSM3 }
 

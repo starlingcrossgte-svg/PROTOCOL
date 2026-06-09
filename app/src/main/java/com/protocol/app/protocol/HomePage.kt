@@ -51,18 +51,7 @@ import com.protocol.app.R
 @Composable
 internal fun HomePage(
     uiState: ProtocolUiState,
-    onOpenSubPage: (SubPage) -> Unit,
-    onRunProbe: () -> Unit,
-    onClearProbeLog: () -> Unit,
-    onCopyProbeLog: () -> Unit,
-    onExportProbeLog: () -> Unit,
-    onHuntKlineInit: () -> Unit,
-    onSendManualCommand: (String) -> Unit,
-    onSimulatorModeChange: (Boolean) -> Unit,
-    onSimulatorPortChange: (Int) -> Unit,
-    onAutoInitChange: (Boolean) -> Unit,
-    onSelectInitSequence: (String) -> Unit,
-    onKlineContinuousTest: () -> Unit
+    onOpenSubPage: (SubPage) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -157,28 +146,11 @@ internal fun HomePage(
             HomeMenuButton(label = "Settings", shape = y2kTopCutShape()) { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
+            HomeMenuButton(label = "Dev Mode") { onOpenSubPage(SubPage.Developer) }
             HomeMenuButton(label = "Notices", shape = y2kBottomCutShape()) { onOpenSubPage(SubPage.Notices) }
         }
-
-        // Developer Mode content — inlined here (was a sub-page).
-        // Gated by Settings → Developer Mode so it stays out of the
-        // way for non-debug use.
-        if (uiState.settings.devMode) {
-            DeveloperBody(
-                uiState = uiState,
-                onRunProbe = onRunProbe,
-                onClearProbeLog = onClearProbeLog,
-                onCopyProbeLog = onCopyProbeLog,
-                onExportProbeLog = onExportProbeLog,
-                onHuntKlineInit = onHuntKlineInit,
-                onSendManualCommand = onSendManualCommand,
-                onSimulatorModeChange = onSimulatorModeChange,
-                onSimulatorPortChange = onSimulatorPortChange,
-                onAutoInitChange = onAutoInitChange,
-                onSelectInitSequence = onSelectInitSequence,
-                onKlineContinuousTest = onKlineContinuousTest,
-            )
-        }
+        // Developer Mode is now its own page (Dev Mode button above) — no longer
+        // inlined here.
     }
 }
 

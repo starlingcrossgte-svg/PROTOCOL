@@ -23,6 +23,9 @@ data class InitStep(
  * needs to change. The runner (in the OBDLink managers) walks [steps], sends
  * each command, and honors any per-step baud switch.
  */
+/** Difficulty/safety tier used to GROUP init sequences in the dev console. */
+enum class CommandTier { BASIC, ADVANCED, AGGRESSIVE }
+
 data class CommandSequence(
     val id: String,
     val name: String,
@@ -30,23 +33,53 @@ data class CommandSequence(
     /** True = raw K-line init, false = ISO-TP CAN init. Picks which list the
      *  selector shows for the active protocol. */
     val kline: Boolean,
-    val steps: List<InitStep>
+    val steps: List<InitStep>,
+    /** Grouping tier in the init dropdown (BASIC default). */
+    val tier: CommandTier = CommandTier.BASIC
 ) {
     companion object {
-        /** Build a sequence from plain command strings (no baud hooks). */
+        /** Build a sequence from plain command strings (no baud hooks). [tier]
+         *  is a named arg after the vararg (defaults BASIC). */
         fun of(
             id: String, name: String, description: String, kline: Boolean,
-            vararg commands: String
-        ) = CommandSequence(id, name, description, kline, commands.map { InitStep(it) })
+            vararg commands: String,
+            tier: CommandTier = CommandTier.BASIC
+        ) = CommandSequence(id, name, description, kline, commands.map { InitStep(it) }, tier)
     }
 }
+
+/** Which adapter family a command targets. The dev console drives only one
+ *  family at a time (whatever adapter is selected), so the palette filters by
+ *  this and the manual-command router formats by it. */
+enum class CommandFamily { ELM, OpenPort }
+
+/**
+ * How a command's text has to reach the wire — the crux of "what is hex vs
+ * text". The router ([normalizeElm] / OpenPortConsole) keys off this:
+ *
+ *  - TEXT      = an adapter CONTROL command (`AT*` / `ST*` for ELM/STN, `at*`
+ *                for OpenPort). Sent as ASCII verbatim; internal spaces are
+ *                SIGNIFICANT (e.g. `STPX d:..., r:1`), so they're preserved.
+ *  - HEX_FRAME = a raw bus/SSM2 frame given as hex bytes. Whitespace is
+ *                INSIGNIFICANT: for ELM the spaces are stripped to a continuous
+ *                ASCII-hex string the STN parses into bytes; for OpenPort the
+ *                hex is parsed to RAW BINARY and wrapped in an `att` header.
+ */
+enum class CommandKind { TEXT, HEX_FRAME }
 
 /**
  * A single tappable command for the Dev-panel quick-pick palette. Tapping one
  * drops [command] straight into the manual command box so the user can fire
  * commands one-by-one without typing. [label] is a dim hint shown beside it.
+ * [family] decides which adapter shows it; [kind] decides how it's normalized
+ * and routed onto the wire.
  */
-data class QuickCommand(val command: String, val label: String)
+data class QuickCommand(
+    val command: String,
+    val label: String,
+    val family: CommandFamily = CommandFamily.ELM,
+    val kind: CommandKind = CommandKind.TEXT
+)
 
 object AdapterCommandLibrary {
 
@@ -106,24 +139,52 @@ object AdapterCommandLibrary {
             "full-page continuous burst x25"
         ),
         // ── EZ30R K-line frames (full SSM2 80-header + checksum) ──
-        QuickCommand("8010F008A80000000E00000F4D", "EZ30R RPM single (A8 00)"),
-        QuickCommand("8010F008A80100000E00000F4E", "EZ30R RPM continuous (A8 01)"),
+        // These are HEX_FRAME: raw bytes. On ELM they go out as continuous
+        // ASCII-hex (spaces stripped); the router would wrap them for OpenPort.
+        QuickCommand("8010F008A80000000E00000F4D", "EZ30R RPM single (A8 00)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("8010F008A80100000E00000F4E", "EZ30R RPM continuous (A8 01)", kind = CommandKind.HEX_FRAME),
         QuickCommand(
             "8010F02CA80000000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D12",
-            "EZ30R full-page single (A8 00)"
+            "EZ30R full-page single (A8 00)", kind = CommandKind.HEX_FRAME
         ),
         QuickCommand(
             "8010F02CA80100000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D13",
-            "EZ30R full-page continuous (A8 01)"
+            "EZ30R full-page continuous (A8 01)", kind = CommandKind.HEX_FRAME
         ),
-        QuickCommand("A80000000E", "read RPM hi (0x0E)"),
-        QuickCommand("A80000000F", "read RPM lo (0x0F)"),
-        QuickCommand("A800000008", "read coolant (0x08)"),
-        QuickCommand("A80000001C", "read battery (0x1C)"),
-        QuickCommand("A800000012", "read IAT (0x12)"),
-        QuickCommand("A800000113", "read oil temp (0x113)"),
-        QuickCommand("A00000083F", "block read 0x08..0x47 (64B)"),
-        QuickCommand("1003", "UDS extended session")
+        QuickCommand("A80000000E", "read RPM hi (0x0E)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("A80000000F", "read RPM lo (0x0F)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("A800000008", "read coolant (0x08)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("A80000001C", "read battery (0x1C)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("A800000012", "read IAT (0x12)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("A800000113", "read oil temp (0x113)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("A00000083F", "block read 0x08..0x47 (64B)", kind = CommandKind.HEX_FRAME),
+        QuickCommand("1003", "UDS extended session", kind = CommandKind.HEX_FRAME)
+    )
+
+    // ── OpenPort 2.0 (Tactrix) quick commands ────────────────────────────
+    // The Tactrix line protocol: lowercase `at*` verbs, auto-incrementing
+    // reqId appended by the console. `ati` takes no reqId. The K-line / CAN
+    // channel-open steps mirror the proven init the live path runs. Hex frames
+    // here are bare SSM2 bytes — the console parses them to binary and wraps
+    // them in the `att<ch>` header for whichever protocol is selected.
+    val OPENPORT_QUICK_COMMANDS: List<QuickCommand> = listOf(
+        QuickCommand("ati", "adapter info (no reqid)", CommandFamily.OpenPort),
+        QuickCommand("ata", "reset/abort channels", CommandFamily.OpenPort),
+        // K-line channel-open (SSM2 @ 4800 on Tactrix channel 3)
+        QuickCommand("ato3 512 4800 0", "K-line: open ch3 @ 4800", CommandFamily.OpenPort),
+        QuickCommand("ats3 1 0", "K-line: channel setting", CommandFamily.OpenPort),
+        // CAN channel-open (ISO15765 @ 500k on Tactrix channel 6)
+        QuickCommand("ato6 0 500000 0", "CAN: open ch6 @ 500k", CommandFamily.OpenPort),
+        QuickCommand("ats6 3 0", "CAN: channel setting", CommandFamily.OpenPort),
+        QuickCommand("ats6 34 65535", "CAN: IOCTL", CommandFamily.OpenPort),
+        QuickCommand("ats6 35 65535", "CAN: IOCTL", CommandFamily.OpenPort),
+        QuickCommand("atv", "adapter voltage", CommandFamily.OpenPort),
+        // SSM2 read frames — bare bytes; the console builds the att wrapper.
+        // K-line: type the FULL 80-header frame. CAN: type the SSM2 payload
+        // (A8 00 <addr>); the console prepends the 7E0 request ID.
+        QuickCommand("8010F008A80000000E00000F4D", "K-line RPM single (full frame)", CommandFamily.OpenPort, CommandKind.HEX_FRAME),
+        QuickCommand("A800000008", "CAN read coolant (payload)", CommandFamily.OpenPort, CommandKind.HEX_FRAME),
+        QuickCommand("A80000000E", "CAN read RPM hi (payload)", CommandFamily.OpenPort, CommandKind.HEX_FRAME)
     )
 
     // ── CAN (ISO-TP, ECM @ 7E0/7E8) ──────────────────────────────────────
@@ -150,7 +211,8 @@ object AdapterCommandLibrary {
         kline = false,
         "ATZ", "ATE0", "ATL0", "ATS0",
         "ATSP6", "ATSH7E0", "ATCRA7E8",
-        "ATAT0", "ATST10"
+        "ATAT0", "ATST10",
+        tier = CommandTier.ADVANCED
     )
 
     /** 2 Mbaud UART: STPBR bumps the STN<->FTDI link to 2,000,000 for max
@@ -167,7 +229,8 @@ object AdapterCommandLibrary {
             InitStep("ATE0"), InitStep("ATL0"), InitStep("ATS0"),
             InitStep("ATSP6"), InitStep("ATSH7E0"), InitStep("ATCRA7E8"),
             InitStep("ATAT0"), InitStep("ATST10")
-        )
+        ),
+        tier = CommandTier.ADVANCED
     )
 
     // ── K-line (raw STN SSM2 @ 4800) ─────────────────────────────────────
@@ -190,7 +253,8 @@ object AdapterCommandLibrary {
         "K-line · Aggressive timing",
         "STP21/4800 + STIP4 0, STIAT 0, STIP1X 5 (5 ms RX interbyte), STIP3 0A (tight P3 gap), ATAT 2. Faster reply-done + inter-message; loosen STIP1X/STIP3 if replies drop.",
         kline = true,
-        "ATE0", "ATL0", "ATS0", "STP 21", "STIMCS 1", "STPBR 4800", "ATAL", "STIP4 0", "STIAT 0", "STIP1X 5", "STIP3 0A", "ATAT 2"
+        "ATE0", "ATL0", "ATS0", "STP 21", "STIMCS 1", "STPBR 4800", "ATAL", "STIP4 0", "STIAT 0", "STIP1X 5", "STIP3 0A", "ATAT 2",
+        tier = CommandTier.AGGRESSIVE
     )
 
     /** Continuous streaming K-line. The on-car-proven combo that lets the STN
@@ -203,7 +267,8 @@ object AdapterCommandLibrary {
         "K-line · Continuous (streaming ~40 Hz)",
         "A8 01 streaming: STIP1X 2 / STIAT 0 / ATAT 2. The poller STREAMS off one request instead of re-asking. ECM-only; ~40 Hz on-car.",
         kline = true,
-        "ATE0", "ATL0", "ATS0", "STP 21", "STIMCS 1", "STPBR 4800", "ATAL", "STIP4 0", "STIAT 0", "STIP1X 2", "ATAT 2"
+        "ATE0", "ATL0", "ATS0", "STP 21", "STIMCS 1", "STPBR 4800", "ATAL", "STIP4 0", "STIAT 0", "STIP1X 2", "ATAT 2",
+        tier = CommandTier.AGGRESSIVE
     )
 
     /** Every sequence, in selector order. Add new tuned inits here. */
@@ -219,4 +284,57 @@ object AdapterCommandLibrary {
     /** Default when the user hasn't picked one. */
     fun defaultFor(kline: Boolean): CommandSequence =
         if (kline) KLINE_STANDARD else CAN_STANDARD
+
+    // ── Manual-command routing helpers (the hex-vs-text / spacing engine) ──
+
+    /** Quick-command palette entries for one adapter family. */
+    fun quickCommandsFor(family: CommandFamily): List<QuickCommand> = when (family) {
+        CommandFamily.ELM -> QUICK_COMMANDS
+        CommandFamily.OpenPort -> OPENPORT_QUICK_COMMANDS
+    }
+
+    /**
+     * Best-effort classify a free-typed command. It's a HEX_FRAME only if, after
+     * removing whitespace, the WHOLE string is hex digits and an even number of
+     * them (a whole number of bytes). Anything with a letter that isn't a hex
+     * digit — `ATSH7E0`, `STPX d:...`, `ati`, `ato6 ...` — is TEXT. Palette
+     * entries carry an explicit [QuickCommand.kind] so they never rely on this.
+     */
+    fun classifyKind(input: String): CommandKind {
+        val compact = input.filter { !it.isWhitespace() }
+        val isHex = compact.length >= 2 && compact.length % 2 == 0 &&
+            compact.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+        return if (isHex) CommandKind.HEX_FRAME else CommandKind.TEXT
+    }
+
+    /**
+     * Format a manual command for an ELM/STN (OBDLink) adapter — the OBDLink
+     * half of the spacing rule. A control command (TEXT) is sent verbatim
+     * (trimmed) so significant spaces survive (`STPX d:..., r:1`); a HEX_FRAME
+     * has ALL whitespace stripped to a continuous upper-case hex string the STN
+     * parses into bytes. So "80 10 F0 08" and "8010F008" both reach the wire as
+     * "8010F008", while "STPX d:..." is left intact.
+     */
+    fun normalizeElm(input: String, kind: CommandKind = classifyKind(input)): String = when (kind) {
+        CommandKind.TEXT -> input.trim()
+        CommandKind.HEX_FRAME -> input.filter { !it.isWhitespace() }.uppercase()
+    }
+
+    /**
+     * Parse a hex string (whitespace ignored) into bytes, or null if it has an
+     * odd number of hex digits or any non-hex character. Used by OpenPortConsole
+     * to turn a typed HEX_FRAME into the raw binary tail of an `att` frame.
+     */
+    fun hexToBytes(input: String): ByteArray? {
+        val h = input.filter { !it.isWhitespace() }
+        if (h.isEmpty() || h.length % 2 != 0) return null
+        val out = ByteArray(h.length / 2)
+        for (i in out.indices) {
+            val hi = Character.digit(h[i * 2], 16)
+            val lo = Character.digit(h[i * 2 + 1], 16)
+            if (hi < 0 || lo < 0) return null
+            out[i] = ((hi shl 4) or lo).toByte()
+        }
+        return out
+    }
 }

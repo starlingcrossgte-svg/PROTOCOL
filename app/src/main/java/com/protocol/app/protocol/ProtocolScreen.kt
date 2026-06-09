@@ -104,9 +104,14 @@ fun ProtocolScreen(
     onDevModeChange: (Boolean) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
-    onAutoInitChange: (Boolean) -> Unit,
-    onSelectInitSequence: (String) -> Unit,
+    onSelectInitSequence: (String?) -> Unit,
     onKlineContinuousTest: () -> Unit,
+    onStartCanMonitor: () -> Unit,
+    onStopCanMonitor: () -> Unit,
+    onSelectAdapter: (Adapter?) -> Unit,
+    onSelectProtocol: (BusProtocol?) -> Unit,
+    onConnectAdapter: () -> Unit,
+    onRunSequence: (List<String>, List<Long>, (Int, String) -> Unit) -> Unit,
     onApplyPreset: (Int) -> Unit,
     onResizeSessionLog: (Float) -> Unit,
     onAutoSaveLogs: () -> Unit,
@@ -249,18 +254,7 @@ fun ProtocolScreen(
                             )
                             1 -> HomePage(
                                 uiState = uiState,
-                                onOpenSubPage = onOpenSubPage,
-                                onRunProbe = onRunProbe,
-                                onClearProbeLog = onClearLog,
-                                onCopyProbeLog = onCopyLog,
-                                onExportProbeLog = onExportLog,
-                                onHuntKlineInit = onHuntKlineInit,
-                                onSendManualCommand = onSendManualCommand,
-                                onSimulatorModeChange = onSimulatorModeChange,
-                                onSimulatorPortChange = onSimulatorPortChange,
-                                onAutoInitChange = onAutoInitChange,
-                                onSelectInitSequence = onSelectInitSequence,
-                                onKlineContinuousTest = onKlineContinuousTest,
+                                onOpenSubPage = onOpenSubPage
                             )
                             else -> LiveDataPage(
                                 uiState = uiState,
@@ -318,7 +312,6 @@ fun ProtocolScreen(
                         onSsmVariantChange = onSsmVariantChange,
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
-                        onDevModeChange = onDevModeChange,
                         onPickCsvFolder = onPickCsvFolder,
                         onRawLogNameChange = onRawLogNameChange,
                         onSessionLogNameChange = onSessionLogNameChange
@@ -338,6 +331,26 @@ fun ProtocolScreen(
                     SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)
                     SubPage.Notices -> NoticesBody()
+                    SubPage.Developer -> DeveloperBody(
+                        uiState = uiState,
+                        onRunProbe = onRunProbe,
+                        onClearProbeLog = onClearLog,
+                        onCopyProbeLog = onCopyLog,
+                        onExportProbeLog = onExportLog,
+                        onHuntKlineInit = onHuntKlineInit,
+                        onSendManualCommand = onSendManualCommand,
+                        onSimulatorModeChange = onSimulatorModeChange,
+                        onSimulatorPortChange = onSimulatorPortChange,
+                        onDevModeChange = onDevModeChange,
+                        onSelectInitSequence = onSelectInitSequence,
+                        onKlineContinuousTest = onKlineContinuousTest,
+                        onStartCanMonitor = onStartCanMonitor,
+                        onStopCanMonitor = onStopCanMonitor,
+                        onSelectAdapter = onSelectAdapter,
+                        onSelectProtocol = onSelectProtocol,
+                        onConnectAdapter = onConnectAdapter,
+                        onRunSequence = onRunSequence,
+                    )
                 }
             }
         }

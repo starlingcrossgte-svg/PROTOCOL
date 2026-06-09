@@ -18,6 +18,9 @@ sealed class SubPage {
     object Flash : SubPage()
     object Tuning : SubPage()
     object Notices : SubPage()
+    /** Developer / Raw Command Interface — its own page, reached by the Home
+     *  DEV MODE button. Master ON/OFF lives at the top of this page. */
+    object Developer : SubPage()
 }
 
 /**

@@ -13,4 +13,13 @@
       a hand-rolled FTDI USB-serial transport (FtdiUsbSerial).
     -->
     <usb-device vendor-id="1027" product-id="24597" />
+    <!--
+      VAG-KKL raw K-line cable. A dumb FTDI FT232RL (VID=0x0403 (FTDI, 1027),
+      PID=0x6001 (24577)) wired straight to a K-line line driver — no on-board
+      protocol intelligence. The phone is the SSM2 protocol master over it
+      (KklKlineManager / KklKlineSource). NOTE: 0x6001 is FTDI's generic FT232R
+      product id, so any plain FT232R USB-serial device matches this filter; we
+      only ever drive SSM2 reads over it.
+    -->
+    <usb-device vendor-id="1027" product-id="24577" />
 </resources>

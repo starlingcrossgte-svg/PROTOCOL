@@ -9,6 +9,8 @@ import com.protocol.app.obdlink.ObdLinkKlineSource
 import com.protocol.app.obdlink.ObdLinkLiveSource
 import com.protocol.app.obdlink.ObdLinkTcpManager
 import com.protocol.app.obdlink.ObdLinkUsbManager
+import com.protocol.app.kkl.KklKlineManager
+import com.protocol.app.kkl.KklKlineSource
 import com.protocol.app.openport2.OpenPort2UsbSession
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import com.protocol.app.openport2.OpenPortCanLiveSource
@@ -88,6 +90,12 @@ class ProtocolViewModel : ViewModel() {
     // during the (slow, timeout-bound) connect would otherwise stack concurrent
     // opens on the same FTDI device — the storm seen in the first bench log.
     @Volatile private var obdLinkExConnecting = false
+    // Raw K-line over a dumb VAG-KKL cable (FT232RL). No STN / OpenPort firmware
+    // in between — the phone is the SSM2 master. Built from a UsbDeviceConnection
+    // the Activity opens after USB permission. K-line only (a dumb K-line cable
+    // has no CAN path).
+    private var kklManager: KklKlineManager? = null
+    @Volatile private var kklConnecting = false
     // TCP transport for simulator mode (OpenPort paths). Held across the
     // coroutine so stop / disconnect can close the socket and drop the
     // reference.
@@ -166,18 +174,14 @@ class ProtocolViewModel : ViewModel() {
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
-    /** When on, OBDLink connects using [setSelectedInitSequence] from the
-     *  command library instead of the built-in default init. */
-    fun setAutoInitEnabled(on: Boolean) = updateSettings { it.copy(autoInitEnabled = on) }
-
-    /** Pick the active AdapterCommandLibrary init sequence (by id). */
+    /** Pick the active AdapterCommandLibrary init sequence (by id). The connect
+     *  uses it directly — the separate Auto-Init toggle was removed. */
     fun setSelectedInitSequence(id: String?) = updateSettings { it.copy(selectedInitSequenceId = id) }
 
-    /** True when Auto Init is on and the streaming K-line sequence is selected,
-     *  so the OBDLink K-line poller streams (A8 01) instead of re-asking. */
-    private fun klineContinuousSelected(): Boolean = _uiState.value.settings.let {
-        it.autoInitEnabled && it.selectedInitSequenceId == AdapterCommandLibrary.KLINE_CONTINUOUS.id
-    }
+    /** True when the streaming K-line sequence is the selected init, so the
+     *  OBDLink K-line poller streams (A8 01) instead of re-asking. */
+    private fun klineContinuousSelected(): Boolean =
+        _uiState.value.settings.selectedInitSequenceId == AdapterCommandLibrary.KLINE_CONTINUOUS.id
 
     fun setAdapter(adapter: Adapter?) {
         // Switching adapter / protocol invalidates any cached K-line channel
@@ -337,19 +341,25 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
-     * Dev console: send a raw AT/ST/SSM2 command typed in the Home BYTES box to
-     * the OBDLink; the reply auto-lands in the BYTES log (the transport logs
-     * OUT/IN to [com.protocol.app.obdlink.ObdLinkTrafficLog]). If nothing is
-     * connected yet, opens a raw channel first (ATE0/ATL0/ATS0 only, no protocol
-     * init) so the console works standalone for resets/wake/probing. If a live
-     * poll/log loop is running it is cancelled and joined first, so the command
-     * always fires and the manual write can't interleave with the loop on the
-     * same socket (which would trip STOPPED on the STN).
+     * Dev console: send a raw command typed in the Home BYTES box, routed to
+     * whichever adapter is selected and auto-formatted for it (the reply lands
+     * in the RAW BYTES log).
+     *
+     *  - OBDLink (BT / EX): ELM/STN ASCII. A hex frame is normalized to
+     *    continuous hex (spaces stripped); a control command keeps its spaces.
+     *    If nothing is connected (BT only), a raw channel is opened first
+     *    (ATE0/ATL0/ATS0, no protocol init) so the console works standalone.
+     *  - OpenPort 2.0: the Tactrix line protocol via [OpenPortConsole] — an
+     *    `at*` verb is sent with an auto reqId; a hex frame is parsed to binary
+     *    and wrapped in the `att<ch>` transmit header for the selected protocol.
+     *
+     * Either way, a running poll/log loop is cancelled and joined first so the
+     * manual write can't interleave with the loop on the same link.
      */
     fun sendManualCommand(command: String, appContext: android.content.Context) {
         val cmd = command.trim()
         if (cmd.isEmpty()) return
-        val isEx = _uiState.value.settings.adapter == Adapter.OBDLinkEx
+        val adapter = _uiState.value.settings.adapter
         viewModelScope.launch(Dispatchers.IO) {
             // Take over the link: stop any running poll/log loop and WAIT for it
             // to fully finish before we write, so the two can't collide.
@@ -358,32 +368,169 @@ class ProtocolViewModel : ViewModel() {
             active?.cancel()
             active?.join()
 
-            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· manual: $cmd")
-            // Route to whichever OBDLink link is active: USB (EX) or Bluetooth.
-            var transport = if (isEx) obdLinkUsbManager?.transport else obdLinkManager?.transport
-            if (transport == null) {
-                if (isEx) {
-                    // The USB connection can only be opened by the Activity (USB
-                    // permission), so the console can't bring the EX up itself.
-                    com.protocol.app.obdlink.ObdLinkTrafficLog.record(
-                        "OUT", "· OBDLink EX not connected — Settings → tap OBDLink EX first"
-                    )
-                    return@launch
-                }
-                com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· opening raw channel…")
-                val mgr = obdLinkManager ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
-                when (val r = mgr.connectBasic()) {
-                    is ObdLinkBtManager.ConnectResult.Failure -> {
-                        com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· connect failed: ${r.reason}")
-                        return@launch
-                    }
-                    is ObdLinkBtManager.ConnectResult.Connected -> transport = mgr.transport
-                }
+            when (adapter) {
+                Adapter.OpenPort -> sendManualOpenPort(cmd)
+                Adapter.OBDLinkEx -> sendManualObdLink(cmd, isEx = true, appContext)
+                Adapter.Ft232rl -> sendManualFt232rl(cmd)
+                else -> sendManualObdLink(cmd, isEx = false, appContext)  // OBDLink / null
             }
-            try {
-                transport?.sendAscii(cmd, timeoutMs = 2000L)
-            } catch (e: Exception) {
-                com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· send failed: ${e.message}")
+        }
+    }
+
+    /** OBDLink (BT/EX) manual command: normalize for the ELM/STN, open a raw
+     *  channel if needed (BT only), send, and let the transport log OUT/IN. */
+    private suspend fun sendManualObdLink(cmd: String, isEx: Boolean, appContext: android.content.Context) {
+        // ELM/STN spacing rule: hex frame -> continuous hex; control command ->
+        // verbatim (significant spaces preserved, e.g. "STPX d:..., r:1").
+        val wire = AdapterCommandLibrary.normalizeElm(cmd)
+        com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· manual: $wire")
+        var transport = if (isEx) obdLinkUsbManager?.transport else obdLinkManager?.transport
+        if (transport == null) {
+            if (isEx) {
+                // The USB connection can only be opened by the Activity (USB
+                // permission), so the console can't bring the EX up itself.
+                com.protocol.app.obdlink.ObdLinkTrafficLog.record(
+                    "OUT", "· OBDLink EX not connected — Settings → tap OBDLink EX first"
+                )
+                return
+            }
+            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· opening raw channel…")
+            val mgr = obdLinkManager ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
+            when (val r = mgr.connectBasic()) {
+                is ObdLinkBtManager.ConnectResult.Failure -> {
+                    com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· connect failed: ${r.reason}")
+                    return
+                }
+                is ObdLinkBtManager.ConnectResult.Connected -> transport = mgr.transport
+            }
+        }
+        try {
+            transport?.sendAscii(wire, timeoutMs = 2000L)
+        } catch (e: Exception) {
+            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· send failed: ${e.message}")
+        }
+    }
+
+    /**
+     * FT232RL (KKL) manual command. The cable has no command language of its own
+     * — there is no ELM/STN to talk to — so a manual command IS a raw SSM2 hex
+     * frame, sent straight onto the K-line via [KklKlineManager.transact]. The
+     * reply source is the request's destination byte (frame[1]: 0x10 ECM /
+     * 0x18 TCM). The connection is owned by the Activity, so this only drives an
+     * already-connected cable.
+     */
+    private fun sendManualFt232rl(cmd: String) {
+        fun log(m: String) = com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· $m")
+        val mgr = kklManager
+        if (mgr?.isConnected() != true) {
+            log("kkl: not connected — Dev Mode → FT232RL + K-line, then Connect")
+            return
+        }
+        val bytes = AdapterCommandLibrary.hexToBytes(cmd)
+        if (bytes == null || bytes.size < 5 || (bytes[0].toInt() and 0xFF) != 0x80) {
+            log("kkl: manual command must be a raw SSM2 hex frame (e.g. 80 10 F0 01 BF 40)")
+            return
+        }
+        val replySource = bytes[1].toInt() and 0xFF   // request dest = reply src
+        viewModelScope.launch(Dispatchers.IO) {
+            val active = runJob
+            runJob = null
+            active?.cancel(); active?.join()
+            val reply = mgr.transact(bytes, replySource, timeoutMs = 800L)
+            if (reply == null) log("kkl: no reply (frame sent, ECU silent / bad checksum)")
+        }
+    }
+
+    /** OpenPort 2.0 manual command via [com.protocol.app.openport2.OpenPortConsole].
+     *  The USB session is owned by the Activity, so the console can only drive an
+     *  already-connected OpenPort (same constraint as the EX). */
+    private fun sendManualOpenPort(cmd: String) {
+        val client = tactrixClient
+        if (client == null) {
+            _uiState.value = _uiState.value.copy(
+                statusMessage = "OpenPort not connected — plug it in & grant USB first"
+            )
+            return
+        }
+        // K-line vs CAN transmit framing follows the selected protocol (K-line
+        // is the proven default when none is picked).
+        val kline = _uiState.value.settings.protocol != BusProtocol.CAN
+        // A manual command may reconfigure the channel — invalidate the cached
+        // init so the next Read Live re-runs the full ati..atv setup.
+        client.channelInitialized = false
+        val status = com.protocol.app.openport2.OpenPortConsole.send(client, cmd, kline)
+        _uiState.value = _uiState.value.copy(statusMessage = status)
+    }
+
+    /**
+     * Dev: run a manual command SEQUENCE — each non-blank command top-to-bottom
+     * on the active adapter, [delayMs] between them. [waitForPrompt] (OBDLink):
+     * wait for the `>` prompt per command, vs fire-and-read after the delay.
+     * Each command's reply is reported via [onResponse] (index, text) so the
+     * generator can show it beside that row. Uses the page's adapter/protocol;
+     * takes over the link first so it can't collide with a running poll.
+     */
+    fun runManualSequence(
+        commands: List<String>,
+        delaysMs: List<Long>,
+        onResponse: (index: Int, response: String) -> Unit
+    ) {
+        val adapter = _uiState.value.settings.adapter
+        viewModelScope.launch(Dispatchers.IO) {
+            val active = runJob
+            runJob = null
+            active?.cancel(); active?.join()
+
+            for ((i, raw) in commands.withIndex()) {
+                val cmd = raw.trim()
+                if (cmd.isEmpty()) continue
+                val resp = when (adapter) {
+                    Adapter.OpenPort -> {
+                        val client = tactrixClient
+                        if (client == null) "OpenPort not connected"
+                        else com.protocol.app.openport2.OpenPortConsole.send(
+                            client, cmd, _uiState.value.settings.protocol != BusProtocol.CAN
+                        )
+                    }
+                    Adapter.OBDLink, Adapter.OBDLinkEx -> {
+                        val transport = if (adapter == Adapter.OBDLinkEx) obdLinkUsbManager?.transport
+                            else obdLinkManager?.transport
+                        if (transport == null) "not connected"
+                        else {
+                            // Wait-for-prompt is implicit in the adapter config —
+                            // the STN sendAscii waits for the '>' reply itself.
+                            val wire = AdapterCommandLibrary.normalizeElm(cmd)
+                            try {
+                                transport.sendAscii(wire, timeoutMs = 3000L).trim()
+                            } catch (e: Exception) {
+                                "send failed: ${e.message}"
+                            }
+                        }
+                    }
+                    Adapter.Ft232rl -> {
+                        // KKL has no command language — each step is a raw SSM2
+                        // hex frame onto the K-line. Reply src = request dest (byte 1).
+                        val mgr = kklManager
+                        val bytes = AdapterCommandLibrary.hexToBytes(cmd)
+                        when {
+                            mgr?.isConnected() != true -> "FT232RL not connected"
+                            bytes == null || bytes.size < 5 || (bytes[0].toInt() and 0xFF) != 0x80 ->
+                                "not a raw SSM2 frame (e.g. 80 10 F0 01 BF 40)"
+                            else -> {
+                                val src = bytes[1].toInt() and 0xFF
+                                val reply = mgr.transact(bytes, src, timeoutMs = 800L)
+                                reply?.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+                                    ?: "no reply"
+                            }
+                        }
+                    }
+                    else -> "pick an adapter first"  // null
+                }
+                // SnapshotStateList writes are thread-safe; update the row's log.
+                onResponse(i, resp)
+                // Per-row delay between commands (mostly for baud-switch timing).
+                val d = delaysMs.getOrElse(i) { 0L }
+                if (d > 0) kotlinx.coroutines.delay(d)
             }
         }
     }
@@ -412,14 +559,10 @@ class ProtocolViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val mgr = obdLinkManager
                 ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
-            // Auto-init: same resolution as the EX — selected library sequence
-            // when enabled (falling back to the protocol default if it doesn't
-            // match), else null = the built-in init.
-            val seq = if (s.autoInitEnabled) {
-                val isKline = protocol == BusProtocol.KLine
-                AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
-                    ?: AdapterCommandLibrary.defaultFor(isKline)
-            } else null
+            // The selected library sequence drives the init when one matching
+            // the protocol is picked; otherwise null = the built-in default init.
+            val isKline = protocol == BusProtocol.KLine
+            val seq = AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
             val r = when (protocol) {
                 BusProtocol.CAN -> mgr.connect(seq)
                 BusProtocol.KLine -> mgr.connectKline(seq)
@@ -513,6 +656,56 @@ class ProtocolViewModel : ViewModel() {
     }
 
     /**
+     * Dev: passive CAN sniff (listen-only). For the 2006 EZ30R CAN tap, which
+     * is **broadcast-only** — the ECM drives 500k CAN but offers NO 7E0/7E8
+     * diagnostic channel, so polling can't work; the only thing to do is
+     * listen. Sets `ATH1` (so each frame's CAN-ID shows) + `ATCAF0` (raw, no
+     * auto-format), then `STMA` (monitor ALL frames, ignores the RX filter,
+     * transmits nothing). Broadcast frames stream into the RAW BYTES log via the
+     * transport's reader thread. Requires an OBDLink (BT or EX) already
+     * connected on CAN; stop with [stopCanMonitor].
+     */
+    fun startCanMonitor(appContext: android.content.Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val active = runJob
+            runJob = null
+            active?.cancel(); active?.join()
+            fun log(m: String) = com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· $m")
+            val transport = when (_uiState.value.settings.adapter) {
+                Adapter.OBDLinkEx -> obdLinkUsbManager?.transport
+                Adapter.OBDLink -> obdLinkManager?.transport
+                else -> null
+            }
+            if (transport == null) {
+                log("CAN monitor: connect an OBDLink on CAN first (Settings → adapter + CAN)")
+                return@launch
+            }
+            log("CAN monitor: ATH1 + STMA (listen-only, all frames) — watch for broadcast frames")
+            try {
+                transport.sendAscii("ATH1", timeoutMs = 800L)   // headers on -> show CAN IDs
+                transport.sendAscii("ATCAF0", timeoutMs = 800L)  // raw frames, no auto-format
+                transport.beginMonitor("STMA")                   // monitor all; no '>' until stopped
+            } catch (e: Exception) {
+                log("CAN monitor failed: ${e.message}")
+            }
+        }
+    }
+
+    /** Stop the passive CAN sniff started by [startCanMonitor] (sends the bare
+     *  0x0D that halts STMA and re-enables the prompt). Safe if not monitoring. */
+    fun stopCanMonitor() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val transport = when (_uiState.value.settings.adapter) {
+                Adapter.OBDLinkEx -> obdLinkUsbManager?.transport
+                Adapter.OBDLink -> obdLinkManager?.transport
+                else -> null
+            } ?: return@launch
+            transport.stopMonitor()
+            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· CAN monitor stopped")
+        }
+    }
+
+    /**
      * Connect the OBDLink EX over USB. The Activity opens the [connection] for
      * the FTDI device after USB permission is granted, then hands it here. We
      * build an [ObdLinkUsbManager] (which takes ownership of the connection) and
@@ -554,14 +747,10 @@ class ProtocolViewModel : ViewModel() {
                 obdLinkUsbManager?.disconnect()
                 val mgr = ObdLinkUsbManager(connection, device)
                 obdLinkUsbManager = mgr
-                // Auto-init: when enabled, connect with the user's selected
-                // library sequence (falling back to the protocol default if the
-                // pick doesn't match); otherwise null = the built-in init.
-                val seq = if (s.autoInitEnabled) {
-                    val isKline = protocol == BusProtocol.KLine
-                    AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
-                        ?: AdapterCommandLibrary.defaultFor(isKline)
-                } else null
+                // The selected library sequence drives the init when one
+                // matching the protocol is picked; else null = built-in default.
+                val isKline = protocol == BusProtocol.KLine
+                val seq = AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
                 val r = when (protocol) {
                     BusProtocol.CAN -> mgr.connect(seq)
                     BusProtocol.KLine -> mgr.connectKline(seq)
@@ -606,6 +795,88 @@ class ProtocolViewModel : ViewModel() {
                 connectionStatus = ConnectionStatus.NoDevice,
                 adapterPresent = false,
                 statusMessage = "OBDLink EX disconnected"
+            )
+        }
+    }
+
+    /**
+     * Connect the FT232RL (VAG-KKL raw K-line) over USB. The Activity opens the
+     * [connection] for the FTDI device after USB permission, then hands it here.
+     * We build a [KklKlineManager] (which takes ownership of the connection),
+     * open the serial at 4800, and probe the ECU over the bare K-line. K-line
+     * only — CAN over a dumb K-line cable is impossible, so a CAN selection is
+     * rejected with a clear message. No-op unless FT232RL is the live adapter.
+     */
+    fun connectFt232rl(
+        connection: android.hardware.usb.UsbDeviceConnection,
+        device: android.hardware.usb.UsbDevice
+    ) {
+        val s = _uiState.value.settings
+        if (s.adapter != Adapter.Ft232rl) {
+            try { connection.close() } catch (_: Exception) {}
+            return
+        }
+        if (kklConnecting) {
+            try { connection.close() } catch (_: Exception) {}
+            return
+        }
+        if (s.protocol == BusProtocol.CAN) {
+            try { connection.close() } catch (_: Exception) {}
+            setConnectionStatus(
+                ConnectionStatus.Error("KKL is K-line only"),
+                "FT232RL is a raw K-line cable — pick K-Line (CAN needs an OBDLink / OpenPort)"
+            )
+            return
+        }
+        kklConnecting = true
+        setConnectionStatus(
+            ConnectionStatus.PermissionRequired("FT232RL"),
+            "Connecting FT232RL (K-line)…"
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                kklManager?.disconnect()
+                val mgr = KklKlineManager(connection, device)
+                kklManager = mgr
+                when (val r = mgr.connect()) {
+                    is KklKlineManager.ConnectResult.Connected -> {
+                        setConnectionStatus(
+                            ConnectionStatus.Connected(r.deviceLabel),
+                            "Connected to ${r.deviceLabel}"
+                        )
+                        setAdapterPresent(true)
+                    }
+                    is KklKlineManager.ConnectResult.Failure -> {
+                        kklManager?.disconnect()
+                        kklManager = null
+                        setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
+                        setAdapterPresent(false)
+                    }
+                }
+            } finally {
+                kklConnecting = false
+            }
+        }
+    }
+
+    /** Tear down the FT232RL KKL link. Safe whether or not it's connected. */
+    fun disconnectFt232rl() {
+        val wasKkl = runningLiveSource != null && _uiState.value.settings.adapter == Adapter.Ft232rl
+        if (wasKkl) {
+            runJob?.cancel()
+            runJob = null
+            runningLiveSource = null
+        }
+        kklManager?.disconnect()
+        kklManager = null
+        if (openSession == null) {
+            _uiState.value = _uiState.value.copy(
+                isReadingLive = if (wasKkl) false else _uiState.value.isReadingLive,
+                isLogging = if (wasKkl) false else _uiState.value.isLogging,
+                liveValues = if (wasKkl) emptyMap() else _uiState.value.liveValues,
+                connectionStatus = ConnectionStatus.NoDevice,
+                adapterPresent = false,
+                statusMessage = "FT232RL disconnected"
             )
         }
     }
@@ -847,6 +1118,12 @@ class ProtocolViewModel : ViewModel() {
                     )
                     return
                 }
+                Adapter.Ft232rl -> if (kklManager?.isConnected() != true) {
+                    _uiState.value = state.copy(
+                        statusMessage = "FT232RL not connected — Dev Mode → pick FT232RL + K-line, then Connect"
+                    )
+                    return
+                }
             }
         }
 
@@ -867,6 +1144,7 @@ class ProtocolViewModel : ViewModel() {
             adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> "Polling OBDLink CAN @ 500k..."
             adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> "Polling OBDLink EX K-line @ 4800..."
             adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> "Polling OBDLink EX CAN @ 500k..."
+            adapter == Adapter.Ft232rl && protocol == BusProtocol.KLine -> "Polling FT232RL raw K-line @ 4800..."
             else -> "Connecting..."
         }
 
@@ -899,6 +1177,7 @@ class ProtocolViewModel : ViewModel() {
                     adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> startObdLinkCanFlow(pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> startObdLinkExKlineFlow(pidsOnPage, pollIntervalMs)
                     adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> startObdLinkExCanFlow(pidsOnPage, pollIntervalMs)
+                    adapter == Adapter.Ft232rl && protocol == BusProtocol.KLine -> startFt232rlKlineFlow(pidsOnPage, pollIntervalMs)
                     else -> null
                 }
             } catch (e: UsbDisconnectedException) {
@@ -1184,6 +1463,19 @@ class ProtocolViewModel : ViewModel() {
         return src.startFlow(pollIntervalMs)
     }
 
+    /** FT232RL (USB) + K-line: raw SSM2 over the dumb KKL cable. Same A8 batching
+     *  and ECM/TCM split as the OBDLink K-line path, but the wire I/O is our own
+     *  software half-duplex transact (no STN). */
+    private fun startFt232rlKlineFlow(
+        pidsOnPage: List<Ssm2Pid>,
+        pollIntervalMs: Long
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val mgr = kklManager ?: return null
+        val src = KklKlineSource(mgr, pidsOnPage)
+        runningLiveSource = src
+        return src.startFlow(pollIntervalMs)
+    }
+
     /** OBDLink EX (USB) + CAN: identical to the BT CAN path, transport from the USB manager. */
     private fun startObdLinkExCanFlow(
         pidsOnPage: List<Ssm2Pid>,
@@ -1438,6 +1730,8 @@ class ProtocolViewModel : ViewModel() {
         // next process (a leaked USB claim is harder to recover than a socket).
         obdLinkUsbManager?.disconnect()
         obdLinkUsbManager = null
+        kklManager?.disconnect()
+        kklManager = null
         super.onCleared()
     }
 }
