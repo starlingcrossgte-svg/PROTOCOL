@@ -15,6 +15,9 @@ sealed class SubPage {
     object Unverified : SubPage()
     object LiveDataSettings : SubPage()
     object Settings : SubPage()
+    /** Flashing lives in a dedicated standalone app (kept out of the live-logging
+     *  app for safety). This destination is a placeholder/stub — the Home "Flash
+     *  ECU" button will become a download link to that app once it ships. */
     object Flash : SubPage()
     object Tuning : SubPage()
     object Notices : SubPage()

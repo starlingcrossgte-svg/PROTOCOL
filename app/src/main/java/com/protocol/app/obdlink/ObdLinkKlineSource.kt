@@ -93,6 +93,16 @@ class ObdLinkKlineSource(
             val arm = "STPX d:${ObdLinkSsm2Can.toElmHex(a8)},r:1,t:$CONTINUOUS_ARM_MS"
             val pending = StringBuilder()
 
+            // Apply the tight K-line timing the stream needs (STIAT 0 / STIP1X 2 /
+            // ATAT 2) up front, so Live Data's streaming toggle works from the
+            // plain verified init — no dependence on a dev "Continuous" init
+            // having been selected at connect. Sent while the '>' prompt is still
+            // active (before any monitor); best-effort, a failed config command
+            // shouldn't abort the stream.
+            for (cmd in STREAM_TIMING) {
+                try { transport.sendAscii(cmd, timeoutMs = STREAM_TIMING_MS) } catch (_: Exception) {}
+            }
+
             // Arm the ECU stream (grabs frame #1, leaves it buffered), then start
             // the monitor. beginMonitor flips the transport into no-'>'-expected
             // state; stopMonitor (inside, via the next sendAscii) sends the 0x0D.
@@ -351,6 +361,13 @@ class ObdLinkKlineSource(
         // and the t: cap on the one A8 01 arming request (r:1 returns on frame #1,
         // so this only bounds the no-reply case at arm time).
         private const val MONITOR_CMD = "STMA"
+        // K-line timing the continuous stream needs, applied once when streaming
+        // starts so it doesn't depend on the connect-time init: hold P1-max
+        // manually (STIAT 0) tight (STIP1X 2 ms — flush each frame as it lands;
+        // 0 chops frames, 6 falls behind, 2 is the on-car edge) + aggressive
+        // adaptive timing (ATAT 2).
+        private val STREAM_TIMING = listOf("STIAT 0", "STIP1X 2", "ATAT 2")
+        private const val STREAM_TIMING_MS = 600L
         private const val CONTINUOUS_ARM_MS = 1000
         // How often to drain the stream buffer, and how long with no bytes before
         // we conclude the stream stalled and re-arm A8 01.

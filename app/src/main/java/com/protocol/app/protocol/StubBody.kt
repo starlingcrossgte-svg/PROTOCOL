@@ -28,8 +28,8 @@ internal fun StubBody(page: SubPage) {
             "Lightweight — days of work once the list of options is locked."
         )
         SubPage.Flash -> Pair(
-            "Full ECU reflash over OpenPort. Seed/key security access, flash-mode init, page-aligned erase + write, checksum, verify, ECU reset.",
-            "Substantial — a multi-week project. The lower layers (USB + Tactrix line protocol + frame parser) are already in place; the flash sequence itself still needs to be written and tested very carefully."
+            "ECU flashing is being built as a dedicated, standalone app — deliberately kept out of this live-logging app so a flash command can never cross into a logging path and brick an ECU. This button will become a download link to that app once it ships.",
+            "In development in its own app. It folds back into PROTOCOL only when it's proven bulletproof."
         )
         SubPage.Tuning -> Pair(
             "Live RAM-resident tunables: rev limiter, fuel cutoff, idle target, etc. Reads via SSM2 0xA8, writes via 0xB8. Addresses come from the per-ECU calibration definitions.",

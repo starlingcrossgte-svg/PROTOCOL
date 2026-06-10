@@ -41,8 +41,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
-import com.protocol.app.flash.FlashPage
-import com.protocol.app.flash.FlashUiState
 
 /**
  * Top-level composable for the PROTOCOL app. Lays out the three-layer
@@ -101,6 +99,7 @@ fun ProtocolScreen(
     onSsmVariantChange: (SsmVariant?) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
+    onKlineStreamingChange: (Boolean) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
@@ -121,15 +120,6 @@ fun ProtocolScreen(
     onResetLayout: () -> Unit,
     onResetAdapter: () -> Unit,
     onShareSavedSession: () -> Unit,
-    flashState: FlashUiState,
-    onFlashTestConnection: () -> Unit,
-    onFlashExportCsv: (String, String) -> Unit,
-    onFlashToggleTrafficRecording: () -> Unit,
-    onFlashClearTrafficLog: () -> Unit,
-    onFlashToggleDeviceRecording: () -> Unit,
-    onFlashClearDeviceLog: () -> Unit,
-    onFlashToggleRunLogRecording: () -> Unit,
-    onFlashClearRunLog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
@@ -301,6 +291,7 @@ fun ProtocolScreen(
                         uiState = uiState,
                         onPollIntervalChange = onPollIntervalChange,
                         onSessionLogMaxChange = onSessionLogMaxChange,
+                        onKlineStreamingChange = onKlineStreamingChange,
                         onResetLayout = onResetLayout,
                         onShareSavedSession = onShareSavedSession,
                         onResetAdapter = onResetAdapter
@@ -316,19 +307,7 @@ fun ProtocolScreen(
                         onRawLogNameChange = onRawLogNameChange,
                         onSessionLogNameChange = onSessionLogNameChange
                     )
-                    SubPage.Flash -> FlashPage(
-                        state = flashState,
-                        onTestConnection = onFlashTestConnection,
-                        onClose = onCloseSubPage,
-                        onExportCsv = onFlashExportCsv,
-                        onToggleTrafficRecording = onFlashToggleTrafficRecording,
-                        onClearTrafficLog = onFlashClearTrafficLog,
-                        onToggleDeviceRecording = onFlashToggleDeviceRecording,
-                        onClearDeviceLog = onFlashClearDeviceLog,
-                        onToggleRunLogRecording = onFlashToggleRunLogRecording,
-                        onClearRunLog = onFlashClearRunLog
-                    )
-                    SubPage.Tuning ->
+                    SubPage.Flash, SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage!!)
                     SubPage.Notices -> NoticesBody()
                     SubPage.Developer -> DeveloperBody(

@@ -94,6 +94,9 @@ internal fun SettingsBody(
                 SelectorButton("OBDLink EX", selected = s.adapter == Adapter.OBDLinkEx) {
                     onAdapterChange(if (s.adapter == Adapter.OBDLinkEx) null else Adapter.OBDLinkEx)
                 }
+                SelectorButton("FT232RL (KKL)", selected = s.adapter == Adapter.Ft232rl) {
+                    onAdapterChange(if (s.adapter == Adapter.Ft232rl) null else Adapter.Ft232rl)
+                }
             }
             Column(
                 modifier = Modifier.weight(1f),

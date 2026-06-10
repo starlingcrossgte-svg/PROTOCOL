@@ -29,7 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModelProvider
 import com.protocol.app.UsbPermissionHelper
-import com.protocol.app.flash.FlashViewModel
 import com.protocol.app.obdlink.FtdiUsbSerial
 import com.protocol.app.openport2.OpenPort2SessionResult
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
@@ -76,7 +75,6 @@ class Protocol : ComponentActivity() {
     }
 
     private lateinit var viewModel: ProtocolViewModel
-    private lateinit var flashViewModel: FlashViewModel
     private lateinit var usbManager: UsbManager
     private lateinit var usbPermissionHelper: UsbPermissionHelper
     private lateinit var sessionManager: OpenPort2UsbSessionManager
@@ -166,7 +164,7 @@ class Protocol : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted: Boolean ->
         if (granted) {
-            viewModel.connectObdLink(applicationContext)
+            viewModel.connectObdLink(applicationContext, pendingConnectFromDev)
         } else {
             viewModel.clearObdLinkAdapter()
             Toast.makeText(this, "Bluetooth permission denied", Toast.LENGTH_LONG).show()
@@ -252,8 +250,8 @@ class Protocol : ComponentActivity() {
         }
         when (s.adapter) {
             Adapter.OpenPort -> discoverAndConnect()
-            Adapter.OBDLink -> ensureBtPermissionThenConnect()
-            Adapter.OBDLinkEx -> connectObdLinkEx()
+            Adapter.OBDLink -> ensureBtPermissionThenConnect(fromDev = true)
+            Adapter.OBDLinkEx -> connectObdLinkEx(fromDev = true)
             Adapter.Ft232rl -> connectFt232rl()
             null -> viewModel.setConnectionStatus(
                 ConnectionStatus.NoDevice,
@@ -281,14 +279,22 @@ class Protocol : ComponentActivity() {
         }
     }
 
-    private fun ensureBtPermissionThenConnect() {
+    // True when the in-flight connect was initiated from the Dev page CONNECT
+    // button, so it should use the dev-selected init. Set right before an async
+    // permission request and read in the permission callback. Every other connect
+    // path (Settings adapter tap, protocol change, Read Live) leaves it false =
+    // verified Live Data init.
+    private var pendingConnectFromDev = false
+
+    private fun ensureBtPermissionThenConnect(fromDev: Boolean = false) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
+            pendingConnectFromDev = fromDev
             btPermissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
         } else {
-            viewModel.connectObdLink(applicationContext)
+            viewModel.connectObdLink(applicationContext, fromDev)
         }
     }
 
@@ -353,7 +359,6 @@ class Protocol : ComponentActivity() {
         )
 
         viewModel = ViewModelProvider(this)[ProtocolViewModel::class.java]
-        flashViewModel = ViewModelProvider(this)[FlashViewModel::class.java]
         viewModel.attachSessionManager(sessionManager)
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
@@ -365,7 +370,6 @@ class Protocol : ComponentActivity() {
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
-            val flashState by flashViewModel.uiState.collectAsState()
 
             val colors = darkColorScheme(
                 primary = Color(0xFFFF6A00),
@@ -415,6 +419,7 @@ class Protocol : ComponentActivity() {
                     onSsmVariantChange = { variant -> viewModel.setSsmVariant(variant) },
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
+                    onKlineStreamingChange = { on -> viewModel.setKlineStreaming(on) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
@@ -434,16 +439,7 @@ class Protocol : ComponentActivity() {
                     onSessionLogNameChange = { name -> viewModel.setSessionLogName(name) },
                     onResetLayout = { viewModel.resetLayout() },
                     onResetAdapter = { viewModel.resetObdLinkAdapter(applicationContext) },
-                    onShareSavedSession = { launchShareSavedSession() },
-                    flashState = flashState,
-                    onFlashTestConnection = { flashViewModel.testConnection() },
-                    onFlashExportCsv = { name, text -> exportFlashCsv(name, text) },
-                    onFlashToggleTrafficRecording = { flashViewModel.toggleTrafficRecording() },
-                    onFlashClearTrafficLog = { flashViewModel.clearTrafficLog() },
-                    onFlashToggleDeviceRecording = { flashViewModel.toggleDeviceRecording() },
-                    onFlashClearDeviceLog = { flashViewModel.clearDeviceLog() },
-                    onFlashToggleRunLogRecording = { flashViewModel.toggleRunLogRecording() },
-                    onFlashClearRunLog = { flashViewModel.clearRunLog() }
+                    onShareSavedSession = { launchShareSavedSession() }
                 )
             }
         }
@@ -558,7 +554,7 @@ class Protocol : ComponentActivity() {
      * needed — but on grant opens a plain connection and hands it to the VM's
      * OBDLink-EX connect instead of opening a Tactrix bulk session.
      */
-    private fun connectObdLinkEx() {
+    private fun connectObdLinkEx(fromDev: Boolean = false) {
         val device = findObdLinkExDevice()
         if (device == null) {
             viewModel.setAdapterPresent(false)
@@ -571,6 +567,7 @@ class Protocol : ComponentActivity() {
         }
         viewModel.setAdapterPresent(true)
         if (!usbManager.hasPermission(device)) {
+            pendingConnectFromDev = fromDev
             viewModel.setConnectionStatus(
                 ConnectionStatus.PermissionRequired(deviceLabel(device)),
                 "Requesting USB permission for OBDLink EX..."
@@ -578,10 +575,10 @@ class Protocol : ComponentActivity() {
             usbPermissionHelper.requestUsbPermission(device, ACTION_USB_PERMISSION)
             return
         }
-        openObdLinkExForDevice(device)
+        openObdLinkExForDevice(device, fromDev)
     }
 
-    private fun openObdLinkExForDevice(device: UsbDevice) {
+    private fun openObdLinkExForDevice(device: UsbDevice, fromDev: Boolean = false) {
         val connection = usbManager.openDevice(device)
         if (connection == null) {
             viewModel.setConnectionStatus(
@@ -590,7 +587,7 @@ class Protocol : ComponentActivity() {
             )
             return
         }
-        viewModel.connectObdLinkEx(connection, device)
+        viewModel.connectObdLinkEx(connection, device, fromDev)
     }
 
     private fun handlePermissionResult(intent: Intent) {
@@ -628,7 +625,7 @@ class Protocol : ComponentActivity() {
         }
 
         when {
-            isEx -> openObdLinkExForDevice(device)
+            isEx -> openObdLinkExForDevice(device, pendingConnectFromDev)
             isFt232rl -> openFt232rlForDevice(device)
             isTactrix -> openSessionForDevice(device)
             else -> viewModel.setConnectionStatus(
@@ -748,11 +745,6 @@ class Protocol : ComponentActivity() {
     private fun launchExportLog() {
         pendingExportText = ProtocolLogFormatter.formatForExport(viewModel.uiState.value)
         exportLogLauncher.launch(ProtocolLogFormatter.suggestedExportFileName())
-    }
-
-    private fun exportFlashCsv(filename: String, text: String) {
-        pendingExportText = text
-        exportLogLauncher.launch(filename)
     }
 
     private fun copySessionLogToClipboard() {

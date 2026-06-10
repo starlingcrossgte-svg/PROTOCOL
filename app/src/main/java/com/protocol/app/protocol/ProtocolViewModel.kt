@@ -3,6 +3,7 @@ package com.protocol.app.protocol
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.protocol.app.obdlink.AdapterCommandLibrary
+import com.protocol.app.obdlink.CommandSequence
 import com.protocol.app.obdlink.LiveSampleSource
 import com.protocol.app.obdlink.ObdLinkBtManager
 import com.protocol.app.obdlink.ObdLinkKlineSource
@@ -174,14 +175,33 @@ class ProtocolViewModel : ViewModel() {
 
     fun setDevMode(on: Boolean) = updateSettings { it.copy(devMode = on) }
 
-    /** Pick the active AdapterCommandLibrary init sequence (by id). The connect
-     *  uses it directly — the separate Auto-Init toggle was removed. */
+    /** Pick the active AdapterCommandLibrary init sequence (by id). DEV-ONLY:
+     *  consulted only by the Dev page CONNECT button. Live Data ignores this and
+     *  always connects with the verified standard init. */
     fun setSelectedInitSequence(id: String?) = updateSettings { it.copy(selectedInitSequenceId = id) }
 
-    /** True when the streaming K-line sequence is the selected init, so the
-     *  OBDLink K-line poller streams (A8 01) instead of re-asking. */
-    private fun klineContinuousSelected(): Boolean =
-        _uiState.value.settings.selectedInitSequenceId == AdapterCommandLibrary.KLINE_CONTINUOUS.id
+    /** Live Data's continuous-streaming toggle (~40 Hz K-line, ECM-only). Drives
+     *  the OBDLink K-line source's streaming mode; the source applies the tight
+     *  timing it needs itself, so this is independent of the dev init. */
+    fun setKlineStreaming(on: Boolean) = updateSettings { it.copy(klineStreaming = on) }
+
+    /** True when Live Data's streaming toggle is on, so the OBDLink K-line source
+     *  STREAMS (A8 01 + monitor) for ECM-only pages instead of re-asking. */
+    private fun klineStreamingEnabled(): Boolean = _uiState.value.settings.klineStreaming
+
+    /**
+     * Init sequence for a connect. Live Data ([fromDev]=false) uses the verified
+     * standard init ONLY — never the dev selection — so a live connection can't
+     * inherit an experimental init. The Dev page ([fromDev]=true) uses the
+     * dev-selected sequence (or null = the manager's built-in default when the
+     * picked one doesn't match the protocol).
+     */
+    private fun connectInitSeq(isKline: Boolean, fromDev: Boolean): CommandSequence? =
+        if (fromDev)
+            AdapterCommandLibrary.byId(_uiState.value.settings.selectedInitSequenceId)
+                ?.takeIf { it.kline == isKline }
+        else
+            AdapterCommandLibrary.defaultFor(isKline)
 
     fun setAdapter(adapter: Adapter?) {
         // Switching adapter / protocol invalidates any cached K-line channel
@@ -541,7 +561,7 @@ class ProtocolViewModel : ViewModel() {
      * granted BLUETOOTH_CONNECT first. No-op unless OBDLink is the selected
      * adapter (defense in depth on stale callbacks).
      */
-    fun connectObdLink(appContext: android.content.Context) {
+    fun connectObdLink(appContext: android.content.Context, fromDev: Boolean = false) {
         val s = _uiState.value.settings
         if (s.adapter != Adapter.OBDLink) return
         val protocol = s.protocol ?: run {
@@ -559,10 +579,10 @@ class ProtocolViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val mgr = obdLinkManager
                 ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
-            // The selected library sequence drives the init when one matching
-            // the protocol is picked; otherwise null = the built-in default init.
+            // Live Data uses the verified standard init; the Dev CONNECT button
+            // (fromDev) uses the dev-selected sequence. See [connectInitSeq].
             val isKline = protocol == BusProtocol.KLine
-            val seq = AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
+            val seq = connectInitSeq(isKline, fromDev)
             val r = when (protocol) {
                 BusProtocol.CAN -> mgr.connect(seq)
                 BusProtocol.KLine -> mgr.connectKline(seq)
@@ -715,7 +735,8 @@ class ProtocolViewModel : ViewModel() {
      */
     fun connectObdLinkEx(
         connection: android.hardware.usb.UsbDeviceConnection,
-        device: android.hardware.usb.UsbDevice
+        device: android.hardware.usb.UsbDevice,
+        fromDev: Boolean = false
     ) {
         val s = _uiState.value.settings
         if (s.adapter != Adapter.OBDLinkEx) {
@@ -747,10 +768,10 @@ class ProtocolViewModel : ViewModel() {
                 obdLinkUsbManager?.disconnect()
                 val mgr = ObdLinkUsbManager(connection, device)
                 obdLinkUsbManager = mgr
-                // The selected library sequence drives the init when one
-                // matching the protocol is picked; else null = built-in default.
+                // Live Data uses the verified standard init; the Dev CONNECT
+                // button (fromDev) uses the dev-selected sequence. See [connectInitSeq].
                 val isKline = protocol == BusProtocol.KLine
-                val seq = AdapterCommandLibrary.byId(s.selectedInitSequenceId)?.takeIf { it.kline == isKline }
+                val seq = connectInitSeq(isKline, fromDev)
                 val r = when (protocol) {
                     BusProtocol.CAN -> mgr.connect(seq)
                     BusProtocol.KLine -> mgr.connectKline(seq)
@@ -1120,7 +1141,7 @@ class ProtocolViewModel : ViewModel() {
                 }
                 Adapter.Ft232rl -> if (kklManager?.isConnected() != true) {
                     _uiState.value = state.copy(
-                        statusMessage = "FT232RL not connected — Dev Mode → pick FT232RL + K-line, then Connect"
+                        statusMessage = "FT232RL not connected — Settings → tap FT232RL (KKL) to grant USB permission"
                     )
                     return
                 }
@@ -1436,7 +1457,7 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val transport = obdLinkManager?.transport ?: return null
-        val src = ObdLinkKlineSource(transport, pidsOnPage, klineContinuousSelected())
+        val src = ObdLinkKlineSource(transport, pidsOnPage, klineStreamingEnabled())
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
     }
@@ -1458,7 +1479,7 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val transport = obdLinkUsbManager?.transport ?: return null
-        val src = ObdLinkKlineSource(transport, pidsOnPage, klineContinuousSelected())
+        val src = ObdLinkKlineSource(transport, pidsOnPage, klineStreamingEnabled())
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
     }
