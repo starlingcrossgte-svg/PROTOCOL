@@ -214,14 +214,13 @@ class ProtocolViewModel : ViewModel() {
      *  always connects with the verified standard init. */
     fun setSelectedInitSequence(id: String?) = updateSettings { it.copy(selectedInitSequenceId = id) }
 
-    /** Live Data's continuous-streaming toggle (~40 Hz K-line, ECM-only). Drives
-     *  the OBDLink K-line source's streaming mode; the source applies the tight
-     *  timing it needs itself, so this is independent of the dev init. */
-    fun setKlineStreaming(on: Boolean) = updateSettings { it.copy(klineStreaming = on) }
-
-    /** True when Live Data's streaming toggle is on, so the OBDLink K-line source
-     *  STREAMS (A8 01 + monitor) for ECM-only pages instead of re-asking. */
-    private fun klineStreamingEnabled(): Boolean = _uiState.value.settings.klineStreaming
+    /** True when the Settings POLLING MODE selector is set to Stream, so the
+     *  OBDLink K-line source STREAMS (A8 01 + monitor) for ECM-only pages instead
+     *  of re-asking each cycle. The source applies the tight K-line timing it needs
+     *  itself, so this works from the plain verified init. Auto-falls-back to
+     *  polling on CAN, the KKL cable, or when a TCM gauge is on the page. */
+    private fun streamingRequested(): Boolean =
+        _uiState.value.settings.pollingMode == PollingMode.Stream
 
     /**
      * Init sequence for a connect. Live Data ([fromDev]=false) uses the verified
@@ -1091,7 +1090,7 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val transport = obdLinkManager?.transport ?: return null
-        val src = ObdLinkKlineSource(transport, pidsOnPage, klineStreamingEnabled())
+        val src = ObdLinkKlineSource(transport, pidsOnPage, streamingRequested())
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
     }
@@ -1113,7 +1112,7 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val transport = obdLinkUsbManager?.transport ?: return null
-        val src = ObdLinkKlineSource(transport, pidsOnPage, klineStreamingEnabled())
+        val src = ObdLinkKlineSource(transport, pidsOnPage, streamingRequested())
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
     }
@@ -1303,6 +1302,10 @@ class ProtocolViewModel : ViewModel() {
         obdLinkUsbManager = null
         kklManager?.disconnect()
         kklManager = null
+        // Close the Bluetooth SPP session too — a leaked socket leaves the MX+
+        // deaf to the next connect until it's power-cycled.
+        obdLinkManager?.disconnect()
+        obdLinkManager = null
         super.onCleared()
     }
 }

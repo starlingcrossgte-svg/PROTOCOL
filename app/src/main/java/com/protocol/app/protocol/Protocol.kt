@@ -412,7 +412,6 @@ class Protocol : ComponentActivity() {
                     onPollingModeChange = { mode -> viewModel.setPollingMode(mode) },
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
-                    onKlineStreamingChange = { on -> viewModel.setKlineStreaming(on) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
@@ -431,6 +430,7 @@ class Protocol : ComponentActivity() {
                     onRawLogNameChange = { name -> viewModel.setRawLogName(name) },
                     onSessionLogNameChange = { name -> viewModel.setSessionLogName(name) },
                     onResetLayout = { viewModel.resetLayout() },
+                    onDisconnectObdLink = { viewModel.disconnectObdLink() },
                     onResetAdapter = { viewModel.devConsole.resetObdLinkAdapter(applicationContext) },
                     onShareSavedSession = { launchShareSavedSession() }
                 )

@@ -47,13 +47,7 @@ data class AppSettings(
     /** Id of the chosen AdapterCommandLibrary sequence (null = library default).
      *  DEV-ONLY: consulted only when connecting from the Dev page CONNECT button.
      *  Live Data always connects with the verified standard init, never this. */
-    val selectedInitSequenceId: String? = null,
-    /** Live Data's continuous-streaming toggle. When on, the OBDLink K-line live
-     *  source STREAMS (A8 01 + STN monitor, ~40 Hz) for ECM-only pages instead of
-     *  re-asking each cycle. Independent of [selectedInitSequenceId] — the source
-     *  applies the tight K-line timing it needs itself, so this works from the
-     *  plain verified init. */
-    val klineStreaming: Boolean = false
+    val selectedInitSequenceId: String? = null
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -97,8 +91,7 @@ class SettingsStore(context: Context) {
             ?: AppSettings.DEFAULT_SESSION_LOG_NAME,
         sessionLogHeightDp = prefs.getFloat(KEY_SESSION_LOG_HEIGHT, AppSettings.DEFAULT_SESSION_LOG_HEIGHT_DP),
         selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET),
-        selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null),
-        klineStreaming = prefs.getBoolean(KEY_KLINE_STREAMING, false)
+        selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null)
     )
 
     fun save(s: AppSettings) {
@@ -119,7 +112,6 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_SESSION_LOG_HEIGHT, s.sessionLogHeightDp)
             .putInt(KEY_SELECTED_PRESET, s.selectedPresetIndex)
             .putString(KEY_INIT_SEQ, s.selectedInitSequenceId)
-            .putBoolean(KEY_KLINE_STREAMING, s.klineStreaming)
             .apply()
     }
 
@@ -141,6 +133,5 @@ class SettingsStore(context: Context) {
         private const val KEY_SESSION_LOG_HEIGHT = "session_log_height_dp"
         private const val KEY_SELECTED_PRESET = "selected_preset_index"
         private const val KEY_INIT_SEQ = "selected_init_sequence_id"
-        private const val KEY_KLINE_STREAMING = "kline_streaming"
     }
 }

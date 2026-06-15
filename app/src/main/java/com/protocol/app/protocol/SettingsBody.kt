@@ -50,6 +50,9 @@ internal fun SettingsBody(
     onAdapterChange: (Adapter?) -> Unit,
     onProtocolChange: (BusProtocol?) -> Unit,
     onPollingModeChange: (PollingMode) -> Unit,
+    onPollIntervalChange: (Int) -> Unit,
+    onDisconnectObdLink: () -> Unit,
+    onResetAdapter: () -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onPickCsvFolder: () -> Unit,
@@ -85,6 +88,21 @@ internal fun SettingsBody(
             }
         )
 
+        // Connection actions for the picked OBDLink, shown only while it's live.
+        // OpenPort / KKL are USB — unplugging the cable IS the disconnect — so
+        // they get no button. Disconnect is BT-only (the MX+ has no cable to
+        // pull); factory reset applies to both STN OBDLinks.
+        val obdLinkConnected = uiState.connectionStatus is ConnectionStatus.Connected &&
+            (s.adapter == Adapter.OBDLink || s.adapter == Adapter.OBDLinkEx)
+        if (obdLinkConnected && s.adapter == Adapter.OBDLink) {
+            SettingsButton(label = "Disconnect OBDLink", shape = SETTINGS_SHAPE, onClick = onDisconnectObdLink)
+            SettingsHelp("Drops the Bluetooth link to the OBDLink MX+ and stops polling. Your adapter and protocol selection are kept — reconnect from Read Live Data. Use this to free the adapter or recover a stuck Bluetooth connection.")
+        }
+        if (obdLinkConnected) {
+            SettingsButton(label = "Factory-Reset OBDLink", shape = SETTINGS_SHAPE, onClick = onResetAdapter)
+            SettingsHelp("Sends ATPP FF OFF / ATD / ATZ — clears the adapter's stored programmable parameters, restores factory defaults, then reboots it. The adapter drops its link after the reset; power-cycle and reconnect. Deep troubleshooting only.")
+        }
+
         CategoryHeader("PROTOCOL")
         // CAN · Broadcast is the '06 Outback's listen-only powertrain CAN — its
         // decode path isn't wired yet, so it's disabled. Keeping it a separate
@@ -115,6 +133,27 @@ internal fun SettingsBody(
             ),
             selectedIndex = s.pollingMode.ordinal,
             onSelect = { i -> onPollingModeChange(PollingMode.values()[i]) }
+        )
+
+        // Poll interval is the minimum cycle period for POLL mode only. Stream
+        // rides the ECU's self-paced A8 01 stream and Monitor listens passively,
+        // so neither honors it — grey it out there to make that explicit.
+        CategoryHeader("POLL INTERVAL")
+        val pollEnabled = s.pollingMode == PollingMode.Poll
+        SliderRow(
+            label = "Poll interval",
+            value = s.pollIntervalMs,
+            suffix = "ms",
+            range = AppSettings.POLL_INTERVAL_MIN..AppSettings.POLL_INTERVAL_MAX,
+            stepDp = 50,
+            enabled = pollEnabled,
+            onChange = onPollIntervalChange
+        )
+        SettingsHelp(
+            if (pollEnabled)
+                "Minimum poll period — lower = faster gauge updates, more bus traffic. Mainly bounds CAN and the simulator; on K-line the wire is usually the limit. Applies on the next Read Live Data."
+            else
+                "Only applies in Poll mode. Stream and Monitor run at the ECU's own rate."
         )
 
         // ── Background ─────────────────────────────────────────────
@@ -234,6 +273,7 @@ internal fun SliderRow(
     suffix: String,
     range: IntRange,
     stepDp: Int,
+    enabled: Boolean = true,
     onChange: (Int) -> Unit
 ) {
     val steps = ((range.last - range.first) / stepDp).coerceAtLeast(0) - 1
@@ -243,7 +283,7 @@ internal fun SliderRow(
     ) {
         Text(
             label,
-            color = Color.White,
+            color = if (enabled) Color.White else NeutralGray,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.bodyMedium,
@@ -251,7 +291,7 @@ internal fun SliderRow(
         )
         Text(
             text = if (suffix.isEmpty()) "$value" else "$value $suffix",
-            color = Accent,
+            color = if (enabled) Accent else NeutralGray,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.bodyMedium
@@ -260,6 +300,7 @@ internal fun SliderRow(
     Slider(
         value = value.toFloat(),
         onValueChange = { onChange(it.toInt()) },
+        enabled = enabled,
         valueRange = range.first.toFloat()..range.last.toFloat(),
         steps = if (steps > 0) steps else 0,
         colors = SliderDefaults.colors(
@@ -267,7 +308,10 @@ internal fun SliderRow(
             activeTrackColor = Accent,
             inactiveTrackColor = SurfaceAlt,
             activeTickColor = SurfaceBg,
-            inactiveTickColor = BorderGray
+            inactiveTickColor = BorderGray,
+            disabledThumbColor = NeutralGray,
+            disabledActiveTrackColor = SurfaceAlt,
+            disabledInactiveTrackColor = SurfaceAlt
         )
     )
 }

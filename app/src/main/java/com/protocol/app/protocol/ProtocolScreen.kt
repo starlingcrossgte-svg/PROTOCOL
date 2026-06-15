@@ -92,7 +92,6 @@ fun ProtocolScreen(
     onPollingModeChange: (PollingMode) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
-    onKlineStreamingChange: (Boolean) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
@@ -111,6 +110,7 @@ fun ProtocolScreen(
     onRawLogNameChange: (String) -> Unit,
     onSessionLogNameChange: (String) -> Unit,
     onResetLayout: () -> Unit,
+    onDisconnectObdLink: () -> Unit,
     onResetAdapter: () -> Unit,
     onShareSavedSession: () -> Unit,
     modifier: Modifier = Modifier
@@ -279,18 +279,18 @@ fun ProtocolScreen(
                     )
                     SubPage.LiveDataSettings -> LiveDataSettingsBody(
                         uiState = uiState,
-                        onPollIntervalChange = onPollIntervalChange,
                         onSessionLogMaxChange = onSessionLogMaxChange,
-                        onKlineStreamingChange = onKlineStreamingChange,
                         onResetLayout = onResetLayout,
-                        onShareSavedSession = onShareSavedSession,
-                        onResetAdapter = onResetAdapter
+                        onShareSavedSession = onShareSavedSession
                     )
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,
                         onAdapterChange = onAdapterChange,
                         onProtocolChange = onProtocolChange,
                         onPollingModeChange = onPollingModeChange,
+                        onPollIntervalChange = onPollIntervalChange,
+                        onDisconnectObdLink = onDisconnectObdLink,
+                        onResetAdapter = onResetAdapter,
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onPickCsvFolder = onPickCsvFolder,
