@@ -20,49 +20,49 @@ data class TrafficEvent(
 }
 
 /**
- * Process-wide ring buffer of recent USB bulk transfers between the host
- * and the Tactrix adapter. Lives outside the ViewModel so [TactrixBulkIo]
- * can call into it from anywhere on the I/O path without needing a
- * back-reference.
+ * Process-wide ring buffer of recent USB bulk transfers between the host and
+ * the Tactrix adapter. Lives outside the ViewModel so [TactrixBulkIo] can call
+ * into it from anywhere on the I/O path without a back-reference.
  *
- * Capped at [MAX_EVENTS] — older events drop off the front when the cap
- * is reached. At ~5 polls/sec × 4 events/poll (two writes, two reads),
- * 5000 events is roughly the last 4 minutes of traffic — enough headroom
- * to capture a short rapid PID-verification log without the connect-time
- * capability bitmap scrolling off. The user can clear to narrow focus.
- *
- * The UI subscribes via [events] (collectAsState in Compose). Mutation is
- * synchronous and lock-free — StateFlow's CAS handles the publish step.
- * Bursts of writes from multiple threads can re-order slightly under
- * heavy contention; for diagnostic display that's acceptable.
+ * Capped at [MAX_EVENTS] (oldest drop off the front) — ~4 minutes of traffic at
+ * the default poll rate. Backed by an [ArrayDeque] so [record] is O(1): append
+ * plus a single front-drop, no whole-list copy. The hot wire path only bumps
+ * [revision] (an O(1) counter); the O(n) snapshot is built by observers in
+ * [snapshot] when they actually render, so always-on recording costs ~nothing
+ * when nobody is watching the dev log. All access is synchronized — safe from
+ * the IO reader threads and the UI thread at once.
  */
 object UsbTrafficLog {
     private const val MAX_EVENTS = 5000
 
-    private val _events = MutableStateFlow<List<TrafficEvent>>(emptyList())
-    val events: StateFlow<List<TrafficEvent>> = _events.asStateFlow()
+    private val buffer = ArrayDeque<TrafficEvent>(MAX_EVENTS)
+    private val _revision = MutableStateFlow(0)
+    /** Bumped on every record / clear. Observers re-read [snapshot] when it changes. */
+    val revision: StateFlow<Int> = _revision.asStateFlow()
+
+    /** Current buffer contents, oldest-first. O(n) — call only when rendering. */
+    @Synchronized fun snapshot(): List<TrafficEvent> = buffer.toList()
 
     fun recordWrite(bytes: ByteArray) = record(TrafficEvent.Direction.OUT, bytes)
     fun recordRead(bytes: ByteArray) = record(TrafficEvent.Direction.IN, bytes)
 
-    fun clear() {
-        _events.value = emptyList()
+    @Synchronized fun clear() {
+        buffer.clear()
+        _revision.value++
     }
 
-    private fun record(direction: TrafficEvent.Direction, bytes: ByteArray) {
+    @Synchronized private fun record(direction: TrafficEvent.Direction, bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        val event = TrafficEvent(
-            timestampMs = System.currentTimeMillis(),
-            direction = direction,
-            hex = TactrixHex.bytesToHex(bytes),
-            ascii = TactrixHex.bytesToPrintableAscii(bytes),
-            byteCount = bytes.size
+        if (buffer.size >= MAX_EVENTS) buffer.removeFirst()
+        buffer.addLast(
+            TrafficEvent(
+                timestampMs = System.currentTimeMillis(),
+                direction = direction,
+                hex = TactrixHex.bytesToHex(bytes),
+                ascii = TactrixHex.bytesToPrintableAscii(bytes),
+                byteCount = bytes.size
+            )
         )
-        val current = _events.value
-        val next = if (current.size >= MAX_EVENTS)
-            current.drop(1) + event
-        else
-            current + event
-        _events.value = next
+        _revision.value++
     }
 }

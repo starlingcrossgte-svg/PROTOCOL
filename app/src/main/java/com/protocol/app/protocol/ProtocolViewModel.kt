@@ -113,6 +113,40 @@ class ProtocolViewModel : ViewModel() {
     // storage at 5 Hz on long-running logs.
     private var samplesSinceLastAutosave: Int = 0
 
+    // ── Dev Mode → Raw Command Interface ────────────────────────────────────
+    // The dev/diagnostic console ops (init hunt, adapter reset, manual command +
+    // sequence, K-line continuous test, CAN monitor) live in their own
+    // [DevConsoleController]. This ViewModel still OWNS the adapter managers and
+    // the poll job; the controller borrows them through this private bridge, so
+    // it never reaches into the rest of the ViewModel. When connection ownership
+    // later moves to its own controller, that owner becomes the host.
+    private val devHost = object : DevConsoleHost {
+        override val scope get() = viewModelScope
+        override val state get() = _uiState.value
+        override suspend fun takeOverLink() {
+            val active = runJob
+            runJob = null
+            active?.cancel()
+            active?.join()
+        }
+        override fun setConnectionStatus(status: ConnectionStatus, message: String) =
+            this@ProtocolViewModel.setConnectionStatus(status, message)
+        override fun setStatusMessage(message: String) {
+            _uiState.value = _uiState.value.copy(statusMessage = message)
+        }
+        override fun tactrixClient() = this@ProtocolViewModel.tactrixClient
+        override fun kklManager() = this@ProtocolViewModel.kklManager
+        override fun obdLinkBtManager() = obdLinkManager
+        override fun obdLinkExManager() = obdLinkUsbManager
+        override fun ensureObdLinkBtManager(appContext: android.content.Context): ObdLinkBtManager =
+            obdLinkManager ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
+        override fun clearObdLinkBtManager() { obdLinkManager = null }
+        override fun clearObdLinkExManager() { obdLinkUsbManager = null }
+    }
+
+    /** Dev Mode → Raw Command Interface operations (extracted from this VM). */
+    internal val devConsole = DevConsoleController(devHost)
+
     fun attachSessionManager(manager: OpenPort2UsbSessionManager) {
         sessionManager = manager
     }
@@ -224,6 +258,8 @@ class ProtocolViewModel : ViewModel() {
 
     fun setSsmVariant(variant: SsmVariant?) = updateSettings { it.copy(ssmVariant = variant) }
 
+    fun setPollingMode(mode: PollingMode) = updateSettings { it.copy(pollingMode = mode) }
+
     fun setSimulatorMode(on: Boolean) = updateSettings { it.copy(simulatorMode = on) }
 
     fun setSimulatorPort(port: Int) = updateSettings {
@@ -253,306 +289,10 @@ class ProtocolViewModel : ViewModel() {
     /**
      * Routed from the BT-permission denial path. Drops the OBDLink selection
      * so the Settings UI reflects reality and nothing else tries to connect.
-     * The legacy obdLinkEnabled flag is no longer read by anything live — it
-     * stays persisted only to avoid prefs migration churn for existing users.
      */
     fun clearObdLinkAdapter() {
         if (_uiState.value.settings.adapter == Adapter.OBDLink) setAdapter(null)
         disconnectObdLink()
-    }
-
-    /**
-     * Dev-only: hunt the STN init that opens raw K-line SSM2 on the MX+ (for the
-     * EZ30R / 3.0R). Basic-connects, then cycles [ObdLinkProbeCandidates.klineInitMatrix]
-     * against the ECU until it answers an SSM2 reply (80 F0 10). Every step
-     * streams to the Developer BT log; the winning init lands in the status.
-     */
-    fun huntKlineInit(appContext: android.content.Context) {
-        setConnectionStatus(ConnectionStatus.PermissionRequired("OBDLink"), "Hunting K-line init…")
-        viewModelScope.launch(Dispatchers.IO) {
-            val mgr = obdLinkManager
-                ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
-            when (val r = mgr.connectBasic()) {
-                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Failure ->
-                    setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
-                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Connected -> {
-                    val transport = mgr.transport
-                    if (transport == null) {
-                        setConnectionStatus(ConnectionStatus.Error("no transport"), "K-line hunt: no transport")
-                        return@launch
-                    }
-                    val prober = com.protocol.app.obdlink.ObdLinkAutoProber(transport)
-                    val outcome = prober.run(
-                        com.protocol.app.obdlink.ObdLinkProbeCandidates.klineInitMatrix(),
-                        com.protocol.app.obdlink.ObdLinkProbeClassifier::klineReplyHit
-                    )
-                    when (outcome) {
-                        is com.protocol.app.obdlink.ObdLinkProbeOutcome.Hit ->
-                            setConnectionStatus(
-                                ConnectionStatus.Connected("OBDLink"),
-                                "K-line init FOUND: ${outcome.candidate.label} — see BT log"
-                            )
-                        is com.protocol.app.obdlink.ObdLinkProbeOutcome.Exhausted ->
-                            setConnectionStatus(
-                                ConnectionStatus.Error("no K-line init worked"),
-                                "K-line hunt: none of ${outcome.tried} candidates worked — see BT log"
-                            )
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Utility: factory-reset the paired OBDLink adapter over Bluetooth. Sends
-     * ATPP FF OFF (clear all programmable parameters / NVM-persisted config),
-     * ATD (restore default settings), ATZ (full reset). Returns the adapter to a
-     * known factory state, clearing any persisted protocol/PP config. The adapter
-     * reboots after ATZ, so the manager is discarded; the next connect builds a fresh one.
-     */
-    fun resetObdLinkAdapter(appContext: android.content.Context) {
-        val isEx = _uiState.value.settings.adapter == Adapter.OBDLinkEx
-        setConnectionStatus(
-            ConnectionStatus.PermissionRequired(if (isEx) "OBDLink EX" else "OBDLink"),
-            "Resetting adapter…"
-        )
-        viewModelScope.launch(Dispatchers.IO) {
-            if (isEx) {
-                // The EX can't reopen its own USB link — it must already be
-                // connected for the reset to reach the STN.
-                val mgr = obdLinkUsbManager
-                if (mgr?.transport == null) {
-                    setConnectionStatus(
-                        ConnectionStatus.Error("OBDLink EX not connected"),
-                        "Connect the EX first (Settings → OBDLink EX), then reset."
-                    )
-                    return@launch
-                }
-                val r = mgr.resetAdapter()
-                // ATZ reboots the STN; the manager is torn down so the next
-                // connect re-runs the baud sweep against the reset adapter.
-                obdLinkUsbManager?.disconnect()
-                obdLinkUsbManager = null
-                when (r) {
-                    is ObdLinkUsbManager.ConnectResult.Connected ->
-                        setConnectionStatus(
-                            ConnectionStatus.NoDevice,
-                            "OBDLink EX factory reset sent (ATPP FF OFF / ATD / ATZ) — reconnect from Settings."
-                        )
-                    is ObdLinkUsbManager.ConnectResult.Failure ->
-                        setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
-                }
-                return@launch
-            }
-            val mgr = obdLinkManager
-                ?: com.protocol.app.obdlink.ObdLinkBtManager(appContext).also { obdLinkManager = it }
-            val r = mgr.resetAdapter()
-            obdLinkManager = null // adapter reboots after ATZ — force a fresh manager next time
-            when (r) {
-                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Connected ->
-                    setConnectionStatus(
-                        ConnectionStatus.NoDevice,
-                        "OBDLink factory reset sent (ATPP FF OFF / ATD / ATZ) — power-cycle the adapter, then re-pair. See Developer BT log."
-                    )
-                is com.protocol.app.obdlink.ObdLinkBtManager.ConnectResult.Failure ->
-                    setConnectionStatus(ConnectionStatus.Error(r.reason), r.reason)
-            }
-        }
-    }
-
-    /**
-     * Dev console: send a raw command typed in the Home BYTES box, routed to
-     * whichever adapter is selected and auto-formatted for it (the reply lands
-     * in the RAW BYTES log).
-     *
-     *  - OBDLink (BT / EX): ELM/STN ASCII. A hex frame is normalized to
-     *    continuous hex (spaces stripped); a control command keeps its spaces.
-     *    If nothing is connected (BT only), a raw channel is opened first
-     *    (ATE0/ATL0/ATS0, no protocol init) so the console works standalone.
-     *  - OpenPort 2.0: the Tactrix line protocol via [OpenPortConsole] — an
-     *    `at*` verb is sent with an auto reqId; a hex frame is parsed to binary
-     *    and wrapped in the `att<ch>` transmit header for the selected protocol.
-     *
-     * Either way, a running poll/log loop is cancelled and joined first so the
-     * manual write can't interleave with the loop on the same link.
-     */
-    fun sendManualCommand(command: String, appContext: android.content.Context) {
-        val cmd = command.trim()
-        if (cmd.isEmpty()) return
-        val adapter = _uiState.value.settings.adapter
-        viewModelScope.launch(Dispatchers.IO) {
-            // Take over the link: stop any running poll/log loop and WAIT for it
-            // to fully finish before we write, so the two can't collide.
-            val active = runJob
-            runJob = null
-            active?.cancel()
-            active?.join()
-
-            when (adapter) {
-                Adapter.OpenPort -> sendManualOpenPort(cmd)
-                Adapter.OBDLinkEx -> sendManualObdLink(cmd, isEx = true, appContext)
-                Adapter.Ft232rl -> sendManualFt232rl(cmd)
-                else -> sendManualObdLink(cmd, isEx = false, appContext)  // OBDLink / null
-            }
-        }
-    }
-
-    /** OBDLink (BT/EX) manual command: normalize for the ELM/STN, open a raw
-     *  channel if needed (BT only), send, and let the transport log OUT/IN. */
-    private suspend fun sendManualObdLink(cmd: String, isEx: Boolean, appContext: android.content.Context) {
-        // ELM/STN spacing rule: hex frame -> continuous hex; control command ->
-        // verbatim (significant spaces preserved, e.g. "STPX d:..., r:1").
-        val wire = AdapterCommandLibrary.normalizeElm(cmd)
-        com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· manual: $wire")
-        var transport = if (isEx) obdLinkUsbManager?.transport else obdLinkManager?.transport
-        if (transport == null) {
-            if (isEx) {
-                // The USB connection can only be opened by the Activity (USB
-                // permission), so the console can't bring the EX up itself.
-                com.protocol.app.obdlink.ObdLinkTrafficLog.record(
-                    "OUT", "· OBDLink EX not connected — Settings → tap OBDLink EX first"
-                )
-                return
-            }
-            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· opening raw channel…")
-            val mgr = obdLinkManager ?: ObdLinkBtManager(appContext).also { obdLinkManager = it }
-            when (val r = mgr.connectBasic()) {
-                is ObdLinkBtManager.ConnectResult.Failure -> {
-                    com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· connect failed: ${r.reason}")
-                    return
-                }
-                is ObdLinkBtManager.ConnectResult.Connected -> transport = mgr.transport
-            }
-        }
-        try {
-            transport?.sendAscii(wire, timeoutMs = 2000L)
-        } catch (e: Exception) {
-            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· send failed: ${e.message}")
-        }
-    }
-
-    /**
-     * FT232RL (KKL) manual command. The cable has no command language of its own
-     * — there is no ELM/STN to talk to — so a manual command IS a raw SSM2 hex
-     * frame, sent straight onto the K-line via [KklKlineManager.transact]. The
-     * reply source is the request's destination byte (frame[1]: 0x10 ECM /
-     * 0x18 TCM). The connection is owned by the Activity, so this only drives an
-     * already-connected cable.
-     */
-    private fun sendManualFt232rl(cmd: String) {
-        fun log(m: String) = com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· $m")
-        val mgr = kklManager
-        if (mgr?.isConnected() != true) {
-            log("kkl: not connected — Dev Mode → FT232RL + K-line, then Connect")
-            return
-        }
-        val bytes = AdapterCommandLibrary.hexToBytes(cmd)
-        if (bytes == null || bytes.size < 5 || (bytes[0].toInt() and 0xFF) != 0x80) {
-            log("kkl: manual command must be a raw SSM2 hex frame (e.g. 80 10 F0 01 BF 40)")
-            return
-        }
-        val replySource = bytes[1].toInt() and 0xFF   // request dest = reply src
-        viewModelScope.launch(Dispatchers.IO) {
-            val active = runJob
-            runJob = null
-            active?.cancel(); active?.join()
-            val reply = mgr.transact(bytes, replySource, timeoutMs = 800L)
-            if (reply == null) log("kkl: no reply (frame sent, ECU silent / bad checksum)")
-        }
-    }
-
-    /** OpenPort 2.0 manual command via [com.protocol.app.openport2.OpenPortConsole].
-     *  The USB session is owned by the Activity, so the console can only drive an
-     *  already-connected OpenPort (same constraint as the EX). */
-    private fun sendManualOpenPort(cmd: String) {
-        val client = tactrixClient
-        if (client == null) {
-            _uiState.value = _uiState.value.copy(
-                statusMessage = "OpenPort not connected — plug it in & grant USB first"
-            )
-            return
-        }
-        // K-line vs CAN transmit framing follows the selected protocol (K-line
-        // is the proven default when none is picked).
-        val kline = _uiState.value.settings.protocol != BusProtocol.CAN
-        // A manual command may reconfigure the channel — invalidate the cached
-        // init so the next Read Live re-runs the full ati..atv setup.
-        client.channelInitialized = false
-        val status = com.protocol.app.openport2.OpenPortConsole.send(client, cmd, kline)
-        _uiState.value = _uiState.value.copy(statusMessage = status)
-    }
-
-    /**
-     * Dev: run a manual command SEQUENCE — each non-blank command top-to-bottom
-     * on the active adapter, [delayMs] between them. [waitForPrompt] (OBDLink):
-     * wait for the `>` prompt per command, vs fire-and-read after the delay.
-     * Each command's reply is reported via [onResponse] (index, text) so the
-     * generator can show it beside that row. Uses the page's adapter/protocol;
-     * takes over the link first so it can't collide with a running poll.
-     */
-    fun runManualSequence(
-        commands: List<String>,
-        delaysMs: List<Long>,
-        onResponse: (index: Int, response: String) -> Unit
-    ) {
-        val adapter = _uiState.value.settings.adapter
-        viewModelScope.launch(Dispatchers.IO) {
-            val active = runJob
-            runJob = null
-            active?.cancel(); active?.join()
-
-            for ((i, raw) in commands.withIndex()) {
-                val cmd = raw.trim()
-                if (cmd.isEmpty()) continue
-                val resp = when (adapter) {
-                    Adapter.OpenPort -> {
-                        val client = tactrixClient
-                        if (client == null) "OpenPort not connected"
-                        else com.protocol.app.openport2.OpenPortConsole.send(
-                            client, cmd, _uiState.value.settings.protocol != BusProtocol.CAN
-                        )
-                    }
-                    Adapter.OBDLink, Adapter.OBDLinkEx -> {
-                        val transport = if (adapter == Adapter.OBDLinkEx) obdLinkUsbManager?.transport
-                            else obdLinkManager?.transport
-                        if (transport == null) "not connected"
-                        else {
-                            // Wait-for-prompt is implicit in the adapter config —
-                            // the STN sendAscii waits for the '>' reply itself.
-                            val wire = AdapterCommandLibrary.normalizeElm(cmd)
-                            try {
-                                transport.sendAscii(wire, timeoutMs = 3000L).trim()
-                            } catch (e: Exception) {
-                                "send failed: ${e.message}"
-                            }
-                        }
-                    }
-                    Adapter.Ft232rl -> {
-                        // KKL has no command language — each step is a raw SSM2
-                        // hex frame onto the K-line. Reply src = request dest (byte 1).
-                        val mgr = kklManager
-                        val bytes = AdapterCommandLibrary.hexToBytes(cmd)
-                        when {
-                            mgr?.isConnected() != true -> "FT232RL not connected"
-                            bytes == null || bytes.size < 5 || (bytes[0].toInt() and 0xFF) != 0x80 ->
-                                "not a raw SSM2 frame (e.g. 80 10 F0 01 BF 40)"
-                            else -> {
-                                val src = bytes[1].toInt() and 0xFF
-                                val reply = mgr.transact(bytes, src, timeoutMs = 800L)
-                                reply?.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-                                    ?: "no reply"
-                            }
-                        }
-                    }
-                    else -> "pick an adapter first"  // null
-                }
-                // SnapshotStateList writes are thread-safe; update the row's log.
-                onResponse(i, resp)
-                // Per-row delay between commands (mostly for baud-switch timing).
-                val d = delaysMs.getOrElse(i) { 0L }
-                if (d > 0) kotlinx.coroutines.delay(d)
-            }
-        }
     }
 
     /**
@@ -586,6 +326,7 @@ class ProtocolViewModel : ViewModel() {
             val r = when (protocol) {
                 BusProtocol.CAN -> mgr.connect(seq)
                 BusProtocol.KLine -> mgr.connectKline(seq)
+                BusProtocol.CanBroadcast -> ObdLinkBtManager.ConnectResult.Failure("unsupported")
             }
             when (r) {
                 is ObdLinkBtManager.ConnectResult.Connected -> {
@@ -625,103 +366,6 @@ class ProtocolViewModel : ViewModel() {
                 adapterPresent = false,
                 statusMessage = "OBDLink disconnected"
             )
-        }
-    }
-
-    /**
-     * One-shot K-line CONTINUOUS test. Builds the on-page ECM A8 **01**
-     * (respond-continuously) frame from the same PIDs the poller uses — no
-     * hand-typed hex to fat-finger — and fires it through STPX with a burst
-     * response count, so the ECU streams many replies off a SINGLE request. The
-     * stream lands in the BYTES log; a wall of `80 F0 10 .. E8` frames = the STN
-     * holds continuous (the OpenPort path). One frame / STOPPED = it doesn't.
-     * Does NOT touch the live poller; takes over the link for the test only.
-     */
-    fun runKlineContinuousTest(appContext: android.content.Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val active = runJob
-            runJob = null
-            active?.cancel(); active?.join()
-
-            fun log(m: String) = com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· $m")
-            val state = _uiState.value
-            val transport = when (state.settings.adapter) {
-                Adapter.OBDLinkEx -> obdLinkUsbManager?.transport
-                Adapter.OBDLink -> obdLinkManager?.transport
-                else -> null
-            }
-            if (transport == null) {
-                log("continuous test: connect an OBDLink on K-line first"); return@launch
-            }
-            val addrs = Ssm2Pids.DEFAULT_DEMO_PIDS
-                .filter { it.id in state.gaugeLayout.pidIds && it.category == com.protocol.app.openport2.Ssm2PidCategory.ECU }
-                .flatMap { it.addresses }
-            if (addrs.isEmpty()) { log("continuous test: no ECM params on the page"); return@launch }
-
-            val frame = com.protocol.app.openport2.Ssm2AddressQuery.buildA8Query(
-                addrs, com.protocol.app.openport2.Ssm2AddressQuery.DEST_ECM, flags = 0x01
-            )
-            val hex = com.protocol.app.obdlink.ObdLinkSsm2Can.toElmHex(frame)
-            log("continuous test: A8 01 burst (${addrs.size} addrs, r:25) — watch for a wall of E8 frames")
-            try {
-                val reply = transport.sendAscii("STPX d:$hex,r:25,t:3000", timeoutMs = 4000L)
-                val frames = reply.replace(" ", "").replace("\r", "").replace("\n", "")
-                    .split("80F010").size - 1
-                log("continuous test: ~$frames frames streamed (>1 = continuous WORKS)")
-                transport.drain()
-            } catch (e: Exception) {
-                log("continuous test failed: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Dev: passive CAN sniff (listen-only). For the 2006 EZ30R CAN tap, which
-     * is **broadcast-only** — the ECM drives 500k CAN but offers NO 7E0/7E8
-     * diagnostic channel, so polling can't work; the only thing to do is
-     * listen. Sets `ATH1` (so each frame's CAN-ID shows) + `ATCAF0` (raw, no
-     * auto-format), then `STMA` (monitor ALL frames, ignores the RX filter,
-     * transmits nothing). Broadcast frames stream into the RAW BYTES log via the
-     * transport's reader thread. Requires an OBDLink (BT or EX) already
-     * connected on CAN; stop with [stopCanMonitor].
-     */
-    fun startCanMonitor(appContext: android.content.Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val active = runJob
-            runJob = null
-            active?.cancel(); active?.join()
-            fun log(m: String) = com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· $m")
-            val transport = when (_uiState.value.settings.adapter) {
-                Adapter.OBDLinkEx -> obdLinkUsbManager?.transport
-                Adapter.OBDLink -> obdLinkManager?.transport
-                else -> null
-            }
-            if (transport == null) {
-                log("CAN monitor: connect an OBDLink on CAN first (Settings → adapter + CAN)")
-                return@launch
-            }
-            log("CAN monitor: ATH1 + STMA (listen-only, all frames) — watch for broadcast frames")
-            try {
-                transport.sendAscii("ATH1", timeoutMs = 800L)   // headers on -> show CAN IDs
-                transport.sendAscii("ATCAF0", timeoutMs = 800L)  // raw frames, no auto-format
-                transport.beginMonitor("STMA")                   // monitor all; no '>' until stopped
-            } catch (e: Exception) {
-                log("CAN monitor failed: ${e.message}")
-            }
-        }
-    }
-
-    /** Stop the passive CAN sniff started by [startCanMonitor] (sends the bare
-     *  0x0D that halts STMA and re-enables the prompt). Safe if not monitoring. */
-    fun stopCanMonitor() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val transport = when (_uiState.value.settings.adapter) {
-                Adapter.OBDLinkEx -> obdLinkUsbManager?.transport
-                Adapter.OBDLink -> obdLinkManager?.transport
-                else -> null
-            } ?: return@launch
-            transport.stopMonitor()
-            com.protocol.app.obdlink.ObdLinkTrafficLog.record("OUT", "· CAN monitor stopped")
         }
     }
 
@@ -775,6 +419,7 @@ class ProtocolViewModel : ViewModel() {
                 val r = when (protocol) {
                     BusProtocol.CAN -> mgr.connect(seq)
                     BusProtocol.KLine -> mgr.connectKline(seq)
+                    BusProtocol.CanBroadcast -> ObdLinkUsbManager.ConnectResult.Failure("unsupported")
                 }
                 when (r) {
                     is ObdLinkUsbManager.ConnectResult.Connected -> {
@@ -1036,7 +681,6 @@ class ProtocolViewModel : ViewModel() {
     fun clearOpenSession() {
         runJob?.cancel()
         runJob = null
-        val wasRunning = _uiState.value.isRunningProbe
         val wasReading = _uiState.value.isReadingLive
         val wasLogging = _uiState.value.isLogging
         val session = openSession
@@ -1045,13 +689,9 @@ class ProtocolViewModel : ViewModel() {
         if (session != null) {
             sessionManager?.closeSession(session)
         }
-        // Wipe the probe outcome card whenever the adapter goes away — a stale
-        // "ECU REPLIED" sitting on screen after detach is misleading. If a run
-        // was mid-flight, mark it as USB-disconnected; otherwise just clear.
-        // Also drop liveValues so gauges revert to "--" instead of showing
-        // the last value they had before the adapter vanished.
+        // Drop liveValues so gauges revert to "--" instead of showing the last
+        // value they had before the adapter vanished.
         _uiState.value = _uiState.value.copy(
-            isRunningProbe = false,
             isReadingLive = false,
             isLogging = false,
             liveValues = emptyMap(),
@@ -1059,12 +699,7 @@ class ProtocolViewModel : ViewModel() {
             liveValuesMax = emptyMap(),
             lastSampleTimestampMs = 0L,
             lastPollWireMs = 0L,
-            log = if (wasRunning) _uiState.value.log else emptyList(),
-            lastOutcome = if (wasRunning) Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED else null,
-            ssm2DecodeBundle = if (wasRunning) _uiState.value.ssm2DecodeBundle else null,
-            ssm2ResponseHex = if (wasRunning) _uiState.value.ssm2ResponseHex else "",
-            attStepDurationMs = if (wasRunning) _uiState.value.attStepDurationMs else null,
-            statusMessage = if (wasRunning || wasReading || wasLogging)
+            statusMessage = if (wasReading || wasLogging)
                 "USB device detached — run aborted"
             else
                 "USB device detached"
@@ -1083,7 +718,6 @@ class ProtocolViewModel : ViewModel() {
      */
     fun startReadingLive(recordToLog: Boolean = false) {
         val state = _uiState.value
-        if (state.isRunningProbe) return
         if (state.isReadingLive) {
             // Poll job already running — just flip the recording flag if needed.
             if (recordToLog && !state.isLogging) {
@@ -1550,79 +1184,6 @@ class ProtocolViewModel : ViewModel() {
         )
     }
 
-    fun runProbe() {
-        if (_uiState.value.isRunningProbe || _uiState.value.isReadingLive || _uiState.value.isLogging) return
-        val s = _uiState.value.settings
-        // Probe still drives the K-line ATI..ATV init + BF40 ECU ID query. The
-        // CAN and OBDLink paths verify themselves through Read Live Data; a
-        // dedicated probe for each path is a follow-up.
-        if (!s.simulatorMode && (s.adapter != Adapter.OpenPort || s.protocol != BusProtocol.KLine)) {
-            _uiState.value = _uiState.value.copy(
-                statusMessage = "Test SSM2 Probe runs on OpenPort 2.0 + K-Line. For the other paths, use Read Live Data."
-            )
-            return
-        }
-        openSession ?: run {
-            _uiState.value = _uiState.value.copy(
-                statusMessage = "No OpenPort session — discover and grant USB permission first"
-            )
-            return
-        }
-        val client = tactrixClient ?: run {
-            _uiState.value = _uiState.value.copy(
-                statusMessage = "No adapter client — reconnect the OpenPort"
-            )
-            return
-        }
-
-        // Test SSM2 Probe is a connection-verification action — always re-run
-        // the full ATI→ATV init so the result reflects the wire right now, not
-        // a cached "channel still open" assumption from a previous press.
-        client.channelInitialized = false
-
-        _uiState.value = _uiState.value.copy(
-            isRunningProbe = true,
-            log = emptyList(),
-            lastOutcome = null,
-            ssm2DecodeBundle = null,
-            ssm2ResponseHex = "",
-            attStepDurationMs = null,
-            statusMessage = "Running SSM2 ECM probe..."
-        )
-
-        runJob = viewModelScope.launch(Dispatchers.IO) {
-            val probe = Ssm2EcmProbe(client)
-            val result = probe.run()
-
-            val responseHex = result.ssm2DecodeBundle?.response?.rawBytes
-                ?.let { TactrixHex.bytesToHex(it) }
-                ?: result.ecuReplyBytes?.let { TactrixHex.bytesToHex(it) }
-                ?: ""
-            val statusLine = when (result.outcome) {
-                Ssm2EcmProbe.ProbeOutcome.SUCCESS_ECU_REPLIED ->
-                    "Probe complete — ECU replied (${result.ecuReplyBytes?.size ?: 0} bytes)"
-                Ssm2EcmProbe.ProbeOutcome.FAIL_INIT_STEP ->
-                    "Probe failed at an init step — see log"
-                Ssm2EcmProbe.ProbeOutcome.FAIL_NO_ECU_REPLY ->
-                    "Probe sent the SSM2 query but no ECU reply was recognized"
-                Ssm2EcmProbe.ProbeOutcome.FAIL_TRANSPORT ->
-                    "Probe failed at the USB transport layer"
-                Ssm2EcmProbe.ProbeOutcome.FAIL_USB_DISCONNECTED ->
-                    "USB device disconnected during probe"
-            }
-
-            _uiState.value = _uiState.value.copy(
-                isRunningProbe = false,
-                log = result.log,
-                lastOutcome = result.outcome,
-                ssm2DecodeBundle = result.ssm2DecodeBundle,
-                ssm2ResponseHex = responseHex,
-                attStepDurationMs = result.attStepDurationMs,
-                statusMessage = statusLine
-            )
-        }
-    }
-
     /**
      * Read-only DTC read for the Diagnostics page. Reuses the same A8
      * read-address transport the live-data path uses (no transport changes),
@@ -1726,17 +1287,6 @@ class ProtocolViewModel : ViewModel() {
             dtcStatus = status,
             dtcCurrent = r.current.map { "${it.code}  ${it.description}" },
             dtcStored = r.stored.map { "${it.code}  ${it.description}" }
-        )
-    }
-
-    fun clearLog() {
-        _uiState.value = _uiState.value.copy(
-            log = emptyList(),
-            lastOutcome = null,
-            ssm2DecodeBundle = null,
-            ssm2ResponseHex = "",
-            attStepDurationMs = null,
-            statusMessage = "Log cleared"
         )
     }
 

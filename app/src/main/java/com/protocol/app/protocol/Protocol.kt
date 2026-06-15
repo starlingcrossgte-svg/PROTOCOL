@@ -396,27 +396,20 @@ class Protocol : ComponentActivity() {
                     onResizeGauge = { pidId, c, r, w, h ->
                         viewModel.resizeGauge(pidId, c, r, w, h)
                     },
-                    onRunProbe = { runActionOrDiscover(PendingAction.Probe) },
-                    onHuntKlineInit = { viewModel.huntKlineInit(applicationContext) },
-                    onSendManualCommand = { cmd -> viewModel.sendManualCommand(cmd, applicationContext) },
+                    onSendManualCommand = { cmd -> viewModel.devConsole.sendManualCommand(cmd, applicationContext) },
                     onReadDtc = { viewModel.readDtcs() },
                     onCopyDtc = { copyDtcToClipboard() },
                     onExportDtc = { launchExportDtc() },
                     onStartReadingLive = { runActionOrDiscover(PendingAction.ReadLive) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
                     onStartLogging = { runActionOrDiscover(PendingAction.LogLive) },
-                    onStopLogging = { viewModel.stopLogging() },
-                    onClearLog = { viewModel.clearLog() },
-                    onCopyLog = { copyLogToClipboard() },
-                    onExportLog = { launchExportLog() },
                     onClearSessionLog = { viewModel.clearSessionLog() },
-                    onCopySessionLog = { copySessionLogToClipboard() },
                     onExportSessionLog = { launchExportSessionLog() },
                     onPickBackground = { launchBackgroundPicker() },
                     onClearBackground = { viewModel.setBackgroundUri(null) },
                     onAdapterChange = { adapter -> onAdapterChanged(adapter) },
                     onProtocolChange = { protocol -> onProtocolChanged(protocol) },
-                    onSsmVariantChange = { variant -> viewModel.setSsmVariant(variant) },
+                    onPollingModeChange = { mode -> viewModel.setPollingMode(mode) },
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
                     onKlineStreamingChange = { on -> viewModel.setKlineStreaming(on) },
@@ -424,13 +417,13 @@ class Protocol : ComponentActivity() {
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
                     onSelectInitSequence = { id -> viewModel.setSelectedInitSequence(id) },
-                    onKlineContinuousTest = { viewModel.runKlineContinuousTest(applicationContext) },
-                    onStartCanMonitor = { viewModel.startCanMonitor(applicationContext) },
-                    onStopCanMonitor = { viewModel.stopCanMonitor() },
+                    onKlineContinuousTest = { viewModel.devConsole.runKlineContinuousTest() },
+                    onStartCanMonitor = { viewModel.devConsole.startCanMonitor() },
+                    onStopCanMonitor = { viewModel.devConsole.stopCanMonitor() },
                     onSelectAdapter = { a -> viewModel.setAdapter(a) },
                     onSelectProtocol = { p -> viewModel.setProtocol(p) },
                     onConnectAdapter = { connectSelectedAdapter() },
-                    onRunSequence = { cmds, delays, cb -> viewModel.runManualSequence(cmds, delays, cb) },
+                    onRunSequence = { cmds, delays, cb -> viewModel.devConsole.runManualSequence(cmds, delays, cb) },
                     onApplyPreset = { i -> viewModel.applyPreset(i) },
                     onResizeSessionLog = { dp -> viewModel.setSessionLogHeightDp(dp) },
                     onAutoSaveLogs = { autoSaveBothLogs() },
@@ -438,7 +431,7 @@ class Protocol : ComponentActivity() {
                     onRawLogNameChange = { name -> viewModel.setRawLogName(name) },
                     onSessionLogNameChange = { name -> viewModel.setSessionLogName(name) },
                     onResetLayout = { viewModel.resetLayout() },
-                    onResetAdapter = { viewModel.resetObdLinkAdapter(applicationContext) },
+                    onResetAdapter = { viewModel.devConsole.resetObdLinkAdapter(applicationContext) },
                     onShareSavedSession = { launchShareSavedSession() }
                 )
             }
@@ -472,7 +465,6 @@ class Protocol : ComponentActivity() {
         val s = viewModel.uiState.value.settings
         if (s.simulatorMode || viewModel.isConnected()) {
             when (action) {
-                PendingAction.Probe -> viewModel.runProbe()
                 PendingAction.ReadLive -> viewModel.startReadingLive(recordToLog = false)
                 PendingAction.LogLive -> viewModel.startLogging()
             }
@@ -731,36 +723,6 @@ class Protocol : ComponentActivity() {
 
     private fun deviceLabel(device: UsbDevice): String {
         return "VID=${device.vendorId} PID=${device.productId}"
-    }
-
-    private fun copyLogToClipboard() {
-        val text = ProtocolLogFormatter.formatForExport(viewModel.uiState.value)
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(
-            ClipData.newPlainText("PROTOCOL Log", text)
-        )
-        Toast.makeText(this, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun launchExportLog() {
-        pendingExportText = ProtocolLogFormatter.formatForExport(viewModel.uiState.value)
-        exportLogLauncher.launch(ProtocolLogFormatter.suggestedExportFileName())
-    }
-
-    private fun copySessionLogToClipboard() {
-        val state = viewModel.uiState.value
-        if (state.sessionLog.isEmpty()) {
-            Toast.makeText(this, "No session data to copy", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val text = ProtocolLogFormatter.formatSessionLogCleanText(
-            state.sessionLog,
-            state.pidIdsOnLiveData,
-            oldestFirst = true
-        )
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("PROTOCOL Session Log", text))
-        Toast.makeText(this, "Session log copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
     // Share the most recent autosaved session log via the system share

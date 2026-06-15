@@ -50,7 +50,6 @@ import com.protocol.app.R
 
 @Composable
 internal fun HomePage(
-    uiState: ProtocolUiState,
     onOpenSubPage: (SubPage) -> Unit
 ) {
     Column(
@@ -147,6 +146,7 @@ internal fun HomePage(
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
             HomeMenuButton(label = "Dev Mode") { onOpenSubPage(SubPage.Developer) }
+            HomeMenuButton(label = "Library") { onOpenSubPage(SubPage.Library) }
             HomeMenuButton(label = "Notices", shape = y2kBottomCutShape()) { onOpenSubPage(SubPage.Notices) }
         }
         // Developer Mode is now its own page (Dev Mode button above) — no longer

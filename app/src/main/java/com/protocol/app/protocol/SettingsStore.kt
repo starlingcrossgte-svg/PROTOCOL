@@ -7,18 +7,26 @@ import android.content.Context
 // K-line transport is fully wired (KklKlineManager / KklKlineSource) — the phone
 // is the SSM2 master; selectable from Settings, K-line only.
 enum class Adapter { OpenPort, OBDLink, OBDLinkEx, Ft232rl }
-enum class BusProtocol { KLine, CAN }
+// CAN splits into two incompatible cases: CanDiagnostic = ISO-TP request/response
+// on 7E0/7E8 (bench / future CAN cars); CanBroadcast = the '06 Outback's listen-only
+// powertrain CAN (no diagnostic channel — requests are unsafe there). `CAN` is the
+// existing diagnostic value, kept as-is to avoid churn; CanBroadcast is the new one.
+enum class BusProtocol { KLine, CAN, CanBroadcast }
 enum class SsmVariant { SSM2, SSM3 }
+
+// How Live Data gets data off the bus. Poll = request/response; Stream = one A8 01,
+// the ECU streams; Monitor = listen-only decode of a broadcast bus.
+enum class PollingMode { Poll, Stream, Monitor }
 
 data class AppSettings(
     val pollIntervalMs: Int = DEFAULT_POLL_INTERVAL_MS,
     val sessionLogMaxSize: Int = DEFAULT_SESSION_LOG_MAX,
     val devMode: Boolean = false,
     val splitScreenMode: Boolean = true,
-    val obdLinkEnabled: Boolean = false,
     val adapter: Adapter? = null,
     val protocol: BusProtocol? = null,
     val ssmVariant: SsmVariant? = null,
+    val pollingMode: PollingMode = PollingMode.Poll,
     val simulatorMode: Boolean = false,
     val simulatorPort: Int = DEFAULT_SIMULATOR_PORT,
     /** SAF tree URI (as String) of the folder CSV logs are saved into by the
@@ -36,9 +44,6 @@ data class AppSettings(
     /** Index into PidPresets.PRESETS of the last preset loaded onto the Live
      *  Data gauges, or [NO_PRESET] if none. Dev-only. */
     val selectedPresetIndex: Int = NO_PRESET,
-    /** When true, OBDLink connects using [selectedInitSequenceId] from the
-     *  command library instead of the built-in default init. Dev/experimental. */
-    val autoInitEnabled: Boolean = false,
     /** Id of the chosen AdapterCommandLibrary sequence (null = library default).
      *  DEV-ONLY: consulted only when connecting from the Dev page CONNECT button.
      *  Live Data always connects with the verified standard init, never this. */
@@ -79,10 +84,10 @@ class SettingsStore(context: Context) {
         sessionLogMaxSize = prefs.getInt(KEY_LOG_MAX, AppSettings.DEFAULT_SESSION_LOG_MAX),
         devMode = prefs.getBoolean(KEY_DEV_MODE, false),
         splitScreenMode = prefs.getBoolean(KEY_SPLIT_SCREEN, true),
-        obdLinkEnabled = prefs.getBoolean(KEY_OBDLINK_ENABLED, false),
         adapter = prefs.getInt(KEY_ADAPTER, -1).takeIf { it >= 0 }?.let { Adapter.values().getOrNull(it) },
         protocol = prefs.getInt(KEY_PROTOCOL, -1).takeIf { it >= 0 }?.let { BusProtocol.values().getOrNull(it) },
         ssmVariant = prefs.getInt(KEY_SSM_VARIANT, -1).takeIf { it >= 0 }?.let { SsmVariant.values().getOrNull(it) },
+        pollingMode = PollingMode.values().getOrNull(prefs.getInt(KEY_POLLING_MODE, 0)) ?: PollingMode.Poll,
         simulatorMode = prefs.getBoolean(KEY_SIMULATOR_MODE, false),
         simulatorPort = prefs.getInt(KEY_SIMULATOR_PORT, AppSettings.DEFAULT_SIMULATOR_PORT),
         csvFolderUri = prefs.getString(KEY_CSV_FOLDER, null),
@@ -92,7 +97,6 @@ class SettingsStore(context: Context) {
             ?: AppSettings.DEFAULT_SESSION_LOG_NAME,
         sessionLogHeightDp = prefs.getFloat(KEY_SESSION_LOG_HEIGHT, AppSettings.DEFAULT_SESSION_LOG_HEIGHT_DP),
         selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET),
-        autoInitEnabled = prefs.getBoolean(KEY_AUTO_INIT, false),
         selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null),
         klineStreaming = prefs.getBoolean(KEY_KLINE_STREAMING, false)
     )
@@ -103,10 +107,10 @@ class SettingsStore(context: Context) {
             .putInt(KEY_LOG_MAX, s.sessionLogMaxSize)
             .putBoolean(KEY_DEV_MODE, s.devMode)
             .putBoolean(KEY_SPLIT_SCREEN, s.splitScreenMode)
-            .putBoolean(KEY_OBDLINK_ENABLED, s.obdLinkEnabled)
             .putInt(KEY_ADAPTER, s.adapter?.ordinal ?: -1)
             .putInt(KEY_PROTOCOL, s.protocol?.ordinal ?: -1)
             .putInt(KEY_SSM_VARIANT, s.ssmVariant?.ordinal ?: -1)
+            .putInt(KEY_POLLING_MODE, s.pollingMode.ordinal)
             .putBoolean(KEY_SIMULATOR_MODE, s.simulatorMode)
             .putInt(KEY_SIMULATOR_PORT, s.simulatorPort)
             .putString(KEY_CSV_FOLDER, s.csvFolderUri)
@@ -114,7 +118,6 @@ class SettingsStore(context: Context) {
             .putString(KEY_SESSION_LOG_NAME, s.sessionLogName)
             .putFloat(KEY_SESSION_LOG_HEIGHT, s.sessionLogHeightDp)
             .putInt(KEY_SELECTED_PRESET, s.selectedPresetIndex)
-            .putBoolean(KEY_AUTO_INIT, s.autoInitEnabled)
             .putString(KEY_INIT_SEQ, s.selectedInitSequenceId)
             .putBoolean(KEY_KLINE_STREAMING, s.klineStreaming)
             .apply()
@@ -126,10 +129,10 @@ class SettingsStore(context: Context) {
         private const val KEY_LOG_MAX = "session_log_max"
         private const val KEY_DEV_MODE = "dev_mode"
         private const val KEY_SPLIT_SCREEN = "split_screen_mode"
-        private const val KEY_OBDLINK_ENABLED = "obdlink_enabled"
         private const val KEY_ADAPTER = "adapter"
         private const val KEY_PROTOCOL = "protocol"
         private const val KEY_SSM_VARIANT = "ssm_variant"
+        private const val KEY_POLLING_MODE = "polling_mode"
         private const val KEY_SIMULATOR_MODE = "simulator_mode"
         private const val KEY_SIMULATOR_PORT = "simulator_port"
         private const val KEY_CSV_FOLDER = "csv_folder_uri"
@@ -137,7 +140,6 @@ class SettingsStore(context: Context) {
         private const val KEY_SESSION_LOG_NAME = "csv_session_log_name"
         private const val KEY_SESSION_LOG_HEIGHT = "session_log_height_dp"
         private const val KEY_SELECTED_PRESET = "selected_preset_index"
-        private const val KEY_AUTO_INIT = "auto_init_enabled"
         private const val KEY_INIT_SEQ = "selected_init_sequence_id"
         private const val KEY_KLINE_STREAMING = "kline_streaming"
     }

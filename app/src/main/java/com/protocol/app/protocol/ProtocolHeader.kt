@@ -32,34 +32,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/**
- * Thin colored bar pinned to the top of the screen above the header.
- * Replaces the old AdapterPill — communicates connection state at a
- * glance without occupying meaningful real estate.
- */
-@Composable
-internal fun ConnectionStatusStripe(
-    visible: Boolean,
-    flashing: Boolean = false,
-    flash: () -> Float = { 0f }
-) {
-    // Presence-based: solid white (Accent) when an adapter is present, invisible
-    // when not. During the no-ECU flash it shows a white<->red mix instead. 3 dp
-    // slot always reserved (no layout shift); the flash value is read in the
-    // draw phase so it never recomposes.
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(3.dp)
-            .drawBehind {
-                when {
-                    flashing -> drawRect(lerp(Color.White, Color.Red, flash().coerceIn(0f, 1f)))
-                    visible -> drawRect(Accent)
-                }
-            }
-    )
-}
-
 // Hamburger opens a small dropdown with sub-page destinations plus the
 // Split Screen toggle. Made internal so LiveDataPage can drop the same
 // icon inline next to its mode buttons when the shared header is hidden.

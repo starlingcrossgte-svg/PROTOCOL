@@ -54,7 +54,7 @@ import coil.compose.AsyncImage
  * Companion files:
  *   - Palette.kt          color constants, gradient brushes, y2kCornerShape
  *   - BackgroundDecor.kt  drawY2kBackgroundDecor
- *   - ProtocolHeader.kt   ProtocolHeader, ConnectionStatusStripe
+ *   - ProtocolHeader.kt   HamburgerMenu, CloseButton
  *   - HomePage.kt         HomePage (Page 0 of the pager)
  *   - LiveDataPage.kt     LiveDataPage (Page 1 of the pager)
  *   - SnapGaugeGrid.kt    SnapGaugeGrid + GaugeTile + DragBar + EditModeOverlay
@@ -76,8 +76,6 @@ fun ProtocolScreen(
     onExitEditMode: () -> Unit,
     onRemoveGauge: (String) -> Unit,
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
-    onRunProbe: () -> Unit,
-    onHuntKlineInit: () -> Unit,
     onSendManualCommand: (String) -> Unit,
     onReadDtc: () -> Unit,
     onCopyDtc: () -> Unit,
@@ -85,18 +83,13 @@ fun ProtocolScreen(
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
     onStartLogging: () -> Unit,
-    onStopLogging: () -> Unit,
-    onClearLog: () -> Unit,
-    onCopyLog: () -> Unit,
-    onExportLog: () -> Unit,
     onClearSessionLog: () -> Unit,
-    onCopySessionLog: () -> Unit,
     onExportSessionLog: () -> Unit,
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onAdapterChange: (Adapter?) -> Unit,
     onProtocolChange: (BusProtocol?) -> Unit,
-    onSsmVariantChange: (SsmVariant?) -> Unit,
+    onPollingModeChange: (PollingMode) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
     onKlineStreamingChange: (Boolean) -> Unit,
@@ -243,7 +236,6 @@ fun ProtocolScreen(
                                 onExportDtc = onExportDtc
                             )
                             1 -> HomePage(
-                                uiState = uiState,
                                 onOpenSubPage = onOpenSubPage
                             )
                             else -> LiveDataPage(
@@ -253,9 +245,7 @@ fun ProtocolScreen(
                                 onStartReadingLive = onStartReadingLive,
                                 onStopReadingLive = onStopReadingLive,
                                 onStartLogging = onStartLogging,
-                                onStopLogging = onStopLogging,
                                 onClearSessionLog = onClearSessionLog,
-                                onCopySessionLog = onCopySessionLog,
                                 onExportSessionLog = onExportSessionLog,
                                 onEnterEditMode = onEnterEditMode,
                                 onExitEditMode = onExitEditMode,
@@ -300,7 +290,7 @@ fun ProtocolScreen(
                         uiState = uiState,
                         onAdapterChange = onAdapterChange,
                         onProtocolChange = onProtocolChange,
-                        onSsmVariantChange = onSsmVariantChange,
+                        onPollingModeChange = onPollingModeChange,
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onPickCsvFolder = onPickCsvFolder,
@@ -308,15 +298,11 @@ fun ProtocolScreen(
                         onSessionLogNameChange = onSessionLogNameChange
                     )
                     SubPage.Flash, SubPage.Tuning ->
-                        StubBody(page = uiState.activeSubPage!!)
+                        StubBody(page = uiState.activeSubPage)
                     SubPage.Notices -> NoticesBody()
+                    SubPage.Library -> LibraryBody()
                     SubPage.Developer -> DeveloperBody(
                         uiState = uiState,
-                        onRunProbe = onRunProbe,
-                        onClearProbeLog = onClearLog,
-                        onCopyProbeLog = onCopyLog,
-                        onExportProbeLog = onExportLog,
-                        onHuntKlineInit = onHuntKlineInit,
                         onSendManualCommand = onSendManualCommand,
                         onSimulatorModeChange = onSimulatorModeChange,
                         onSimulatorPortChange = onSimulatorPortChange,

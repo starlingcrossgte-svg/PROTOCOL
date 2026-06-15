@@ -94,11 +94,6 @@ import java.util.Locale
 @Composable
 internal fun DeveloperBody(
     uiState: ProtocolUiState,
-    onRunProbe: () -> Unit,
-    onClearProbeLog: () -> Unit,
-    onCopyProbeLog: () -> Unit,
-    onExportProbeLog: () -> Unit,
-    onHuntKlineInit: () -> Unit,
     onSendManualCommand: (String) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
@@ -116,8 +111,8 @@ internal fun DeveloperBody(
     // Which command set the console drives. The dev console talks to exactly one
     // adapter at a time, so the palette + manual router key off the selection.
     val family = if (s.adapter == Adapter.OpenPort) CommandFamily.OpenPort else CommandFamily.ELM
-    val trafficEvents by UsbTrafficLog.events.collectAsState()
-    val btEvents by ObdLinkTrafficLog.events.collectAsState()
+    val usbRevision by UsbTrafficLog.revision.collectAsState()
+    val btRevision by ObdLinkTrafficLog.revision.collectAsState()
     val context = LocalContext.current
     // SAF "create document" save: Export writes the log to a folder the user
     // picks (Downloads/Files) via the system dialog. pendingCsv holds it until
@@ -136,8 +131,13 @@ internal fun DeveloperBody(
         }
     }
 
-    // Merge USB + OBDLink traffic into one time-ordered stream.
-    val merged = remember(trafficEvents, btEvents) {
+    // Merge USB + OBDLink traffic into one time-ordered stream. Snapshot the
+    // ring buffers only when a revision bumps (i.e. only while this page is
+    // composed and new traffic arrives) — the O(n) copy stays off the
+    // wire-recording hot path.
+    val merged = remember(usbRevision, btRevision) {
+        val trafficEvents = UsbTrafficLog.snapshot()
+        val btEvents = ObdLinkTrafficLog.snapshot()
         val lines = ArrayList<LogLine>(trafficEvents.size + btEvents.size)
         for (e in trafficEvents)
             lines.add(LogLine(e.timestampMs, e.direction == TrafficEvent.Direction.OUT, e.hex, e.byteCount, e.ascii))
@@ -167,7 +167,20 @@ internal fun DeveloperBody(
         // Home/Settings. Selecting does NOT connect — the CONNECT button (below
         // the log) does. Tap a selected adapter/bus again to clear it.
         CategoryHeader("CONFIGURATION", startPadding = 8.dp)
-        AdapterSelector(selected = s.adapter, onSelect = onSelectAdapter)
+        SelectorDropdown(
+            placeholder = "SELECT ADAPTER",
+            items = listOf(
+                DropdownItem("OPEN PORT 2.0"),
+                DropdownItem("OBDLINK BLUETOOTH"),
+                DropdownItem("OBDLINK USB"),
+                DropdownItem("FT232RL")
+            ),
+            selectedIndex = s.adapter?.ordinal,
+            onSelect = { i ->
+                val picked = Adapter.values()[i]
+                onSelectAdapter(if (s.adapter == picked) null else picked)
+            }
+        )
         ProtocolToggle(selected = s.protocol, onSelect = onSelectProtocol)
         EmulatorDropdown(
             on = s.simulatorMode,
@@ -829,74 +842,6 @@ private fun CombinedLogRow(line: LogLine) {
                 fontSize = 10.sp,
                 modifier = Modifier.padding(start = 8.dp)
             )
-        }
-    }
-}
-
-// ── Adapter + protocol selectors (dev page) ─────────────────────────────────
-
-private val ADAPTER_OPTIONS = listOf(
-    Adapter.OpenPort to "OPEN PORT 2.0",
-    Adapter.OBDLink to "OBDLINK BLUETOOTH",
-    Adapter.OBDLinkEx to "OBDLINK USB",
-    Adapter.Ft232rl to "FT232RL"
-)
-
-private fun adapterLabel(a: Adapter?): String =
-    ADAPTER_OPTIONS.firstOrNull { it.first == a }?.second ?: "SELECT ADAPTER"
-
-// Rounded single-select adapter dropdown. Selecting only sets the adapter —
-// CONNECT performs the handshake (deferred). Same shape/feel as SequenceSelector.
-@Composable
-private fun AdapterSelector(selected: Adapter?, onSelect: (Adapter?) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(8.dp)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .border(1.dp, Accent, shape)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { open = !open }
-                .background(SurfaceBg)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                adapterLabel(selected),
-                color = if (selected != null) Color.White else NeutralGray,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text(
-                if (open) "▴" else "▾",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        if (open) {
-            Column(modifier = Modifier.fillMaxWidth().background(SurfaceAlt)) {
-                ADAPTER_OPTIONS.forEach { (adapter, label) ->
-                    Text(
-                        label,
-                        color = if (adapter == selected) Accent else Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            // Re-tapping the selected adapter clears it (toggle off).
-                            .clickable { onSelect(if (adapter == selected) null else adapter); open = false }
-                            .padding(horizontal = 14.dp, vertical = 11.dp)
-                    )
-                }
-            }
         }
     }
 }

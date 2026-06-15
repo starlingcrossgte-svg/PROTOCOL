@@ -22,8 +22,8 @@ object RawByteLog {
     private data class Line(val ts: Long, val out: Boolean, val payload: String)
 
     fun formatCsv(): String {
-        val usb = UsbTrafficLog.events.value
-        val bt = ObdLinkTrafficLog.events.value
+        val usb = UsbTrafficLog.snapshot()
+        val bt = ObdLinkTrafficLog.snapshot()
         if (usb.isEmpty() && bt.isEmpty()) return ""
         val lines = ArrayList<Line>(usb.size + bt.size)
         for (e in usb) lines.add(Line(e.timestampMs, e.direction == TrafficEvent.Direction.OUT, e.hex))

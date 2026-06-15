@@ -1,131 +1,14 @@
 package com.protocol.app.protocol
 
-import com.protocol.app.openport2.EcuIdDecoder
-import com.protocol.app.openport2.OpenPortCommandParser
 import com.protocol.app.openport2.PollSample
-import com.protocol.app.openport2.Ssm2Frame
-import com.protocol.app.openport2.Ssm2FrameParser
 import com.protocol.app.openport2.Ssm2Pids
-import com.protocol.app.openport2.TactrixHex
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Top-level helpers shared between the on-screen probe sections
-// (OutcomeCard.kt) and the export formatter below. Kept here so both
-// callers stay in sync on length / checksum rendering.
-
-internal fun lengthLine(frame: Ssm2Frame): String {
-    val declared = frame.length; val received = frame.payload.size
-    return if (frame.truncated || declared != received)
-        "  length = 0x%02X ($declared declared, $received received — truncated)".format(declared)
-    else
-        "  length = 0x%02X ($declared byte${if (declared == 1) "" else "s"})".format(declared)
-}
-
-internal fun checksumLine(frame: Ssm2Frame): String = when {
-    frame.truncated || frame.checksum < 0 -> "  checksum = (not received — truncated)"
-    frame.checksumValid -> "  checksum = 0x%02X (valid)".format(frame.checksum)
-    else -> "  checksum = 0x%02X (invalid)".format(frame.checksum)
-}
-
 private val csvTimeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
 object ProtocolLogFormatter {
-
-    fun formatForExport(uiState: ProtocolUiState): String {
-        val sb = StringBuilder()
-        sb.append("========================================\n")
-        sb.append("PROTOCOL — OpenPort SSM2 ECM Probe Log\n")
-        sb.append("Exported: ").append(timestampNow()).append("\n")
-        sb.append("========================================\n\n")
-        sb.append("==== HUMAN SUMMARY ====\n")
-        val outcome = uiState.lastOutcome
-        val bundle = uiState.ssm2DecodeBundle
-        val ecuId = bundle?.ecuId
-        val response = bundle?.response
-        val isTruncated = response?.truncated == true
-        sb.append(kv("Result", outcome?.name ?: "(no run)"))
-        sb.append(kv("ECU ID", ecuId?.ecuIdHex ?: "—"))
-        sb.append(kv("Internal ID", if (isTruncated)
-            "not in received bytes — response partially assembled"
-        else
-            EcuIdDecoder.INTERNAL_ID_NOT_PRESENT))
-        sb.append(kv("Calibration", ecuId?.calibrationBytes?.let(TactrixHex::bytesToHex) ?: "—"))
-        sb.append(kv("SSM ID", ecuId?.ssmIdBytes?.let(TactrixHex::bytesToHex) ?: "—"))
-        sb.append(kv("Source module", response?.let { "${Ssm2FrameParser.moduleLabel(it.source)} (0x%02X)".format(it.source) } ?: "—"))
-        sb.append(kv("Header detected", response?.let { "%02X %02X %02X".format(it.format, it.destination, it.source) } ?: "—"))
-        sb.append(kv("Response time", uiState.attStepDurationMs?.let { "$it ms" } ?: "—"))
-        if (isTruncated && response != null) {
-            sb.append(kv("Response status", "PARTIAL — ${response.payload.size} of ${response.length} bytes received"))
-            sb.append(kv("ECU ID bytes", "found at expected offset"))
-            sb.append(kv("Full assembly", "not complete — multi-frame fix pending"))
-        }
-        sb.append("\n")
-        sb.append("==== SSM2 DECODE ====\n")
-        if (bundle == null) {
-            sb.append("att3 never reached — no SSM2 frame transmitted.\n")
-        } else {
-            val req = bundle.request
-            if (req != null) {
-                sb.append("Request : ").append(TactrixHex.bytesToHex(req.rawBytes)).append("\n")
-                sb.append("  format = 0x%02X\n".format(req.format))
-                sb.append("  destination = 0x%02X (${Ssm2FrameParser.moduleLabel(req.destination)})\n".format(req.destination))
-                sb.append("  source = 0x%02X (${Ssm2FrameParser.moduleLabel(req.source)})\n".format(req.source))
-                sb.append("  length = 0x%02X (${req.length} byte${if (req.length == 1) "" else "s"})\n".format(req.length))
-                if (req.payload.isNotEmpty()) {
-                    val cmd = req.payload[0].toInt() and 0xFF
-                    sb.append("  command = 0x%02X (${Ssm2FrameParser.commandLabel(cmd)})\n".format(cmd))
-                }
-                sb.append(checksumLine(req)).append("\n")
-            } else { sb.append("Request : (not parsed)\n") }
-            val rsp = bundle.response
-            if (rsp != null) {
-                sb.append("Response: ").append(TactrixHex.bytesToHex(rsp.rawBytes)).append("\n")
-                sb.append("  format = 0x%02X\n".format(rsp.format))
-                sb.append("  destination = 0x%02X (${Ssm2FrameParser.moduleLabel(rsp.destination)})\n".format(rsp.destination))
-                sb.append("  source = 0x%02X (${Ssm2FrameParser.moduleLabel(rsp.source)})\n".format(rsp.source))
-                sb.append(lengthLine(rsp)).append("\n")
-                if (rsp.payload.isNotEmpty()) {
-                    val code = rsp.payload[0].toInt() and 0xFF
-                    sb.append("  response = 0x%02X (${Ssm2FrameParser.commandLabel(code)})\n".format(code))
-                }
-                sb.append(checksumLine(rsp)).append("\n")
-            } else { sb.append("Response: not parsed — no vehicle frame received.\n") }
-        }
-        sb.append("\n")
-        sb.append("==== OPENPORT FRAME ====\n")
-        if (bundle == null) {
-            sb.append("att3 never reached.\n")
-        } else {
-            sb.append(kv("att3 ack (aro)", if (bundle.aroAcknowledged) "acknowledged" else "not acknowledged"))
-            sb.append(kv("Vehicle frame (ar3)", if (bundle.ar3FrameDetected) "detected (channel 3)" else "not detected"))
-            sb.append(kv("Extracted payload", bundle.extractedFrameHex.ifBlank { "(none)" }))
-        }
-        sb.append("\n")
-        sb.append("==== LOW LEVEL USB / OPENPORT (final step) ====\n")
-        val lastStep = uiState.log.lastOrNull()
-        if (lastStep == null) {
-            sb.append("(no run)\n")
-        } else {
-            sb.append(kv("Step", "${lastStep.stepIndex} — ${lastStep.stepLabel}"))
-            sb.append(kv("Request", lastStep.requestAscii.ifBlank { "(empty)" }))
-            sb.append(kv("USB hex out", lastStep.requestHex.ifBlank { "(empty)" }))
-            val cmd = OpenPortCommandParser.parseOpenPortCommand(lastStep.requestAscii)
-            val payloadLen = cmd?.payloadLen
-            if (payloadLen != null && payloadLen > 0) {
-                val hex = lastStep.requestHex.trim().split(" ").filter { it.isNotBlank() }
-                if (hex.size >= payloadLen) sb.append(kv("Payload", hex.takeLast(payloadLen).joinToString(" ")))
-            }
-            sb.append(kv("USB hex in", lastStep.responseHex.ifBlank { "(empty)" }))
-            sb.append(kv("Duration", "${lastStep.durationMs} ms"))
-        }
-        sb.append("\n")
-        sb.append("==== FULL RUN LOG (all steps) ====\n")
-        if (uiState.log.isEmpty()) sb.append("(no run)\n")
-        else for (entry in uiState.log) appendStepBlock(sb, entry)
-        return sb.toString()
-    }
 
     fun formatSessionLogCsv(uiState: ProtocolUiState): String {
         val log = uiState.sessionLog
@@ -327,18 +210,9 @@ object ProtocolLogFormatter {
 
     private val logTimeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
-    fun suggestedExportFileName(): String =
-        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            .let { "protocol_probe_$it.txt" }
-
     fun suggestedCsvFileName(): String =
         SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             .let { "protocol_session_$it.csv" }
-
-    private fun timestampNow(): String =
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-
-    private fun kv(label: String, value: String): String = "${label.padEnd(16)}: $value\n"
 
     private fun formatPidValueCsv(pidId: String, value: Double): String = when (pidId) {
         "rpm"             -> "%.1f".format(value)
@@ -404,26 +278,4 @@ object ProtocolLogFormatter {
         else              -> "%.3f".format(value)
     }
 
-    private fun appendStepBlock(sb: StringBuilder, entry: com.protocol.app.openport2.TactrixCommandLog) {
-        sb.append("[").append(entry.stepIndex).append("] ").append(entry.stepLabel).append("\n")
-        sb.append("  REQ ASCII : ").append(entry.requestAscii).append("\n")
-        sb.append("  REQ HEX   : ").append(entry.requestHex).append("\n")
-        sb.append("  RSP ASCII : ").append(entry.responseAscii).append("\n")
-        sb.append("  RSP HEX   : ").append(entry.responseHex).append("\n")
-        val parsed = OpenPortCommandParser.parseOpenPortCommand(entry.requestAscii)
-        sb.append("  PARSED CMD: ").append(parsedCmdLine(parsed)).append("\n")
-        sb.append("  TIME      : ").append(entry.durationMs).append(" ms\n")
-        sb.append("  OUTCOME   : ").append(entry.outcome.name).append("\n")
-        if (entry.notes.isNotBlank()) sb.append("  NOTES     : ").append(entry.notes).append("\n")
-        sb.append("\n")
-    }
-
-    private fun parsedCmdLine(cmd: com.protocol.app.openport2.OpenPortCommand?): String {
-        if (cmd == null) return "(no command on the wire)"
-        val ch = cmd.channel?.let { "$it" } ?: "-"
-        val reqId = cmd.reqId?.let { "$it" } ?: "-"
-        val timeout = cmd.timeoutMicros?.let { "${it}µs" } ?: "-"
-        val payloadLen = cmd.payloadLen?.let { "$it" } ?: "-"
-        return "verb=${cmd.verb} channel=$ch payloadLen=$payloadLen timeout=$timeout reqId=$reqId"
-    }
 }

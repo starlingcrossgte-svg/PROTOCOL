@@ -1,9 +1,6 @@
 package com.protocol.app.protocol
 
 import com.protocol.app.openport2.PollSample
-import com.protocol.app.openport2.Ssm2DecodeBundle
-import com.protocol.app.openport2.Ssm2EcmProbe
-import com.protocol.app.openport2.TactrixCommandLog
 
 /**
  * Top-level destinations reachable above the Home / Live Data pager. When
@@ -21,6 +18,10 @@ sealed class SubPage {
     object Flash : SubPage()
     object Tuning : SubPage()
     object Notices : SubPage()
+    /** Verified init sequences + adapter command palettes, READ-ONLY. Reached
+     *  from the Home "Library" button. Renders AdapterCommandLibrary; nothing
+     *  depends on it (easy to remove). */
+    object Library : SubPage()
     /** Developer / Raw Command Interface — its own page, reached by the Home
      *  DEV MODE button. Master ON/OFF lives at the top of this page. */
     object Developer : SubPage()
@@ -32,7 +33,7 @@ sealed class SubPage {
  * this in the VM and starts USB discovery; setOpenSession replays the
  * action once the session is up.
  */
-enum class PendingAction { Probe, ReadLive, LogLive }
+enum class PendingAction { ReadLive, LogLive }
 
 data class ProtocolUiState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.NoDevice,
@@ -46,14 +47,8 @@ data class ProtocolUiState(
      *  mode and run the no-ECU red/white flash on the top/bottom bars. */
     val noEcuEventId: Int = 0,
     val statusMessage: String = "",
-    val isRunningProbe: Boolean = false,
     val isReadingLive: Boolean = false,
     val isLogging: Boolean = false,
-    val log: List<TactrixCommandLog> = emptyList(),
-    val lastOutcome: Ssm2EcmProbe.ProbeOutcome? = null,
-    val ssm2DecodeBundle: Ssm2DecodeBundle? = null,
-    val ssm2ResponseHex: String = "",
-    val attStepDurationMs: Long? = null,
     val liveValues: Map<String, Double> = emptyMap(),
     /** Lowest value seen for each PID since the current Read Live Data session started. Cleared on stop / detach / layout removal. */
     val liveValuesMin: Map<String, Double> = emptyMap(),

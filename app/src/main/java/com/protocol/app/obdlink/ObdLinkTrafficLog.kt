@@ -17,34 +17,38 @@ data class ObdLinkTrafficEvent(
 }
 
 /**
- * Process-wide ring buffer of recent OBDLink Bluetooth exchanges. Fed by
- * [ObdLinkBtTransport]'s log hook; the Developer page subscribes via [events]
- * so the user can watch the ELM handshake + SSM2 polling live — an in-app
- * view of the adapter's byte traffic.
+ * Process-wide ring buffer of recent OBDLink exchanges. Fed by
+ * [ObdLinkBtTransport]'s log hook; the Developer page reads it so the user can
+ * watch the ELM handshake + SSM2 polling — an in-app view of the adapter's byte
+ * traffic. Its own log (zero shared code with the USB
+ * [com.protocol.app.openport2.UsbTrafficLog]) so the adapter paths stay isolated.
  *
- * Its own log (zero shared code with the USB UsbTrafficLog / flash logs) so
- * the adapter paths stay isolated.
+ * Same O(1) ring as the USB log: [record] appends to an [ArrayDeque] and bumps
+ * [revision]; the O(n) [snapshot] is built by observers when they render, so
+ * always-on recording is cheap when nobody is watching. Synchronized for the
+ * reader-thread / UI-thread mix.
  */
 object ObdLinkTrafficLog {
-    // Raised for short rapid PID-verification captures — older lines drop off
-    // the front once the cap is reached (~minutes of K-line/CAN ASCII traffic).
     private const val MAX_EVENTS = 5000
 
-    private val _events = MutableStateFlow<List<ObdLinkTrafficEvent>>(emptyList())
-    val events: StateFlow<List<ObdLinkTrafficEvent>> = _events.asStateFlow()
+    private val buffer = ArrayDeque<ObdLinkTrafficEvent>(MAX_EVENTS)
+    private val _revision = MutableStateFlow(0)
+    /** Bumped on every record / clear. Observers re-read [snapshot] when it changes. */
+    val revision: StateFlow<Int> = _revision.asStateFlow()
 
-    @Volatile var recording: Boolean = true
+    /** Current buffer contents, oldest-first. O(n) — call only when rendering. */
+    @Synchronized fun snapshot(): List<ObdLinkTrafficEvent> = buffer.toList()
 
-    fun record(direction: String, text: String) {
-        if (!recording) return
+    @Synchronized fun record(direction: String, text: String) {
         if (text.isEmpty()) return
         val dir = if (direction == "OUT") ObdLinkTrafficEvent.Direction.OUT else ObdLinkTrafficEvent.Direction.IN
-        val event = ObdLinkTrafficEvent(System.currentTimeMillis(), dir, text)
-        val current = _events.value
-        _events.value = if (current.size >= MAX_EVENTS) current.drop(1) + event else current + event
+        if (buffer.size >= MAX_EVENTS) buffer.removeFirst()
+        buffer.addLast(ObdLinkTrafficEvent(System.currentTimeMillis(), dir, text))
+        _revision.value++
     }
 
-    fun clear() {
-        _events.value = emptyList()
+    @Synchronized fun clear() {
+        buffer.clear()
+        _revision.value++
     }
 }
