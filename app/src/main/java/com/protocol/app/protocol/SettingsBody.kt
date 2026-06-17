@@ -104,16 +104,16 @@ internal fun SettingsBody(
         }
 
         CategoryHeader("PROTOCOL")
-        // CAN · Broadcast is the '06 Outback's listen-only powertrain CAN — its
-        // decode path isn't wired yet, so it's disabled. Keeping it a separate
-        // selection (not "CAN") is a SAFETY gate: regular request mode on a
-        // broadcast bus could inject commands.
+        // CAN · Broadcast is the '06 Outback's listen-only powertrain CAN. Kept a
+        // separate selection (not "CAN") as a SAFETY gate: it routes to a monitor
+        // source that NEVER transmits, whereas request mode on a broadcast bus
+        // could inject commands. Picking it forces POLLING MODE → Monitor.
         SelectorDropdown(
             placeholder = "SELECT PROTOCOL",
             items = listOf(
                 DropdownItem("K-Line"),
                 DropdownItem("CAN · Diagnostic"),
-                DropdownItem("CAN · Broadcast", enabled = false)
+                DropdownItem("CAN · Broadcast")
             ),
             selectedIndex = s.protocol?.ordinal,
             onSelect = { i ->
@@ -123,13 +123,17 @@ internal fun SettingsBody(
         )
 
         CategoryHeader("POLLING MODE")
-        // Monitor (listen-only decode) isn't wired yet → disabled.
+        // Which modes are offered depends on the chosen ADAPTER + PROTOCOL: the
+        // route's capability flags drive the greying so the UI can't offer a mode
+        // the transport won't run. Stream = K-line ECM streaming (A8 01); Monitor
+        // = listen-only broadcast decode (CanBroadcast, not wired yet).
+        val pollingRoute = TransportRoute.of(s.adapter, s.protocol)
         SelectorDropdown(
             placeholder = "SELECT MODE",
             items = listOf(
                 DropdownItem("Poll"),
-                DropdownItem("Stream"),
-                DropdownItem("Monitor", enabled = false)
+                DropdownItem("Stream", enabled = pollingRoute?.supportsStream == true),
+                DropdownItem("Monitor", enabled = pollingRoute?.supportsMonitor == true)
             ),
             selectedIndex = s.pollingMode.ordinal,
             onSelect = { i -> onPollingModeChange(PollingMode.values()[i]) }

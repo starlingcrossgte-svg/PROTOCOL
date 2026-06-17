@@ -110,7 +110,16 @@ internal fun DeveloperBody(
     val s = uiState.settings
     // Which command set the console drives. The dev console talks to exactly one
     // adapter at a time, so the palette + manual router key off the selection.
-    val family = if (s.adapter == Adapter.OpenPort) CommandFamily.OpenPort else CommandFamily.ELM
+    // Three real sets: OpenPort / KKL (FT232RL) / ELM (both OBDLinks).
+    val family = when (s.adapter) {
+        Adapter.OpenPort -> CommandFamily.OpenPort
+        Adapter.Ft232rl -> CommandFamily.Kkl
+        else -> CommandFamily.ELM
+    }
+    // The old in-page master toggle is gone. Opening the Dev Mode page enables
+    // devMode (so dev-gated features like the Live Data PID presets keep
+    // working) and the RAW BYTES log is always live here.
+    LaunchedEffect(Unit) { onDevModeChange(true) }
     val usbRevision by UsbTrafficLog.revision.collectAsState()
     val btRevision by ObdLinkTrafficLog.revision.collectAsState()
     val context = LocalContext.current
@@ -159,28 +168,11 @@ internal fun DeveloperBody(
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Master control — title + ON/OFF framed in one box. White = armed
-        // (log + features run); grey = off, dormant during daily logging.
-        MasterControl(armed = s.devMode, onToggle = { onDevModeChange(!s.devMode) })
-
         // ── CONFIGURATION ── adapter, bus, emulator, init. Pick here instead of
         // Home/Settings. Selecting does NOT connect — the CONNECT button (below
         // the log) does. Tap a selected adapter/bus again to clear it.
         CategoryHeader("CONFIGURATION", startPadding = 8.dp)
-        SelectorDropdown(
-            placeholder = "SELECT ADAPTER",
-            items = listOf(
-                DropdownItem("OPEN PORT 2.0"),
-                DropdownItem("OBDLINK BLUETOOTH"),
-                DropdownItem("OBDLINK USB"),
-                DropdownItem("FT232RL")
-            ),
-            selectedIndex = s.adapter?.ordinal,
-            onSelect = { i ->
-                val picked = Adapter.values()[i]
-                onSelectAdapter(if (s.adapter == picked) null else picked)
-            }
-        )
+        AdapterGrid(selected = s.adapter, onSelect = onSelectAdapter)
         ProtocolToggle(selected = s.protocol, onSelect = onSelectProtocol)
         EmulatorDropdown(
             on = s.simulatorMode,
@@ -191,16 +183,13 @@ internal fun DeveloperBody(
         InitDropdown(
             selectedId = s.selectedInitSequenceId,
             protocol = s.protocol,
-            onSelect = onSelectInitSequence,
-            onKlineContinuousTest = onKlineContinuousTest,
-            onStartCanMonitor = onStartCanMonitor
+            onSelect = onSelectInitSequence
         )
 
         // Combined raw log (USB + OBDLink), newest at the bottom. Title sits
         // above the log; Clear / Export are a tab on the log's inner top-right.
         CategoryHeader("RAW BYTES", startPadding = 8.dp)
         CombinedLogCard(
-            armed = s.devMode,
             lines = merged,
             onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
             onExportCsv = {
@@ -209,9 +198,11 @@ internal fun DeveloperBody(
             }
         )
 
-        // CONNECT / STOP — side by side, below the log, above the manual command
-        // box. CONNECT runs the handshake for the selected adapter (or primes
-        // the emulator); STOP halts the active stream/monitor.
+        // Action buttons below the log, above the manual command box — two rows
+        // of two. CONNECT runs the handshake for the selected adapter (or primes
+        // the emulator); STOP halts the active stream/monitor. CONTINUOUS TEST
+        // fires an A8 01 burst and counts the streamed frames; CAN MONITOR starts
+        // the listen-only broadcast sniff. Both report into the RAW BYTES log.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -219,12 +210,20 @@ internal fun DeveloperBody(
             DevActionButton("CONNECT", Modifier.weight(1f), border = Accent) { onConnectAdapter() }
             DevActionButton("STOP", Modifier.weight(1f), border = BorderGray) { onStopCanMonitor() }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            DevActionButton("CONTINUOUS TEST", Modifier.weight(1f), border = Accent) { onKlineContinuousTest() }
+            DevActionButton("CAN MONITOR", Modifier.weight(1f), border = Accent) { onStartCanMonitor() }
+        }
 
         // Manual command console — type any command; it's auto-formatted for the
         // SELECTED adapter (ELM/STN ASCII for OBDLink, Tactrix line protocol for
-        // OpenPort) and the reply lands in the RAW BYTES log above. The palette
-        // and spacing/hex normalization follow the active adapter family.
-        CategoryHeader("MANUAL COMMANDS", startPadding = 8.dp)
+        // OpenPort, raw SSM2 frames for KKL) and the reply lands in the RAW BYTES
+        // log above. The empty-box placeholder ("Manual Commands") is the label,
+        // so there's no separate header. Palette + hex normalization follow the
+        // active adapter family.
         ManualCommandRow(family = family, onSend = onSendManualCommand)
 
         // ── SEQUENCE GENERATOR ── last on the page. 10 command slots each with
@@ -305,7 +304,7 @@ private fun ManualCommandRow(family: CommandFamily, onSend: (String) -> Unit) {
                 decorationBox = { inner ->
                     if (cmd.isEmpty()) {
                         Text(
-                            "COMMAND",
+                            "Manual Commands",
                             color = NeutralGray,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.SemiBold,
@@ -386,39 +385,49 @@ private fun CommandPalette(
             )
         }
         if (open) {
+            // Group the family's commands by section (SETUP · AT, CONTINUOUS, …)
+            // and render one dim header per group, in first-seen order.
+            val grouped = remember(family) {
+                AdapterCommandLibrary.quickCommandsFor(family).groupBy { it.group }
+            }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(340.dp)
                     .background(SurfaceBg)
             ) {
-                items(AdapterCommandLibrary.quickCommandsFor(family)) { qc ->
-                    val isHex = qc.kind == CommandKind.HEX_FRAME
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onPick(qc.command) }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            qc.command,
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        // Kind tag (HEX vs TXT) + the dim hint. HEX is accented
-                        // so it's obvious which entries are raw frames vs control
-                        // commands — the visible half of the hex/text rule.
-                        Text(
-                            (if (isHex) "HEX · " else "") + qc.label,
-                            color = if (isHex) Accent else NeutralGray,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
+                grouped.forEach { (group, cmds) ->
+                    if (group.isNotBlank()) {
+                        item(key = "hdr-$group") { InitTierHeader(group) }
+                    }
+                    items(cmds, key = { it.command }) { qc ->
+                        val isHex = qc.kind == CommandKind.HEX_FRAME
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(qc.command) }
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                qc.command,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Kind tag (HEX vs TXT) + the dim hint. HEX is accented
+                            // so it's obvious which entries are raw frames vs control
+                            // commands — the visible half of the hex/text rule.
+                            Text(
+                                (if (isHex) "HEX · " else "") + qc.label,
+                                color = if (isHex) Accent else NeutralGray,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            )
+                        }
                     }
                 }
             }
@@ -426,35 +435,55 @@ private fun CommandPalette(
     }
 }
 
-// Expandable single-select dropdown for the init-sequence library. Shows the
-// selected sequence's name; tapping expands the list (name + description), and
-// picking one persists it and collapses. Small list (4), so a plain Column.
-// Master control — the title + ON/OFF state framed together in one rounded
-// box. White = armed (log + features run), grey = off (dormant during daily
-// logging). Tap anywhere on the box to toggle.
+// Adapter selector — a 2×2 grid of buttons (replaces the old dropdown). Top row
+// OpenPort / OBDLink BT; bottom row OBDLink USB / FT232RL. Selected = bright
+// Accent outline+text, unselected = dim; re-tapping the selected one clears it
+// (toggle off), matching the K-LINE / CAN bus row below.
 @Composable
-private fun MasterControl(armed: Boolean, onToggle: () -> Unit) {
-    val color = if (armed) Color.White else NeutralGray
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
+private fun AdapterGrid(selected: Adapter?, onSelect: (Adapter?) -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AdapterButton("OPEN PORT 2.0", Adapter.OpenPort, selected, Modifier.weight(1f), onSelect)
+            AdapterButton("OBDLINK MX+", Adapter.OBDLink, selected, Modifier.weight(1f), onSelect)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AdapterButton("OBDLINK EX", Adapter.OBDLinkEx, selected, Modifier.weight(1f), onSelect)
+            AdapterButton("FT232RL", Adapter.Ft232rl, selected, Modifier.weight(1f), onSelect)
+        }
+    }
+}
+
+@Composable
+private fun AdapterButton(
+    label: String,
+    adapter: Adapter,
+    selected: Adapter?,
+    modifier: Modifier,
+    onSelect: (Adapter?) -> Unit
+) {
+    val isSelected = selected == adapter
+    val line = if (isSelected) Accent else AccentDim
+    Box(
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, color, RoundedCornerShape(8.dp))
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .background(SurfaceBg)
+            .border(1.dp, line, RoundedCornerShape(8.dp))
+            .clickable { onSelect(if (isSelected) null else adapter) }
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
-            "RAW COMMAND INTERFACE",
-            color = Color.White,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            if (armed) "ON" else "OFF",
-            color = color,
+            label,
+            color = line,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.bodySmall
@@ -490,16 +519,14 @@ private fun DevActionButton(
     }
 }
 
-// Init & on-bus tests dropdown. Lists each command-library sequence with its
-// commands under the title, and folds in the CONTINUOUS TEST + CAN MONITOR
-// start actions (STOP lives by CONNECT). Stage 6 adds tier grouping.
+// Init-sequence dropdown. Lists each command-library sequence with its commands
+// under the title, grouped by tier. (The CONTINUOUS TEST + CAN MONITOR actions
+// are buttons under the log now, not folded in here.)
 @Composable
 private fun InitDropdown(
     selectedId: String?,
     protocol: BusProtocol?,
-    onSelect: (String?) -> Unit,
-    onKlineContinuousTest: () -> Unit,
-    onStartCanMonitor: () -> Unit
+    onSelect: (String?) -> Unit
 ) {
     var open by remember { mutableStateOf(false) }
     val lib = com.protocol.app.obdlink.AdapterCommandLibrary
@@ -521,7 +548,7 @@ private fun InitDropdown(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                selected?.name ?: "INIT & TESTS",
+                selected?.name ?: "INITIATION PRESETS",
                 color = if (selected != null) Color.White else NeutralGray,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
@@ -590,15 +617,6 @@ private fun InitDropdown(
                         }
                     }
                 }
-                // Unverified / on-bus test actions.
-                InitTierHeader("UNVERIFIED / TEST")
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    DevActionButton("CONTINUOUS TEST", Modifier.weight(1f), border = Accent) { onKlineContinuousTest() }
-                    DevActionButton("CAN MONITOR ▶", Modifier.weight(1f), border = Accent) { onStartCanMonitor() }
-                }
             }
         }
     }
@@ -635,34 +653,11 @@ private data class LogLine(
 
 @Composable
 private fun CombinedLogCard(
-    armed: Boolean,
     lines: List<LogLine>,
     onClear: () -> Unit,
     onExportCsv: () -> Unit
 ) {
-    // Master OFF → the log is dormant (no live view) so it doesn't run during
-    // daily logging. Tap ON above to arm it.
-    if (!armed) {
-        Card(
-            shape = RoundedCornerShape(8.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
-            border = BorderStroke(1.dp, BorderGray),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(120.dp).padding(12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "OFF — tap ON above to arm the log",
-                    color = NeutralGray,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
-        return
-    }
+    // Always live on the Dev Mode page (the page itself is the dev surface).
     var expanded by remember { mutableStateOf(false) }
     // Compact inline height — only a few request/response lines. The Expand tab
     // opens the full scrollable, highlightable, copyable view.

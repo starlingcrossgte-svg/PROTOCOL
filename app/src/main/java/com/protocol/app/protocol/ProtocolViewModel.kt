@@ -14,6 +14,7 @@ import com.protocol.app.kkl.KklKlineManager
 import com.protocol.app.kkl.KklKlineSource
 import com.protocol.app.openport2.OpenPort2UsbSession
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
+import com.protocol.app.openport2.OpenPortCanBroadcastSource
 import com.protocol.app.openport2.OpenPortCanLiveSource
 import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2EcmProbe
@@ -229,12 +230,26 @@ class ProtocolViewModel : ViewModel() {
      * dev-selected sequence (or null = the manager's built-in default when the
      * picked one doesn't match the protocol).
      */
+    private fun protocolLabelOf(protocol: BusProtocol): String = when (protocol) {
+        BusProtocol.KLine -> "K-line"
+        BusProtocol.CAN -> "CAN"
+        BusProtocol.CanBroadcast -> "CAN broadcast"
+    }
+
     private fun connectInitSeq(isKline: Boolean, fromDev: Boolean): CommandSequence? =
         if (fromDev)
             AdapterCommandLibrary.byId(_uiState.value.settings.selectedInitSequenceId)
                 ?.takeIf { it.kline == isKline }
         else
             AdapterCommandLibrary.defaultFor(isKline)
+
+    /** If the current (adapter, bus) route can't run the selected polling mode,
+     *  fall back to Poll. Keeps the persisted mode honest with the route table
+     *  (and the Settings selector greying) when the adapter/protocol changes. */
+    private fun AppSettings.withSupportedPollingMode(): AppSettings {
+        val route = TransportRoute.of(adapter, protocol) ?: return this
+        return if (route.supports(pollingMode)) this else copy(pollingMode = route.defaultMode)
+    }
 
     fun setAdapter(adapter: Adapter?) {
         // Switching adapter / protocol invalidates any cached K-line channel
@@ -245,19 +260,19 @@ class ProtocolViewModel : ViewModel() {
         val state = _uiState.value
         if (state.isReadingLive || state.isLogging) stopReadingLive()
         tactrixClient?.channelInitialized = false
-        updateSettings { it.copy(adapter = adapter) }
+        updateSettings { it.copy(adapter = adapter).withSupportedPollingMode() }
     }
 
     fun setProtocol(protocol: BusProtocol?) {
         val state = _uiState.value
         if (state.isReadingLive || state.isLogging) stopReadingLive()
         tactrixClient?.channelInitialized = false
-        updateSettings { it.copy(protocol = protocol) }
+        updateSettings { it.copy(protocol = protocol).withSupportedPollingMode() }
     }
 
     fun setSsmVariant(variant: SsmVariant?) = updateSettings { it.copy(ssmVariant = variant) }
 
-    fun setPollingMode(mode: PollingMode) = updateSettings { it.copy(pollingMode = mode) }
+    fun setPollingMode(mode: PollingMode) = updateSettings { it.copy(pollingMode = mode).withSupportedPollingMode() }
 
     fun setSimulatorMode(on: Boolean) = updateSettings { it.copy(simulatorMode = on) }
 
@@ -310,7 +325,7 @@ class ProtocolViewModel : ViewModel() {
             )
             return
         }
-        val protocolLabel = if (protocol == BusProtocol.KLine) "K-line" else "CAN"
+        val protocolLabel = protocolLabelOf(protocol)
         setConnectionStatus(
             ConnectionStatus.PermissionRequired("OBDLink"),
             "Connecting OBDLink ($protocolLabel)..."
@@ -323,9 +338,10 @@ class ProtocolViewModel : ViewModel() {
             val isKline = protocol == BusProtocol.KLine
             val seq = connectInitSeq(isKline, fromDev)
             val r = when (protocol) {
-                BusProtocol.CAN -> mgr.connect(seq)
+                // CanBroadcast shares the CAN channel init — the broadcast source
+                // flips it into raw STMA monitor at flow start.
+                BusProtocol.CAN, BusProtocol.CanBroadcast -> mgr.connect(seq)
                 BusProtocol.KLine -> mgr.connectKline(seq)
-                BusProtocol.CanBroadcast -> ObdLinkBtManager.ConnectResult.Failure("unsupported")
             }
             when (r) {
                 is ObdLinkBtManager.ConnectResult.Connected -> {
@@ -400,7 +416,7 @@ class ProtocolViewModel : ViewModel() {
             )
             return
         }
-        val protocolLabel = if (protocol == BusProtocol.KLine) "K-line" else "CAN"
+        val protocolLabel = protocolLabelOf(protocol)
         obdLinkExConnecting = true
         setConnectionStatus(
             ConnectionStatus.PermissionRequired("OBDLink EX"),
@@ -416,9 +432,10 @@ class ProtocolViewModel : ViewModel() {
                 val isKline = protocol == BusProtocol.KLine
                 val seq = connectInitSeq(isKline, fromDev)
                 val r = when (protocol) {
-                    BusProtocol.CAN -> mgr.connect(seq)
+                    // CanBroadcast shares the CAN channel init — the broadcast
+                    // source flips it into raw STMA monitor at flow start.
+                    BusProtocol.CAN, BusProtocol.CanBroadcast -> mgr.connect(seq)
                     BusProtocol.KLine -> mgr.connectKline(seq)
-                    BusProtocol.CanBroadcast -> ObdLinkUsbManager.ConnectResult.Failure("unsupported")
                 }
                 when (r) {
                     is ObdLinkUsbManager.ConnectResult.Connected -> {
@@ -750,6 +767,16 @@ class ProtocolViewModel : ViewModel() {
             )
             return
         }
+        // Resolve the single transport route for this (adapter, bus). A null
+        // route means a valid pair of selectors that isn't a real transport
+        // (e.g. FT232RL + CAN — the KKL cable is K-line only).
+        val route = TransportRoute.of(adapter, protocol)
+        if (route == null) {
+            _uiState.value = state.copy(
+                statusMessage = "${adapter.name} + ${protocol.name} isn't a supported combination"
+            )
+            return
+        }
         // Live-hardware paths additionally require the adapter to be connected.
         // Simulator paths skip this — they open their own TCP socket on demand.
         if (!useSimulator) {
@@ -782,24 +809,20 @@ class ProtocolViewModel : ViewModel() {
         }
 
         val simHostPort = "127.0.0.1:${state.settings.simulatorPort}"
-        val initialStatus = when {
-            useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
-                "Simulator: OpenPort K-line @ $simHostPort"
-            useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.CAN ->
-                "Simulator: OpenPort CAN @ $simHostPort"
-            useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.KLine ->
-                "Simulator: OBDLink K-line @ $simHostPort"
-            useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.CAN ->
-                "Simulator: OBDLink CAN @ $simHostPort"
-            adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
+        val initialStatus = if (useSimulator) {
+            "Simulator: ${route.label} @ $simHostPort"
+        } else when (route) {
+            TransportRoute.OpenPortKline ->
                 if (tactrixClient?.channelInitialized == true) "Reusing K-line channel..." else "Initializing OpenPort K-line..."
-            adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> "Initializing OpenPort CAN @ 500 kbps..."
-            adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> "Polling OBDLink K-line @ 4800..."
-            adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> "Polling OBDLink CAN @ 500k..."
-            adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> "Polling OBDLink EX K-line @ 4800..."
-            adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> "Polling OBDLink EX CAN @ 500k..."
-            adapter == Adapter.Ft232rl && protocol == BusProtocol.KLine -> "Polling FT232RL raw K-line @ 4800..."
-            else -> "Connecting..."
+            TransportRoute.OpenPortCan -> "Initializing OpenPort CAN @ 500 kbps..."
+            TransportRoute.OpenPortCanBroadcast -> "Monitoring OpenPort CAN broadcast @ 500k..."
+            TransportRoute.ObdLinkKline -> "Polling OBDLink K-line @ 4800..."
+            TransportRoute.ObdLinkCan -> "Polling OBDLink CAN @ 500k..."
+            TransportRoute.ObdLinkCanBroadcast -> "Monitoring OBDLink CAN broadcast @ 500k..."
+            TransportRoute.ObdLinkExKline -> "Polling OBDLink EX K-line @ 4800..."
+            TransportRoute.ObdLinkExCan -> "Polling OBDLink EX CAN @ 500k..."
+            TransportRoute.ObdLinkExCanBroadcast -> "Monitoring OBDLink EX CAN broadcast @ 500k..."
+            TransportRoute.Ft232rlKline -> "Polling FT232RL raw K-line @ 4800..."
         }
 
         _uiState.value = state.copy(
@@ -816,23 +839,25 @@ class ProtocolViewModel : ViewModel() {
         runJob = viewModelScope.launch(Dispatchers.IO) {
             val simPort = state.settings.simulatorPort
             val sampleFlow: kotlinx.coroutines.flow.Flow<PollSample>? = try {
-                when {
-                    useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.KLine ->
-                        startSimulatorOpenPortKlineFlow(simPort, pidsOnPage, pollIntervalMs)
-                    useSimulator && adapter == Adapter.OpenPort && protocol == BusProtocol.CAN ->
-                        startSimulatorOpenPortCanFlow(simPort, pidsOnPage, pollIntervalMs)
-                    useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.KLine ->
-                        startSimulatorObdLinkKlineFlow(simPort, pidsOnPage, pollIntervalMs)
-                    useSimulator && adapter == Adapter.OBDLink && protocol == BusProtocol.CAN ->
-                        startSimulatorObdLinkCanFlow(simPort, pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.OpenPort && protocol == BusProtocol.KLine -> startOpenPortKlineFlow(pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> startOpenPortCanFlow(pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> startObdLinkKlineFlow(pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> startObdLinkCanFlow(pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> startObdLinkExKlineFlow(pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> startObdLinkExCanFlow(pidsOnPage, pollIntervalMs)
-                    adapter == Adapter.Ft232rl && protocol == BusProtocol.KLine -> startFt232rlKlineFlow(pidsOnPage, pollIntervalMs)
+                if (useSimulator) when (route) {
+                    // VIPER emulates OpenPort and OBDLink only — the EX/KKL routes
+                    // have no simulator path (null → "Channel init failed" below).
+                    TransportRoute.OpenPortKline -> startSimulatorOpenPortKlineFlow(simPort, pidsOnPage, pollIntervalMs)
+                    TransportRoute.OpenPortCan -> startSimulatorOpenPortCanFlow(simPort, pidsOnPage, pollIntervalMs)
+                    TransportRoute.ObdLinkKline -> startSimulatorObdLinkKlineFlow(simPort, pidsOnPage, pollIntervalMs)
+                    TransportRoute.ObdLinkCan -> startSimulatorObdLinkCanFlow(simPort, pidsOnPage, pollIntervalMs)
                     else -> null
+                } else when (route) {
+                    TransportRoute.OpenPortKline -> startOpenPortKlineFlow(pidsOnPage, pollIntervalMs)
+                    TransportRoute.OpenPortCan -> startOpenPortCanFlow(pidsOnPage, pollIntervalMs)
+                    TransportRoute.OpenPortCanBroadcast -> startOpenPortCanBroadcastFlow()
+                    TransportRoute.ObdLinkKline -> startObdLinkKlineFlow(pidsOnPage, pollIntervalMs)
+                    TransportRoute.ObdLinkCan -> startObdLinkCanFlow(pidsOnPage, pollIntervalMs)
+                    TransportRoute.ObdLinkCanBroadcast -> startObdLinkCanBroadcastFlow(obdLinkManager?.transport)
+                    TransportRoute.ObdLinkExKline -> startObdLinkExKlineFlow(pidsOnPage, pollIntervalMs)
+                    TransportRoute.ObdLinkExCan -> startObdLinkExCanFlow(pidsOnPage, pollIntervalMs)
+                    TransportRoute.ObdLinkExCanBroadcast -> startObdLinkCanBroadcastFlow(obdLinkUsbManager?.transport)
+                    TransportRoute.Ft232rlKline -> startFt232rlKlineFlow(pidsOnPage, pollIntervalMs)
                 }
             } catch (e: UsbDisconnectedException) {
                 _uiState.value = _uiState.value.copy(
@@ -1056,15 +1081,15 @@ class ProtocolViewModel : ViewModel() {
         if (!probe.initializeChannel(mutableListOf())) return null
         val poller = Ssm2Poller(client, pidsOnPage)
         runningPoller = poller
-        // Experimental continuous SSM2 mode (A8 flag 0x01): one request, the ECU
-        // streams replies, dropping the per-cycle request transmit (~70% of
-        // K-line wire time). Gated on Developer Mode + ECM-only pages (K-line
-        // can't stream two modules); auto-falls-back to single-response if the
-        // ECU ignores it. Verify in the BYTES log: look for `A8 01` and multiple
-        // E8 replies per request.
+        // Continuous SSM2 mode (A8 flag 0x01): one request, the ECU streams
+        // replies, dropping the per-cycle request transmit (~70% of K-line wire
+        // time). Driven by POLLING MODE → Stream (the OpenPortKline route's
+        // supportsStream), ECM-only pages only (K-line can't stream two modules);
+        // auto-falls-back to single-response if the ECU ignores it. Verify in the
+        // BYTES log: look for `A8 01` and multiple E8 replies per request.
         val ecmOnly = pidsOnPage.isNotEmpty() &&
             pidsOnPage.none { it.category == com.protocol.app.openport2.Ssm2PidCategory.TCM }
-        return if (_uiState.value.settings.devMode && ecmOnly) {
+        return if (streamingRequested() && ecmOnly) {
             poller.startContinuousEcmFlow()
         } else {
             poller.startFlow(pollIntervalMs)
@@ -1125,7 +1150,7 @@ class ProtocolViewModel : ViewModel() {
         pollIntervalMs: Long
     ): kotlinx.coroutines.flow.Flow<PollSample>? {
         val mgr = kklManager ?: return null
-        val src = KklKlineSource(mgr, pidsOnPage)
+        val src = KklKlineSource(mgr, pidsOnPage, continuous = streamingRequested())
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
     }
@@ -1139,6 +1164,28 @@ class ProtocolViewModel : ViewModel() {
         val src = ObdLinkLiveSource(transport, pidsOnPage)
         runningLiveSource = src
         return src.startFlow(pollIntervalMs)
+    }
+
+    /** OpenPort 2.0 + CAN broadcast (Monitor): listen-only accept-all CAN; never
+     *  transmits. Frames stream into the RAW BYTES log; gauges stay empty (no
+     *  SSM2 mapping for broadcast). */
+    private fun startOpenPortCanBroadcastFlow(): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val session = openSession ?: return null
+        val src = OpenPortCanBroadcastSource(TactrixBulkIo(session))
+        if (!src.initChannel()) return null
+        runningLiveSource = src
+        return src.startFlow(0L)
+    }
+
+    /** OBDLink (MX+ BT or EX USB) + CAN broadcast (Monitor): STN STMA monitor-all,
+     *  listen-only. Same source for both — they share [ObdLinkBtTransport]. */
+    private fun startObdLinkCanBroadcastFlow(
+        transport: com.protocol.app.obdlink.ObdLinkBtTransport?
+    ): kotlinx.coroutines.flow.Flow<PollSample>? {
+        val t = transport ?: return null
+        val src = com.protocol.app.obdlink.ObdLinkCanBroadcastSource(t)
+        runningLiveSource = src
+        return src.startFlow(0L)
     }
 
     fun startLogging() {

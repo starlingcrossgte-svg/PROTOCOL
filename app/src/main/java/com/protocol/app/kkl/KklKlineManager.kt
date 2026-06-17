@@ -123,6 +123,34 @@ class KklKlineManager(
         return null
     }
 
+    /**
+     * Arm a continuous read: drain stale RX, then write [frame] (an A8 01 query)
+     * WITHOUT waiting for a reply. The ECU then streams E8 frames on the K-line
+     * by itself; the caller pulls them with [readAvailable]. The single request
+     * echoes back once (header `80 <dest> F0`) ahead of the replies — the reply
+     * frame scanner walks past it, exactly as [transact] does. Returns false on
+     * write failure. The continuous analogue of the STN's STMA monitor, but here
+     * the phone simply reads the raw UART (no on-board monitor to drive).
+     */
+    fun armStream(frame: ByteArray): Boolean {
+        val serial = ftdi ?: return false
+        drain()
+        ObdLinkTrafficLog.record("OUT", toHex(frame) + " (stream arm)")
+        return try {
+            serial.output.write(frame); true
+        } catch (e: Exception) {
+            ObdLinkTrafficLog.record("OUT", "· kkl: stream write failed: ${e.message}"); false
+        }
+    }
+
+    /** One raw read of whatever the FTDI RX holds into [tmp]; returns the byte
+     *  count (0 = nothing yet, -1 = closed / error). For the continuous reader;
+     *  framing/decoding is the caller's job. */
+    fun readAvailable(tmp: ByteArray): Int {
+        val serial = ftdi ?: return -1
+        return try { serial.input.read(tmp, 0, tmp.size) } catch (e: Exception) { -1 }
+    }
+
     /** Discard whatever is sitting in the FTDI RX buffer (stale echo / a partial
      *  frame from a prior transaction) so the next read starts clean. */
     fun drain() {

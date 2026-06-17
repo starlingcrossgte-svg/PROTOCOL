@@ -1,12 +1,15 @@
 package com.protocol.app.protocol
 
 import android.content.Context
+import android.os.SystemClock
 import com.protocol.app.kkl.KklKlineManager
 import com.protocol.app.obdlink.AdapterCommandLibrary
 import com.protocol.app.obdlink.ObdLinkBtManager
 import com.protocol.app.obdlink.ObdLinkSsm2Can
 import com.protocol.app.obdlink.ObdLinkTrafficLog
 import com.protocol.app.obdlink.ObdLinkUsbManager
+import com.protocol.app.openport2.K_LINE_CHANNEL
+import com.protocol.app.openport2.OpenPortCanBroadcastSource
 import com.protocol.app.openport2.OpenPortConsole
 import com.protocol.app.openport2.Ssm2AddressQuery
 import com.protocol.app.openport2.Ssm2PidCategory
@@ -14,6 +17,7 @@ import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.TactrixClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -63,6 +67,11 @@ internal interface DevConsoleHost {
  * borrows the active link from the [host].
  */
 internal class DevConsoleController(private val host: DevConsoleHost) {
+
+    // Active listen-only monitor read loop for the OpenPort path (the OBDLink
+    // path rides its own STMA reader thread instead). STOP / stopCanMonitor
+    // cancels it. KKL has no CAN bus, so it never sets this.
+    @Volatile private var monitorJob: Job? = null
 
     /**
      * Utility: factory-reset the paired OBDLink adapter over Bluetooth. Sends
@@ -320,32 +329,86 @@ internal class DevConsoleController(private val host: DevConsoleHost) {
 
             fun log(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
             val state = host.state
-            val transport = when (state.settings.adapter) {
-                Adapter.OBDLinkEx -> host.obdLinkExManager()?.transport
-                Adapter.OBDLink -> host.obdLinkBtManager()?.transport
-                else -> null
-            }
-            if (transport == null) {
-                log("continuous test: connect an OBDLink on K-line first"); return@launch
-            }
+            // The A8 01 (respond-continuously) frame is built from the same
+            // on-page ECM PIDs the poller uses — no hand-typed hex to fat-finger.
             val addrs = Ssm2Pids.DEFAULT_DEMO_PIDS
                 .filter { it.id in state.gaugeLayout.pidIds && it.category == Ssm2PidCategory.ECU }
                 .flatMap { it.addresses }
             if (addrs.isEmpty()) { log("continuous test: no ECM params on the page"); return@launch }
+            val frame = Ssm2AddressQuery.buildA8Query(addrs, Ssm2AddressQuery.DEST_ECM, flags = 0x01)
 
-            val frame = Ssm2AddressQuery.buildA8Query(
-                addrs, Ssm2AddressQuery.DEST_ECM, flags = 0x01
-            )
-            val hex = ObdLinkSsm2Can.toElmHex(frame)
-            log("continuous test: A8 01 burst (${addrs.size} addrs, r:25) — watch for a wall of E8 frames")
-            try {
-                val reply = transport.sendAscii("STPX d:$hex,r:25,t:3000", timeoutMs = 4000L)
-                val frames = reply.replace(" ", "").replace("\r", "").replace("\n", "")
-                    .split("80F010").size - 1
-                log("continuous test: ~$frames frames streamed (>1 = continuous WORKS)")
-                transport.drain()
-            } catch (e: Exception) {
-                log("continuous test failed: ${e.message}")
+            when (state.settings.adapter) {
+                Adapter.OBDLink, Adapter.OBDLinkEx -> {
+                    val transport = if (state.settings.adapter == Adapter.OBDLinkEx)
+                        host.obdLinkExManager()?.transport else host.obdLinkBtManager()?.transport
+                    if (transport == null) { log("continuous test: connect the OBDLink on K-line first"); return@launch }
+                    val hex = ObdLinkSsm2Can.toElmHex(frame)
+                    log("continuous test: A8 01 burst (${addrs.size} addrs, r:25) — watch for a wall of E8 frames")
+                    try {
+                        val reply = transport.sendAscii("STPX d:$hex,r:25,t:3000", timeoutMs = 4000L)
+                        val frames = reply.replace(" ", "").replace("\r", "").replace("\n", "")
+                            .split("80F010").size - 1
+                        log("continuous test: ~$frames frames streamed (>1 = continuous WORKS)")
+                        transport.drain()
+                    } catch (e: Exception) {
+                        log("continuous test failed: ${e.message}")
+                    }
+                }
+                Adapter.OpenPort -> {
+                    val client = host.tactrixClient()
+                    if (client == null) { log("continuous test: connect the OpenPort on K-line first"); return@launch }
+                    log("continuous test: A8 01 on OpenPort K-line (${addrs.size} addrs) — harvesting ~3 s of stream")
+                    try {
+                        // Arm: one A8 01 request on the K-line channel; the first
+                        // streamed reply is matched here.
+                        val armed = client.sendAsciiPlusBinary(
+                            asciiBodyWithoutReqId = "att$K_LINE_CHANNEL ${frame.size} 0 400000",
+                            binaryTail = frame,
+                            appendReqId = true,
+                            expectVehicleFrameOnChannel = K_LINE_CHANNEL,
+                            expectedReplySource = Ssm2AddressQuery.DEST_ECM
+                        )
+                        var frames = if (armed.matched) 1 else 0
+                        // Harvest the remaining streamed replies with NO new
+                        // transmit — every frame after the first proves continuous.
+                        val deadline = SystemClock.elapsedRealtime() + 3000L
+                        while (SystemClock.elapsedRealtime() < deadline) {
+                            client.readNextVehicleFrame(K_LINE_CHANNEL, Ssm2AddressQuery.DEST_ECM, 500L)
+                                ?: continue
+                            frames++
+                        }
+                        log("continuous test: ~$frames frames streamed (>1 = continuous WORKS)")
+                    } catch (e: Exception) {
+                        log("continuous test failed: ${e.message}")
+                    }
+                }
+                Adapter.Ft232rl -> {
+                    val mgr = host.kklManager()
+                    if (mgr?.isConnected() != true) { log("continuous test: connect FT232RL on K-line first"); return@launch }
+                    log("continuous test: A8 01 armed on KKL (${addrs.size} addrs) — reading ~3 s of stream")
+                    if (!mgr.armStream(frame)) { log("continuous test: stream arm failed"); return@launch }
+                    // Pull raw UART for the window; log each chunk so the stream is
+                    // visible, and count reply headers (80 F0 10) to score it.
+                    val tmp = ByteArray(512)
+                    val seen = StringBuilder()
+                    val deadline = SystemClock.elapsedRealtime() + 3000L
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        val n = mgr.readAvailable(tmp)
+                        if (n < 0) break
+                        if (n > 0) {
+                            val chunk = StringBuilder(n * 2)
+                            for (k in 0 until n) chunk.append("%02X".format(tmp[k].toInt() and 0xFF))
+                            ObdLinkTrafficLog.record("IN", chunk.toString())
+                            seen.append(chunk)
+                        } else {
+                            delay(5)
+                        }
+                    }
+                    val frames = seen.toString().split("80F010").size - 1
+                    log("continuous test: ~$frames frames streamed (>1 = continuous WORKS)")
+                    mgr.drain()
+                }
+                else -> log("continuous test: pick an adapter first")
             }
         }
     }
@@ -364,30 +427,60 @@ internal class DevConsoleController(private val host: DevConsoleHost) {
         host.scope.launch(Dispatchers.IO) {
             host.takeOverLink()
             fun log(m: String) = ObdLinkTrafficLog.record("OUT", "· $m")
-            val transport = when (host.state.settings.adapter) {
-                Adapter.OBDLinkEx -> host.obdLinkExManager()?.transport
-                Adapter.OBDLink -> host.obdLinkBtManager()?.transport
-                else -> null
-            }
-            if (transport == null) {
-                log("CAN monitor: connect an OBDLink on CAN first (Settings → adapter + CAN)")
-                return@launch
-            }
-            log("CAN monitor: ATH1 + STMA (listen-only, all frames) — watch for broadcast frames")
-            try {
-                transport.sendAscii("ATH1", timeoutMs = 800L)   // headers on -> show CAN IDs
-                transport.sendAscii("ATCAF0", timeoutMs = 800L)  // raw frames, no auto-format
-                transport.beginMonitor("STMA")                   // monitor all; no '>' until stopped
-            } catch (e: Exception) {
-                log("CAN monitor failed: ${e.message}")
+            when (host.state.settings.adapter) {
+                Adapter.OBDLink, Adapter.OBDLinkEx -> {
+                    val transport = if (host.state.settings.adapter == Adapter.OBDLinkEx)
+                        host.obdLinkExManager()?.transport else host.obdLinkBtManager()?.transport
+                    if (transport == null) {
+                        log("CAN monitor: connect the OBDLink on CAN first (Dev Mode → adapter + CAN-BUS)")
+                        return@launch
+                    }
+                    log("CAN monitor: ATH1 + STMA (listen-only, all frames) — watch for broadcast frames")
+                    try {
+                        transport.sendAscii("ATH1", timeoutMs = 800L)   // headers on -> show CAN IDs
+                        transport.sendAscii("ATCAF0", timeoutMs = 800L)  // raw frames, no auto-format
+                        transport.beginMonitor("STMA")                   // monitor all; no '>' until stopped
+                    } catch (e: Exception) {
+                        log("CAN monitor failed: ${e.message}")
+                    }
+                }
+                Adapter.OpenPort -> {
+                    val client = host.tactrixClient()
+                    if (client == null) { log("CAN monitor: connect the OpenPort first"); return@launch }
+                    log("CAN monitor: OpenPort ch6 @ 500k, accept-all (listen-only) — watch for broadcast frames")
+                    // The monitor reconfigures the adapter to ch6 — invalidate the
+                    // cached K-line init so the next live read re-runs setup.
+                    client.channelInitialized = false
+                    // Reuse the Live Data broadcast source: it opens ch6 with an
+                    // accept-all filter and records every distinct frame to the
+                    // log. Collect-and-ignore (frames are logged inside) until STOP
+                    // cancels the job.
+                    val src = OpenPortCanBroadcastSource(client.rawIo)
+                    monitorJob?.cancel()
+                    monitorJob = host.scope.launch(Dispatchers.IO) {
+                        try {
+                            src.startFlow(200L).collect { /* frames logged in source */ }
+                        } catch (e: Exception) {
+                            ObdLinkTrafficLog.record("OUT", "· CAN monitor ended: ${e.message}")
+                        } finally {
+                            src.close()
+                        }
+                    }
+                }
+                Adapter.Ft232rl ->
+                    log("CAN monitor: FT232RL is K-line only — no CAN bus to monitor")
+                else -> log("CAN monitor: pick an adapter first")
             }
         }
     }
 
-    /** Stop the passive CAN sniff started by [startCanMonitor] (sends the bare
-     *  0x0D that halts STMA and re-enables the prompt). Safe if not monitoring. */
+    /** Stop the passive CAN sniff started by [startCanMonitor]: cancels the
+     *  OpenPort read loop, and for an OBDLink sends the bare 0x0D that halts
+     *  STMA and re-enables the prompt. Safe if not monitoring. */
     fun stopCanMonitor() {
         host.scope.launch(Dispatchers.IO) {
+            monitorJob?.cancel()
+            monitorJob = null
             val transport = when (host.state.settings.adapter) {
                 Adapter.OBDLinkEx -> host.obdLinkExManager()?.transport
                 Adapter.OBDLink -> host.obdLinkBtManager()?.transport

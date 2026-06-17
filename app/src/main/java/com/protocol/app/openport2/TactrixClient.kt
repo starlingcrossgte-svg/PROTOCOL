@@ -47,6 +47,11 @@ class TactrixClient(private val io: TactrixIo) {
      */
     var channelInitialized: Boolean = false
 
+    /** The raw byte transport, for dev tools that drive a listen-only channel
+     *  (e.g. the CAN-broadcast monitor) directly, bypassing the SSM2 framing
+     *  here. Module-internal so only in-app dev code can reach it. */
+    internal val rawIo: TactrixIo get() = io
+
     fun resetRequestIdCounter(startFrom: Int = 2) {
         nextRequestId.set(startFrom)
     }

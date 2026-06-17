@@ -50,8 +50,11 @@ data class CommandSequence(
 
 /** Which adapter family a command targets. The dev console drives only one
  *  family at a time (whatever adapter is selected), so the palette filters by
- *  this and the manual-command router formats by it. */
-enum class CommandFamily { ELM, OpenPort }
+ *  this and the manual-command router formats by it. Three real sets:
+ *   - ELM      = OBDLink BT + OBDLink EX (ELM/STN ASCII).
+ *   - OpenPort = Tactrix line protocol.
+ *   - Kkl      = FT232RL dumb cable — no command language, raw SSM2 frames only. */
+enum class CommandFamily { ELM, OpenPort, Kkl }
 
 /**
  * How a command's text has to reach the wire — the crux of "what is hex vs
@@ -78,87 +81,102 @@ data class QuickCommand(
     val command: String,
     val label: String,
     val family: CommandFamily = CommandFamily.ELM,
-    val kind: CommandKind = CommandKind.TEXT
+    val kind: CommandKind = CommandKind.TEXT,
+    /** Section the command sits under in the palette (e.g. "SETUP · AT"). The
+     *  palette renders one dim header per group, in first-seen order, so listing
+     *  the entries in group order here is all that's needed. */
+    val group: String = ""
 )
 
 object AdapterCommandLibrary {
 
-    /** Flat, scrollable palette for the manual command box. Ordered by use:
-     *  identity/reset, link config, CAN setup, timing/speed, reads. */
+    /** OBDLink (ELM/STN) palette, grouped for the manual command box. Order of
+     *  the sections: the SETUP groups first (AT, then STN, then STPX request
+     *  format), then the fire-after-init CONTINUOUS sends, the CAN MONITOR arm
+     *  commands, and finally SINGLE-address poll frames. The palette renders one
+     *  dim header per [QuickCommand.group] in this order. */
     val QUICK_COMMANDS: List<QuickCommand> = listOf(
-        QuickCommand("ATI", "adapter / ELM version"),
-        QuickCommand("STI", "STN firmware version"),
-        QuickCommand("@1", "device description"),
-        QuickCommand("BF", "ECU ID + capability bitmap"),
-        QuickCommand("ATZ", "full reset"),
-        QuickCommand("ATWS", "warm start"),
-        QuickCommand("ATD", "restore defaults"),
-        QuickCommand("ATE0", "echo off"),
-        QuickCommand("ATL0", "linefeeds off"),
-        QuickCommand("ATS0", "spaces off"),
-        QuickCommand("ATH0", "headers off"),
-        QuickCommand("ATH1", "headers on"),
-        QuickCommand("ATAL", "allow long messages"),
-        QuickCommand("ATSP6", "ISO 15765 CAN 11/500"),
-        QuickCommand("ATSH7E0", "tx header = ECM"),
-        QuickCommand("ATSH7E1", "tx header = TCM"),
-        QuickCommand("ATCRA7E8", "rx filter = ECM"),
-        QuickCommand("ATCRA7E9", "rx filter = TCM"),
-        QuickCommand("ATFCSH7E0", "flow-control header"),
-        QuickCommand("ATFCSD300000", "flow-control data"),
-        QuickCommand("ATFCSM1", "flow-control mode 1"),
-        QuickCommand("ATFCSM0", "flow-control mode 0"),
-        QuickCommand("ATAT0", "adaptive timing off"),
-        QuickCommand("ATAT2", "adaptive timing aggressive"),
-        QuickCommand("ATST10", "timeout 64 ms"),
-        QuickCommand("ATST08", "timeout 32 ms"),
-        QuickCommand("STP301", "P3 inter-msg gap 4 ms"),
-        QuickCommand("STPBR2000000", "UART 2 Mbaud"),
-        QuickCommand("STPBR115200", "UART 115200"),
-        QuickCommand("STPRS", "protocol status"),
-        // ── K-line timing / aggression (ISO 9141, SSM2 @ 4800) ──
-        QuickCommand("STP 21", "K-line: ISO9141, no header/autoinit"),
-        QuickCommand("STIMCS 1", "K-line: self-checksum (auto off)"),
-        QuickCommand("STPBR 4800", "K-line: SSM2 baud 4800"),
-        QuickCommand("STIP4 0", "P4: TX interbyte 0 ms"),
-        QuickCommand("STIP1X 5", "P1: RX interbyte max 5 ms (aggressive)"),
-        QuickCommand("STIP1X 10", "P1: RX interbyte max 10 ms"),
-        QuickCommand("STIP1X 20", "P1: RX interbyte max 20 ms (safe)"),
-        QuickCommand("STIAT 0", "adaptive P1-max OFF (manual)"),
-        QuickCommand("STIAT 1", "adaptive P1-max ON (default)"),
-        QuickCommand("STIP3 20", "P3 inter-msg gap — smoothness"),
-        QuickCommand("STIP3 0A", "P3 inter-msg gap — push limits (hex)"),
-        QuickCommand("STIP3 10", "P3 inter-msg gap — push limits (decimal)"),
-        QuickCommand("STPTO 200", "OBD request timeout 200 ms"),
-        // ── Polling-technique tests (continuous / monitor) ──
-        QuickCommand("STM", "start bus monitor"),
-        QuickCommand("STMA", "monitor ALL frames"),
-        QuickCommand("STPX d:8010F008A80100000E00000F4E,r:25,t:3000", "RPM continuous burst x25"),
-        QuickCommand(
-            "STPX d:8010F02CA80100000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D13,r:25,t:3000",
-            "full-page continuous burst x25"
-        ),
-        // ── EZ30R K-line frames (full SSM2 80-header + checksum) ──
-        // These are HEX_FRAME: raw bytes. On ELM they go out as continuous
-        // ASCII-hex (spaces stripped); the router would wrap them for OpenPort.
-        QuickCommand("8010F008A80000000E00000F4D", "EZ30R RPM single (A8 00)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("8010F008A80100000E00000F4E", "EZ30R RPM continuous (A8 01)", kind = CommandKind.HEX_FRAME),
-        QuickCommand(
-            "8010F02CA80000000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D12",
-            "EZ30R full-page single (A8 00)", kind = CommandKind.HEX_FRAME
-        ),
+        // ── SETUP · AT ── ELM control commands: reset, link config, CAN setup,
+        //                  flow control, timing.
+        QuickCommand("ATI", "adapter / ELM version", group = "SETUP · AT"),
+        QuickCommand("ATZ", "full reset", group = "SETUP · AT"),
+        QuickCommand("ATWS", "warm start", group = "SETUP · AT"),
+        QuickCommand("ATD", "restore defaults", group = "SETUP · AT"),
+        QuickCommand("ATE0", "echo off", group = "SETUP · AT"),
+        QuickCommand("ATL0", "linefeeds off", group = "SETUP · AT"),
+        QuickCommand("ATS0", "spaces off", group = "SETUP · AT"),
+        QuickCommand("ATH1", "headers on", group = "SETUP · AT"),
+        QuickCommand("ATH0", "headers off", group = "SETUP · AT"),
+        QuickCommand("ATAL", "allow long messages", group = "SETUP · AT"),
+        QuickCommand("ATCAF0", "CAN auto-format off (raw)", group = "SETUP · AT"),
+        QuickCommand("ATCAF1", "CAN auto-format on", group = "SETUP · AT"),
+        QuickCommand("ATSP6", "ISO 15765 CAN 11/500", group = "SETUP · AT"),
+        QuickCommand("ATSH7E0", "tx header = ECM", group = "SETUP · AT"),
+        QuickCommand("ATSH7E1", "tx header = TCM", group = "SETUP · AT"),
+        QuickCommand("ATCRA7E8", "rx filter = ECM", group = "SETUP · AT"),
+        QuickCommand("ATCRA7E9", "rx filter = TCM", group = "SETUP · AT"),
+        QuickCommand("ATFCSH7E0", "flow-control header", group = "SETUP · AT"),
+        QuickCommand("ATFCSD300000", "flow-control data", group = "SETUP · AT"),
+        QuickCommand("ATFCSM1", "flow-control mode 1", group = "SETUP · AT"),
+        QuickCommand("ATFCSM0", "flow-control mode 0", group = "SETUP · AT"),
+        QuickCommand("ATAT0", "adaptive timing off", group = "SETUP · AT"),
+        QuickCommand("ATAT2", "adaptive timing aggressive", group = "SETUP · AT"),
+        QuickCommand("ATST10", "timeout 64 ms", group = "SETUP · AT"),
+        QuickCommand("ATST08", "timeout 32 ms", group = "SETUP · AT"),
+        // ── SETUP · STN ── STN-specific: identity, K-line bring-up (ISO9141,
+        //                   SSM2 @ 4800), UART baud, and K-line timing levers.
+        QuickCommand("STI", "STN firmware version", group = "SETUP · STN"),
+        QuickCommand("@1", "device description", group = "SETUP · STN"),
+        QuickCommand("STPRS", "protocol status", group = "SETUP · STN"),
+        QuickCommand("STP 21", "K-line: ISO9141, no header/autoinit", group = "SETUP · STN"),
+        QuickCommand("STIMCS 1", "K-line: self-checksum (auto off)", group = "SETUP · STN"),
+        QuickCommand("STPBR 4800", "K-line: SSM2 baud 4800", group = "SETUP · STN"),
+        QuickCommand("STPBR115200", "UART 115200", group = "SETUP · STN"),
+        QuickCommand("STPBR2000000", "UART 2 Mbaud", group = "SETUP · STN"),
+        QuickCommand("STIP4 0", "P4: TX interbyte 0 ms", group = "SETUP · STN"),
+        QuickCommand("STIP1X 2", "P1: RX interbyte 2 ms (stream edge)", group = "SETUP · STN"),
+        QuickCommand("STIP1X 5", "P1: RX interbyte 5 ms (aggressive)", group = "SETUP · STN"),
+        QuickCommand("STIP1X 10", "P1: RX interbyte 10 ms", group = "SETUP · STN"),
+        QuickCommand("STIP1X 20", "P1: RX interbyte 20 ms (safe)", group = "SETUP · STN"),
+        QuickCommand("STIAT 0", "adaptive P1-max OFF (manual)", group = "SETUP · STN"),
+        QuickCommand("STIAT 1", "adaptive P1-max ON (default)", group = "SETUP · STN"),
+        QuickCommand("STIP3 0A", "P3 inter-msg gap tight (hex)", group = "SETUP · STN"),
+        QuickCommand("STIP3 20", "P3 inter-msg gap smooth", group = "SETUP · STN"),
+        QuickCommand("STP301", "P3 inter-msg gap 4 ms", group = "SETUP · STN"),
+        QuickCommand("STPTO 200", "OBD request timeout 200 ms", group = "SETUP · STN"),
+        // ── SETUP · STPX ── the STPX request grammar (d: data, r: replies,
+        //                    t: timeout). Templates to build a precise send.
+        QuickCommand("STPX d:8010F008A80000000E00000F4D", "STPX send only (no receive)", group = "SETUP · STPX"),
+        QuickCommand("STPX d:8010F008A80000000E00000F4D,r:1", "STPX send, wait 1 reply", group = "SETUP · STPX"),
+        QuickCommand("STPX d:8010F008A80000000E00000F4D,r:1,t:1000", "STPX send, 1 reply, 1 s timeout", group = "SETUP · STPX"),
+        // ── CONTINUOUS / STREAM ── fire AFTER init; the ECU firehoses replies
+        //    off one request (A8 01). Watch the RAW BYTES log fill with E8 frames.
+        QuickCommand("8010F008A80100000E00000F4E", "RPM continuous (A8 01)", kind = CommandKind.HEX_FRAME, group = "CONTINUOUS / STREAM"),
         QuickCommand(
             "8010F02CA80100000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D13",
-            "EZ30R full-page continuous (A8 01)", kind = CommandKind.HEX_FRAME
+            "full-page continuous (A8 01)", kind = CommandKind.HEX_FRAME, group = "CONTINUOUS / STREAM"
         ),
-        QuickCommand("A80000000E", "read RPM hi (0x0E)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("A80000000F", "read RPM lo (0x0F)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("A800000008", "read coolant (0x08)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("A80000001C", "read battery (0x1C)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("A800000012", "read IAT (0x12)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("A800000113", "read oil temp (0x113)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("A00000083F", "block read 0x08..0x47 (64B)", kind = CommandKind.HEX_FRAME),
-        QuickCommand("1003", "UDS extended session", kind = CommandKind.HEX_FRAME)
+        QuickCommand("STPX d:8010F008A80100000E00000F4E,r:25,t:3000", "RPM continuous burst x25", group = "CONTINUOUS / STREAM"),
+        QuickCommand(
+            "STPX d:8010F02CA80100000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D13,r:25,t:3000",
+            "full-page continuous burst x25", group = "CONTINUOUS / STREAM"
+        ),
+        // ── CAN MONITOR ── listen-only sniff of a broadcast bus (the '06 3.0R
+        //    powertrain CAN). Pair with ATH1 + ATCAF0 above.
+        QuickCommand("STM", "start bus monitor", group = "CAN MONITOR"),
+        QuickCommand("STMA", "monitor ALL frames", group = "CAN MONITOR"),
+        // ── SINGLE POLL ── one-address K-line reads (full SSM2 80-frame +
+        //    checksum) — pull a value once. ECU ID (BF) lives here too.
+        QuickCommand("8010F001BF40", "ECU ID + capability bitmap (BF)", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A80000000835", "coolant 0x08", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A80000001C49", "battery 0x1C", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A8000000123F", "IAT 0x12", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A80000011341", "oil temp 0x113", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F008A80000000E00000F4D", "RPM single 0x0E/0x0F (A8 00)", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand(
+            "8010F02CA80000000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D12",
+            "full-page single (A8 00)", kind = CommandKind.HEX_FRAME, group = "SINGLE POLL"
+        )
     )
 
     // ── OpenPort 2.0 (Tactrix) quick commands ────────────────────────────
@@ -168,23 +186,57 @@ object AdapterCommandLibrary {
     // here are bare SSM2 bytes — the console parses them to binary and wraps
     // them in the `att<ch>` header for whichever protocol is selected.
     val OPENPORT_QUICK_COMMANDS: List<QuickCommand> = listOf(
-        QuickCommand("ati", "adapter info (no reqid)", CommandFamily.OpenPort),
-        QuickCommand("ata", "reset/abort channels", CommandFamily.OpenPort),
-        // K-line channel-open (SSM2 @ 4800 on Tactrix channel 3)
-        QuickCommand("ato3 512 4800 0", "K-line: open ch3 @ 4800", CommandFamily.OpenPort),
-        QuickCommand("ats3 1 0", "K-line: channel setting", CommandFamily.OpenPort),
-        // CAN channel-open (ISO15765 @ 500k on Tactrix channel 6)
-        QuickCommand("ato6 0 500000 0", "CAN: open ch6 @ 500k", CommandFamily.OpenPort),
-        QuickCommand("ats6 3 0", "CAN: channel setting", CommandFamily.OpenPort),
-        QuickCommand("ats6 34 65535", "CAN: IOCTL", CommandFamily.OpenPort),
-        QuickCommand("ats6 35 65535", "CAN: IOCTL", CommandFamily.OpenPort),
-        QuickCommand("atv", "adapter voltage", CommandFamily.OpenPort),
-        // SSM2 read frames — bare bytes; the console builds the att wrapper.
-        // K-line: type the FULL 80-header frame. CAN: type the SSM2 payload
-        // (A8 00 <addr>); the console prepends the 7E0 request ID.
-        QuickCommand("8010F008A80000000E00000F4D", "K-line RPM single (full frame)", CommandFamily.OpenPort, CommandKind.HEX_FRAME),
-        QuickCommand("A800000008", "CAN read coolant (payload)", CommandFamily.OpenPort, CommandKind.HEX_FRAME),
-        QuickCommand("A80000000E", "CAN read RPM hi (payload)", CommandFamily.OpenPort, CommandKind.HEX_FRAME)
+        // ── SETUP · LINK ──
+        QuickCommand("ati", "adapter info (no reqid)", CommandFamily.OpenPort, group = "SETUP · LINK"),
+        QuickCommand("ata", "reset/abort channels", CommandFamily.OpenPort, group = "SETUP · LINK"),
+        QuickCommand("atv", "adapter voltage", CommandFamily.OpenPort, group = "SETUP · LINK"),
+        // ── SETUP · K-LINE ── channel-open (SSM2 @ 4800 on Tactrix channel 3)
+        QuickCommand("ato3 512 4800 0", "open ch3 @ 4800", CommandFamily.OpenPort, group = "SETUP · K-LINE"),
+        QuickCommand("ats3 1 0", "channel setting", CommandFamily.OpenPort, group = "SETUP · K-LINE"),
+        // ── SETUP · CAN ── channel-open (ISO15765 @ 500k on Tactrix channel 6)
+        QuickCommand("ato6 0 500000 0", "open ch6 @ 500k", CommandFamily.OpenPort, group = "SETUP · CAN"),
+        QuickCommand("ats6 3 0", "channel setting", CommandFamily.OpenPort, group = "SETUP · CAN"),
+        QuickCommand("ats6 34 65535", "IOCTL", CommandFamily.OpenPort, group = "SETUP · CAN"),
+        QuickCommand("ats6 35 65535", "IOCTL", CommandFamily.OpenPort, group = "SETUP · CAN"),
+        // ── CONTINUOUS / STREAM ── full 80-frame A8 01; the console wraps it in
+        //    the att<ch> header for the selected protocol. ECU streams replies.
+        QuickCommand("8010F008A80100000E00000F4E", "RPM continuous (A8 01)", CommandFamily.OpenPort, CommandKind.HEX_FRAME, group = "CONTINUOUS / STREAM"),
+        QuickCommand(
+            "8010F02CA80100000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D13",
+            "full-page continuous (A8 01)", CommandFamily.OpenPort, CommandKind.HEX_FRAME, group = "CONTINUOUS / STREAM"
+        ),
+        // ── SINGLE POLL ── K-line: type the FULL 80-frame. CAN: type the SSM2
+        //    payload (A8 00 <addr>); the console prepends the 7E0 request ID.
+        QuickCommand("8010F008A80000000E00000F4D", "K-line RPM single (full frame)", CommandFamily.OpenPort, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("A800000008", "CAN read coolant (payload)", CommandFamily.OpenPort, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("A80000000E", "CAN read RPM hi (payload)", CommandFamily.OpenPort, CommandKind.HEX_FRAME, group = "SINGLE POLL")
+    )
+
+    // ── FT232RL (KKL dumb cable) quick commands ───────────────────────────
+    // The cable has NO command language of its own — the phone is the protocol
+    // master — so every entry is a raw SSM2 K-line frame (full 80-header +
+    // checksum). The console sends the bytes straight onto the K-line and reads
+    // the reply (src = request dest, byte 1). No AT/ST commands apply.
+    val KKL_QUICK_COMMANDS: List<QuickCommand> = listOf(
+        // ── READ / IDENTITY ──
+        QuickCommand("8010F001BF40", "ECU ID + capability bitmap (BF)", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "READ / IDENTITY"),
+        // ── CONTINUOUS / STREAM ── A8 01 arms the ECU's own stream; the KKL
+        //    continuous source rides it. Fire after a connect.
+        QuickCommand("8010F008A80100000E00000F4E", "RPM continuous (A8 01)", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "CONTINUOUS / STREAM"),
+        QuickCommand(
+            "8010F02CA80100000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D13",
+            "full-page continuous (A8 01)", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "CONTINUOUS / STREAM"
+        ),
+        // ── SINGLE POLL ── one-address reads (A8 00).
+        QuickCommand("8010F005A80000000835", "coolant 0x08", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A80000001C49", "battery 0x1C", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A8000000123F", "IAT 0x12", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F005A80000011341", "oil temp 0x113", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand("8010F008A80000000E00000F4D", "RPM single 0x0E/0x0F (A8 00)", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "SINGLE POLL"),
+        QuickCommand(
+            "8010F02CA80000000E00000F00000800001C000046000113000012FF2578FF2579FF257AFF257B00002200003C00003D12",
+            "full-page single (A8 00)", CommandFamily.Kkl, CommandKind.HEX_FRAME, group = "SINGLE POLL"
+        )
     )
 
     // ── CAN (ISO-TP, ECM @ 7E0/7E8) ──────────────────────────────────────
@@ -291,6 +343,7 @@ object AdapterCommandLibrary {
     fun quickCommandsFor(family: CommandFamily): List<QuickCommand> = when (family) {
         CommandFamily.ELM -> QUICK_COMMANDS
         CommandFamily.OpenPort -> OPENPORT_QUICK_COMMANDS
+        CommandFamily.Kkl -> KKL_QUICK_COMMANDS
     }
 
     /**
