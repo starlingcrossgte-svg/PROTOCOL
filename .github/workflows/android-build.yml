@@ -40,3 +40,4 @@ jobs:
         with:
           name: PROTOCOL-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 89
