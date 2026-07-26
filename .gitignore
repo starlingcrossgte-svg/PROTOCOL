@@ -4,3 +4,15 @@ local.properties
 *.apk
 *.aab
 build.ps1
+
+# BYO-payload discipline: never commit user-supplied kernels, ROMs, captures, or
+# logs. The app ships the transport mechanism only — these are local, external
+# files supplied at runtime, and must never enter the public repository.
+*.bin
+*.hex
+*.srec
+*.s19
+*.rom
+*.pcap
+*.pcapng
+*.csv
