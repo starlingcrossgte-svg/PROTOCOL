@@ -167,6 +167,34 @@ class OpenPortCanLiveSource(
         return if (anyOk) raw else null
     }
 
+    /**
+     * One-shot SSM2 write of [value] to [addr] over the (already-open) CAN
+     * channel — a single att6 B8 frame, mirroring [readAddressesOnce]'s
+     * transmit but writing instead of reading. Returns true only if the ECU
+     * echoes the written value (F8 <value>); a no-reply or wrong echo is false.
+     * Caller must have run [initChannel] first.
+     *
+     * Used by the DTC reset (clear-memory). The live poll path stays read-only.
+     */
+    fun writeAddressOnce(addr: Ssm2Address, value: Byte): Boolean {
+        val ssm2Payload = ObdLinkSsm2Can.buildWritePayload(addr, value)
+        val tail = CAN_ID_REQUEST + ssm2Payload
+        val reqId = nextReqId.getAndIncrement()
+        val asciiLine = "att$CHANNEL ${tail.size} $TX_FLAGS $DEFAULT_TX_TIMEOUT_MICROS $reqId\r\n"
+        val packet = asciiLine.toByteArray(StandardCharsets.US_ASCII) + tail
+        return try {
+            io.write(packet)
+            val rr = io.readUntil(READ_TIMEOUT_MS) { buf ->
+                extractVehicleData(buf) != null || hasAreError(buf, reqId)
+            }
+            val data = extractVehicleData(rr.bytes)
+            data != null && ObdLinkSsm2Can.isWriteAck(data, value)
+        } catch (e: UsbDisconnectedException) {
+            channelOpened = false
+            false
+        }
+    }
+
     private fun buildSample(pids: List<Ssm2Pid>, raw: IntArray, wireStart: Long): PollSample {
         val values = HashMap<String, Double>()
         val rawValues = ArrayList<Int>(raw.size)

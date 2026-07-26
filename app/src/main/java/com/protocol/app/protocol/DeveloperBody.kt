@@ -64,8 +64,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.protocol.app.obdlink.AdapterCommandLibrary
 import com.protocol.app.obdlink.CommandFamily
 import com.protocol.app.obdlink.CommandKind
@@ -120,41 +118,10 @@ internal fun DeveloperBody(
     // devMode (so dev-gated features like the Live Data PID presets keep
     // working) and the RAW BYTES log is always live here.
     LaunchedEffect(Unit) { onDevModeChange(true) }
-    val usbRevision by UsbTrafficLog.revision.collectAsState()
-    val btRevision by ObdLinkTrafficLog.revision.collectAsState()
-    val context = LocalContext.current
-    // SAF "create document" save: Export writes the log to a folder the user
-    // picks (Downloads/Files) via the system dialog. pendingCsv holds it until
-    // the picker returns.
-    var pendingCsv by remember { mutableStateOf("") }
-    val saveCsvLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.openOutputStream(uri)?.use { it.write(pendingCsv.toByteArray()) }
-                android.widget.Toast.makeText(context, "Saved", android.widget.Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                android.widget.Toast.makeText(context, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    // Merge USB + OBDLink traffic into one time-ordered stream. Snapshot the
-    // ring buffers only when a revision bumps (i.e. only while this page is
-    // composed and new traffic arrives) — the O(n) copy stays off the
-    // wire-recording hot path.
-    val merged = remember(usbRevision, btRevision) {
-        val trafficEvents = UsbTrafficLog.snapshot()
-        val btEvents = ObdLinkTrafficLog.snapshot()
-        val lines = ArrayList<LogLine>(trafficEvents.size + btEvents.size)
-        for (e in trafficEvents)
-            lines.add(LogLine(e.timestampMs, e.direction == TrafficEvent.Direction.OUT, e.hex, e.byteCount, e.ascii))
-        for (e in btEvents)
-            lines.add(LogLine(e.timestampMs, e.direction == ObdLinkTrafficEvent.Direction.OUT, e.text, e.text.length))
-        lines.sortBy { it.ts }
-        lines
-    }
+    // Transport log (USB + OBDLink) + its CSV export — both shared with the Flash
+    // silo via the helpers below, so the two pages render the same TRANSPORT card.
+    val merged = rememberMergedTransportLog()
+    val exportLog = rememberTransportLogExport()
 
     Column(
         modifier = Modifier
@@ -165,13 +132,15 @@ internal fun DeveloperBody(
             // dead band the outside-scroll placement produced. Free scroll, no
             // forced bring-into-view fighting the gesture.
             .imePadding()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            // Top trimmed to 4dp (from 8) so the page rides ~4dp higher after the
+            // CONFIGURATION header was removed — recovers the clipped bottom without
+            // clipping the top. Bottom stays 8dp for breathing room.
+            .padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // ── CONFIGURATION ── adapter, bus, emulator, init. Pick here instead of
-        // Home/Settings. Selecting does NOT connect — the CONNECT button (below
-        // the log) does. Tap a selected adapter/bus again to clear it.
-        CategoryHeader("CONFIGURATION", startPadding = 8.dp)
+        // Configuration (no header label): adapter, bus, emulator, init. Selecting
+        // does NOT connect — the CONNECT button (below the log) does. Tap a selected
+        // adapter/bus again to clear it.
         AdapterGrid(selected = s.adapter, onSelect = onSelectAdapter)
         ProtocolToggle(selected = s.protocol, onSelect = onSelectProtocol)
         EmulatorDropdown(
@@ -186,16 +155,13 @@ internal fun DeveloperBody(
             onSelect = onSelectInitSequence
         )
 
-        // Combined raw log (USB + OBDLink), newest at the bottom. Title sits
-        // above the log; Clear / Export are a tab on the log's inner top-right.
-        CategoryHeader("RAW BYTES", startPadding = 8.dp)
+        // Combined transport log (USB + OBDLink), newest at the bottom. The
+        // "TRANSPORT" label + Clear / Export live inside the card's top row
+        // (no separate header above it).
         CombinedLogCard(
             lines = merged,
             onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
-            onExportCsv = {
-                pendingCsv = formatCombined(merged)
-                saveCsvLauncher.launch("protocol-traffic.csv")
-            }
+            onExportCsv = { exportLog(merged, "protocol-traffic.csv") }
         )
 
         // Action buttons below the log, above the manual command box — two rows
@@ -217,7 +183,6 @@ internal fun DeveloperBody(
             DevActionButton("CONTINUOUS TEST", Modifier.weight(1f), border = Accent) { onKlineContinuousTest() }
             DevActionButton("CAN MONITOR", Modifier.weight(1f), border = Accent) { onStartCanMonitor() }
         }
-
         // Manual command console — type any command; it's auto-formatted for the
         // SELECTED adapter (ELM/STN ASCII for OBDLink, Tactrix line protocol for
         // OpenPort, raw SSM2 frames for KKL) and the reply lands in the RAW BYTES
@@ -226,10 +191,9 @@ internal fun DeveloperBody(
         // active adapter family.
         ManualCommandRow(family = family, onSend = onSendManualCommand)
 
-        // ── SEQUENCE GENERATOR ── last on the page. 10 command slots each with
-        // its own response line, a ms-delay between commands, a wait-for-prompt
-        // toggle, Clear, and Send (fires top→bottom on the configured adapter).
-        CategoryHeader("SEQUENCE GENERATOR", startPadding = 8.dp)
+        // Sequence generator (last on the page, no header label): 10 command slots,
+        // a ms-delay between commands, Clear, and Send. The label lives in the
+        // "10-STEP SEQUENCE GENERATOR" dropdown title.
         SequenceGenerator(onRun = onRunSequence)
     }
 }
@@ -494,7 +458,7 @@ private fun AdapterButton(
 // Shared rounded action button (CONNECT / STOP / test actions). Full white
 // label, caller-supplied [border] color and [modifier] (weight for side-by-side).
 @Composable
-private fun DevActionButton(
+internal fun DevActionButton(
     label: String,
     modifier: Modifier,
     border: Color,
@@ -625,7 +589,7 @@ private fun InitDropdown(
 // One thin segment of the RAW BYTES log's top-right action tab. White label,
 // small padding so the tab stays slim. Mirrors the Live Data SegmentButton.
 @Composable
-private fun LogTabButton(text: String, onClick: () -> Unit) {
+internal fun LogTabButton(text: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxHeight()
@@ -643,7 +607,7 @@ private fun LogTabButton(text: String, onClick: () -> Unit) {
     }
 }
 
-private data class LogLine(
+internal data class LogLine(
     val ts: Long,
     val isOut: Boolean,
     val payload: String,        // hex (USB) or ASCII text (OBDLink)
@@ -652,27 +616,36 @@ private data class LogLine(
 )
 
 @Composable
-private fun CombinedLogCard(
+internal fun CombinedLogCard(
     lines: List<LogLine>,
     onClear: () -> Unit,
-    onExportCsv: () -> Unit
+    onExportCsv: () -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    // null → the log fills the card's remaining height (scrollable); a value →
+    // fixed compact inline height (the Dev console default).
+    compactHeight: Dp? = 200.dp
 ) {
-    // Always live on the Dev Mode page (the page itself is the dev surface).
-    var expanded by remember { mutableStateOf(false) }
-    // Compact inline height — only a few request/response lines. The Expand tab
-    // opens the full scrollable, highlightable, copyable view.
-    val compactHeight = 200.dp
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
         border = BorderStroke(1.dp, BorderGray),
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier
     ) {
-        // Clear / Export / Expand folder-tab on the log's inner top-right corner.
+        // "TRANSPORT" label on the left + the Clear / Export folder-tab on
+        // the log's inner top-right corner (replaces the old header above the card).
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                "TRANSPORT",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 12.dp)
+            )
             val tabShape = RoundedCornerShape(bottomStart = 10.dp)
             Row(
                 modifier = Modifier
@@ -684,20 +657,15 @@ private fun CombinedLogCard(
                 LogTabButton("Clear", onClear)
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White))
                 LogTabButton("Export", onExportCsv)
-                Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White))
-                LogTabButton("Expand") { expanded = true }
             }
         }
-        LogList(lines = lines, height = compactHeight, userScrollEnabled = false)
-    }
-
-    if (expanded) {
-        LogFullscreen(
-            lines = lines,
-            onClear = onClear,
-            onExportCsv = onExportCsv,
-            onClose = { expanded = false }
-        )
+        if (compactHeight != null) {
+            LogList(lines = lines, height = compactHeight, userScrollEnabled = false)
+        } else {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                LogList(lines = lines, height = null, userScrollEnabled = true)
+            }
+        }
     }
 }
 
@@ -706,7 +674,7 @@ private fun CombinedLogCard(
 // fills its parent). An instant snap (no animation) avoids fighting the pager's
 // horizontal swipe when this page scrolls into view.
 @Composable
-private fun LogList(lines: List<LogLine>, height: Dp?, userScrollEnabled: Boolean = true) {
+internal fun LogList(lines: List<LogLine>, height: Dp?, userScrollEnabled: Boolean = true) {
     val listState = rememberLazyListState()
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
@@ -730,62 +698,6 @@ private fun LogList(lines: List<LogLine>, height: Dp?, userScrollEnabled: Boolea
             modifier = sizeMod.padding(8.dp)
         ) {
             items(lines) { line -> CombinedLogRow(line) }
-        }
-    }
-}
-
-// Fullscreen log overlay: full-height scroll + highlight + copy, with the same
-// Clear / Export plus a Close. Dialog with platform width off = true fullscreen.
-@Composable
-private fun LogFullscreen(
-    lines: List<LogLine>,
-    onClear: () -> Unit,
-    onExportCsv: () -> Unit,
-    onClose: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        // Full-bleed dark background to the very edges of the phone; the content
-        // is inset off the status / nav bars so nothing hides under the clock.
-        Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0E1013))) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "RAW BYTES",
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Row(
-                    modifier = Modifier.height(IntrinsicSize.Min),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    LogTabButton("Clear", onClear)
-                    LogTabButton("Export", onExportCsv)
-                    LogTabButton("Close", onClose)
-                }
-            }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                LogList(lines = lines, height = null)
-            }
-        }
         }
     }
 }
@@ -860,7 +772,7 @@ private fun ProtocolToggle(selected: BusProtocol?, onSelect: (BusProtocol?) -> U
 }
 
 @Composable
-private fun ProtocolToggleButton(
+internal fun ProtocolToggleButton(
     label: String,
     selected: Boolean,
     modifier: Modifier,
@@ -1021,7 +933,7 @@ private fun SequenceGenerator(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "10-STEP SEQUENCE",
+                    "10-STEP SEQUENCE GENERATOR",
                     color = Color.White,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
@@ -1214,3 +1126,53 @@ private fun formatCombined(lines: List<LogLine>): String =
         val arrow = if (l.isOut) "->" else "<-"
         "${trafficTimeFmt.format(Date(l.ts))} $arrow ${l.payload}"
     }
+
+// ── Shared TRANSPORT-log infrastructure ─────────────────────────────────────
+// Both the Dev console and the Flash silo render the same combined log + Export.
+// These helpers keep that single source of truth in one place so neither page
+// duplicates the snapshot/merge or the SAF save plumbing.
+
+/** Process-wide USB + OBDLink traffic merged into one time-ordered list.
+ *  Recomposes only when either ring buffer's revision bumps; the O(n) snapshot
+ *  copy stays off the wire-recording hot path. */
+@Composable
+internal fun rememberMergedTransportLog(): List<LogLine> {
+    val usbRevision by UsbTrafficLog.revision.collectAsState()
+    val btRevision by ObdLinkTrafficLog.revision.collectAsState()
+    return remember(usbRevision, btRevision) {
+        val trafficEvents = UsbTrafficLog.snapshot()
+        val btEvents = ObdLinkTrafficLog.snapshot()
+        val lines = ArrayList<LogLine>(trafficEvents.size + btEvents.size)
+        for (e in trafficEvents)
+            lines.add(LogLine(e.timestampMs, e.direction == TrafficEvent.Direction.OUT, e.hex, e.byteCount, e.ascii))
+        for (e in btEvents)
+            lines.add(LogLine(e.timestampMs, e.direction == ObdLinkTrafficEvent.Direction.OUT, e.text, e.text.length))
+        lines.sortBy { it.ts }
+        lines
+    }
+}
+
+/** SAF "create document" CSV export for a transport log. Returns a lambda: call
+ *  it with the lines to save + a suggested filename, and the system save dialog
+ *  picks the destination (Downloads/Files). */
+@Composable
+internal fun rememberTransportLogExport(): (List<LogLine>, String) -> Unit {
+    val context = LocalContext.current
+    var pendingCsv by remember { mutableStateOf("") }
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(pendingCsv.toByteArray()) }
+                android.widget.Toast.makeText(context, "Saved", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    return { lines, name ->
+        pendingCsv = formatCombined(lines)
+        saveCsvLauncher.launch(name)
+    }
+}

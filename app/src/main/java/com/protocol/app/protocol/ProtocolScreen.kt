@@ -78,7 +78,8 @@ fun ProtocolScreen(
     onResizeGauge: (String, Int, Int, Int, Int) -> Boolean,
     onSendManualCommand: (String) -> Unit,
     onReadDtc: () -> Unit,
-    onCopyDtc: () -> Unit,
+    onClearDtc: () -> Unit,
+    onResetDtc: () -> Unit,
     onExportDtc: () -> Unit,
     onStartReadingLive: () -> Unit,
     onStopReadingLive: () -> Unit,
@@ -99,6 +100,14 @@ fun ProtocolScreen(
     onKlineContinuousTest: () -> Unit,
     onStartCanMonitor: () -> Unit,
     onStopCanMonitor: () -> Unit,
+    onReadFirmware: () -> Unit,
+    onSelectKernel: () -> Unit,
+    onClearKernel: () -> Unit,
+    onSelectKernelProtocol: (com.protocol.app.firmware.KernelProtocol) -> Unit,
+    onSetKernelNeedsPrep: (Boolean) -> Unit,
+    onWriteFirmware: (Boolean) -> Unit,
+    onSelectWriteRom: () -> Unit,
+    onClearWriteRom: () -> Unit,
     onSelectAdapter: (Adapter?) -> Unit,
     onSelectProtocol: (BusProtocol?) -> Unit,
     onConnectAdapter: () -> Unit,
@@ -107,6 +116,8 @@ fun ProtocolScreen(
     onResizeSessionLog: (Float) -> Unit,
     onAutoSaveLogs: () -> Unit,
     onPickCsvFolder: () -> Unit,
+    onPickKernelFolder: () -> Unit,
+    onPickRomFolder: () -> Unit,
     onRawLogNameChange: (String) -> Unit,
     onSessionLogNameChange: (String) -> Unit,
     onResetLayout: () -> Unit,
@@ -232,7 +243,8 @@ fun ProtocolScreen(
                             0 -> DiagnosticsPage(
                                 uiState = uiState,
                                 onReadDtc = onReadDtc,
-                                onCopyDtc = onCopyDtc,
+                                onClearDtc = onClearDtc,
+                                onResetDtc = onResetDtc,
                                 onExportDtc = onExportDtc
                             )
                             1 -> HomePage(
@@ -294,10 +306,23 @@ fun ProtocolScreen(
                         onPickBackground = onPickBackground,
                         onClearBackground = onClearBackground,
                         onPickCsvFolder = onPickCsvFolder,
+                        onPickKernelFolder = onPickKernelFolder,
+                        onPickRomFolder = onPickRomFolder,
+                        onSelectKernelProtocol = onSelectKernelProtocol,
+                        onSetKernelNeedsPrep = onSetKernelNeedsPrep,
                         onRawLogNameChange = onRawLogNameChange,
                         onSessionLogNameChange = onSessionLogNameChange
                     )
-                    SubPage.Flash, SubPage.Tuning ->
+                    SubPage.Flash -> FlashBody(
+                        uiState = uiState,
+                        onSelectKernel = onSelectKernel,
+                        onClearKernel = onClearKernel,
+                        onSelectWriteRom = onSelectWriteRom,
+                        onClearWriteRom = onClearWriteRom,
+                        onReadFirmware = onReadFirmware,
+                        onWriteFirmware = onWriteFirmware
+                    )
+                    SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage)
                     SubPage.Notices -> NoticesBody()
                     SubPage.Library -> LibraryBody()

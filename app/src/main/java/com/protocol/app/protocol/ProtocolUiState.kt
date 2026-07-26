@@ -64,6 +64,8 @@ data class ProtocolUiState(
     val sessionLog: List<PollSample> = emptyList(),
     /** True while a one-shot DTC read is in flight (Diagnostics page). */
     val isReadingDtc: Boolean = false,
+    /** True while a DTC reset (SSM2 clear-memory write) is in flight. */
+    val isResettingDtc: Boolean = false,
     /** Human-readable status line for the Diagnostics page DTC read. */
     val dtcStatus: String = "",
     /** Current (temporary) trouble codes from the last read, "P0xxx  DESCRIPTION". */

@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.protocol.app.firmware.KernelProtocol
 
 // General app Settings sub-page. Connection config (adapter / protocol / polling
 // mode) at the top in the rounded dev-console dropdown style, then background +
@@ -56,6 +57,10 @@ internal fun SettingsBody(
     onPickBackground: () -> Unit,
     onClearBackground: () -> Unit,
     onPickCsvFolder: () -> Unit,
+    onPickKernelFolder: () -> Unit,
+    onPickRomFolder: () -> Unit,
+    onSelectKernelProtocol: (KernelProtocol) -> Unit,
+    onSetKernelNeedsPrep: (Boolean) -> Unit,
     onRawLogNameChange: (String) -> Unit,
     onSessionLogNameChange: (String) -> Unit
 ) {
@@ -191,6 +196,52 @@ internal fun SettingsBody(
             value = sessionNameField,
             onValueChange = { sessionNameField = it; onSessionLogNameChange(it) }
         )
+
+        // File-picker start folders. No section header — each button's own label is
+        // the control: it sets WHERE the Flash page's SELECT KERNEL / SELECT ROM
+        // pickers open. The files themselves are chosen over on the Flash page.
+        val kernelFolder = s.kernelFolderUri?.let { CsvDestination.prettyFolderLabel(Uri.parse(it)) }
+        SettingsButton(
+            label = if (kernelFolder != null) "Kernel Folder: $kernelFolder" else "Choose Kernel Folder",
+            shape = SETTINGS_SHAPE,
+            onClick = onPickKernelFolder
+        )
+        val romFolder = s.romFolderUri?.let { CsvDestination.prettyFolderLabel(Uri.parse(it)) }
+        SettingsButton(
+            label = if (romFolder != null) "ROM Folder: $romFolder" else "Choose ROM Folder",
+            shape = SETTINGS_SHAPE,
+            onClick = onPickRomFolder
+        )
+
+        // ── Kernel handling ────────────────────────────────────────
+        // How the Flash page treats the selected kernel file. These change rarely
+        // (per kernel family), so they live here rather than in the silo:
+        //   BARE = bare cmd grammar / reply cmd|0x80 (already in upload form).
+        //   BEEF = BE EF wrapped / reply cmd|0x40 (raw external kernels).
+        //   PREP = pad + integrity word + encrypt before upload; VERBATIM = send as-is.
+        CategoryHeader("KERNEL")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ProtocolToggleButton("BARE", s.kernelProtocol == KernelProtocol.BARE, Modifier.weight(1f)) {
+                onSelectKernelProtocol(KernelProtocol.BARE)
+            }
+            ProtocolToggleButton("BEEF", s.kernelProtocol == KernelProtocol.BEEF, Modifier.weight(1f)) {
+                onSelectKernelProtocol(KernelProtocol.BEEF)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ProtocolToggleButton("PREP", s.kernelNeedsPrep, Modifier.weight(1f)) {
+                onSetKernelNeedsPrep(true)
+            }
+            ProtocolToggleButton("VERBATIM", !s.kernelNeedsPrep, Modifier.weight(1f)) {
+                onSetKernelNeedsPrep(false)
+            }
+        }
     }
 }
 
@@ -238,7 +289,7 @@ private fun NameField(
 }
 
 @Composable
-internal fun SettingsButton(label: String, shape: Shape = y2kCornerShape(), onClick: () -> Unit) {
+internal fun SettingsButton(label: String, shape: Shape = RoundedCornerShape(8.dp), onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(

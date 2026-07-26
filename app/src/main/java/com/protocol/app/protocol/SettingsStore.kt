@@ -1,6 +1,7 @@
 package com.protocol.app.protocol
 
 import android.content.Context
+import com.protocol.app.firmware.KernelProtocol
 
 // Ft232rl = VAG-KKL raw-K-line cable (FT232RL chip). Appended last so existing
 // persisted ordinals (OpenPort=0, OBDLink=1, OBDLinkEx=2) are unchanged. Raw
@@ -47,7 +48,34 @@ data class AppSettings(
     /** Id of the chosen AdapterCommandLibrary sequence (null = library default).
      *  DEV-ONLY: consulted only when connecting from the Dev page CONNECT button.
      *  Live Data always connects with the verified standard init, never this. */
-    val selectedInitSequenceId: String? = null
+    val selectedInitSequenceId: String? = null,
+    /** SAF URI (as String) of the user-selected RAM kernel image used by the
+     *  Dev-Mode firmware read. Null = none chosen; the read prompts to pick one.
+     *  The kernel is never bundled in the APK — it is always a file the user
+     *  supplies via the system file picker, read through the ContentResolver. */
+    val kernelUri: String? = null,
+    /** Command grammar the selected kernel speaks once running: BARE (bare cmd,
+     *  reply cmd|0x80 — the proven bench kernel) or BEEF (BE EF wrapped, reply
+     *  cmd|0x40 — the FastECU-family SH7058 CAN kernels). Not derivable from the
+     *  binary, so the user selects it. */
+    val kernelProtocol: KernelProtocol = KernelProtocol.BARE,
+    /** Whether the selected kernel is a RAW binary that must be prepped (pad +
+     *  integrity word + encrypt) before upload. False = already in upload form,
+     *  sent verbatim. */
+    val kernelNeedsPrep: Boolean = false,
+    /** SAF URI (as String) of the ROM image the Dev-Mode firmware WRITE flashes to
+     *  the ECU. Null = none chosen; the write prompts to pick one. Never bundled. */
+    val writeRomUri: String? = null,
+    /** SAF tree URI (as String) of the folder the Dev-Mode SELECT KERNEL FILE picker
+     *  opens to. Set in Home Settings; only a start-location hint, never the file. */
+    val kernelFolderUri: String? = null,
+    /** SAF tree URI (as String) of the folder the Dev-Mode SELECT ROM TO WRITE picker
+     *  opens to. Set in Home Settings; only a start-location hint, never the file. */
+    val romFolderUri: String? = null,
+    /** Flash WRITE mode. true = TEST (non-destructive: flash stays protected, the
+     *  kernel only VALIDATEs buffer CRCs); false = COMMIT (real write). Defaults to
+     *  TEST so the WRITE button can't modify flash until explicitly switched. */
+    val flashTestMode: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -91,7 +119,14 @@ class SettingsStore(context: Context) {
             ?: AppSettings.DEFAULT_SESSION_LOG_NAME,
         sessionLogHeightDp = prefs.getFloat(KEY_SESSION_LOG_HEIGHT, AppSettings.DEFAULT_SESSION_LOG_HEIGHT_DP),
         selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET),
-        selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null)
+        selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null),
+        kernelUri = prefs.getString(KEY_KERNEL_URI, null),
+        kernelProtocol = KernelProtocol.values().getOrNull(prefs.getInt(KEY_KERNEL_PROTOCOL, 0)) ?: KernelProtocol.BARE,
+        kernelNeedsPrep = prefs.getBoolean(KEY_KERNEL_PREP, false),
+        writeRomUri = prefs.getString(KEY_WRITE_ROM_URI, null),
+        kernelFolderUri = prefs.getString(KEY_KERNEL_FOLDER, null),
+        romFolderUri = prefs.getString(KEY_ROM_FOLDER, null),
+        flashTestMode = prefs.getBoolean(KEY_FLASH_TEST_MODE, true)
     )
 
     fun save(s: AppSettings) {
@@ -112,6 +147,13 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_SESSION_LOG_HEIGHT, s.sessionLogHeightDp)
             .putInt(KEY_SELECTED_PRESET, s.selectedPresetIndex)
             .putString(KEY_INIT_SEQ, s.selectedInitSequenceId)
+            .putString(KEY_KERNEL_URI, s.kernelUri)
+            .putInt(KEY_KERNEL_PROTOCOL, s.kernelProtocol.ordinal)
+            .putBoolean(KEY_KERNEL_PREP, s.kernelNeedsPrep)
+            .putString(KEY_WRITE_ROM_URI, s.writeRomUri)
+            .putString(KEY_KERNEL_FOLDER, s.kernelFolderUri)
+            .putString(KEY_ROM_FOLDER, s.romFolderUri)
+            .putBoolean(KEY_FLASH_TEST_MODE, s.flashTestMode)
             .apply()
     }
 
@@ -133,5 +175,12 @@ class SettingsStore(context: Context) {
         private const val KEY_SESSION_LOG_HEIGHT = "session_log_height_dp"
         private const val KEY_SELECTED_PRESET = "selected_preset_index"
         private const val KEY_INIT_SEQ = "selected_init_sequence_id"
+        private const val KEY_KERNEL_URI = "kernel_uri"
+        private const val KEY_KERNEL_PROTOCOL = "kernel_protocol"
+        private const val KEY_KERNEL_PREP = "kernel_needs_prep"
+        private const val KEY_WRITE_ROM_URI = "write_rom_uri"
+        private const val KEY_KERNEL_FOLDER = "kernel_folder_uri"
+        private const val KEY_ROM_FOLDER = "rom_folder_uri"
+        private const val KEY_FLASH_TEST_MODE = "flash_test_mode"
     }
 }

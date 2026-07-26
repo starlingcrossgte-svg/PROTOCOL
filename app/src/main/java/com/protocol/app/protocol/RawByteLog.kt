@@ -13,7 +13,7 @@ import java.util.Locale
  * traffic merged, time-ordered). Used by the Lock-and-Tap auto-save so a
  * short rapid capture lands on disk for PID verification. The on-screen RAW
  * BYTES log keeps its own formatter (DeveloperBody) — this one is CSV-shaped
- * (Time,Dir,Payload) for spreadsheet/RomRaider-style inspection.
+ * (Time,Dir,Payload) for spreadsheet inspection.
  */
 object RawByteLog {
 

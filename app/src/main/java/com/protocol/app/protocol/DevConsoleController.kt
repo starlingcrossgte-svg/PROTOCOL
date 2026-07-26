@@ -1,8 +1,17 @@
 package com.protocol.app.protocol
 
 import android.content.Context
+import android.net.Uri
 import android.os.SystemClock
+import com.protocol.app.firmware.BeefKernelReadClient
+import com.protocol.app.firmware.BeefKernelWriteClient
+import com.protocol.app.firmware.FirmwareCanTransport
+import com.protocol.app.firmware.KernelImagePrep
+import com.protocol.app.firmware.KernelProtocol
+import com.protocol.app.firmware.KernelReadClient
+import com.protocol.app.firmware.UdsBootloaderClient
 import com.protocol.app.kkl.KklKlineManager
+import java.io.File
 import com.protocol.app.obdlink.AdapterCommandLibrary
 import com.protocol.app.obdlink.ObdLinkBtManager
 import com.protocol.app.obdlink.ObdLinkSsm2Can
@@ -490,4 +499,206 @@ internal class DevConsoleController(private val host: DevConsoleHost) {
             ObdLinkTrafficLog.record("OUT", "· CAN monitor stopped")
         }
     }
+
+    /**
+     * Dev Mode: read the ECU firmware image over OpenPort CAN. Uploads a RAM
+     * kernel, jumps to it, and dumps the image via READ_AREA — READ-ONLY (no
+     * erase / no write is ever sent). OpenPort only (CAN read path).
+     *
+     * The RAM kernel binary is NEVER bundled in the APK and never read from a
+     * fixed path: it is a file the user selects via the system file picker
+     * (Dev Mode -> SELECT KERNEL FILE), persisted as a SAF URI and read through
+     * the ContentResolver — so the kernel can live anywhere the user puts it and
+     * is swappable without an app rebuild.
+     *
+     * Progress + the saved-image path land in the RAW BYTES log; the att6/ar6
+     * wire bytes auto-log through the USB transport. Borrows the live link like
+     * every other dev op; never touches the logging poll path.
+     */
+    fun runFirmwareRead(appContext: Context) {
+        fun log(m: String) = ObdLinkTrafficLog.record("OUT", "· fw: $m")
+        if (host.state.settings.adapter != Adapter.OpenPort) {
+            log("read firmware: select OpenPort 2.0 first (CAN read path)")
+            return
+        }
+        host.scope.launch(Dispatchers.IO) {
+          try {
+            host.takeOverLink()
+            val client = host.tactrixClient()
+            if (client == null) {
+                log("read firmware: OpenPort not connected — plug in & grant USB first")
+                return@launch
+            }
+            // We reconfigure the adapter to CAN ch6 — invalidate the cached
+            // K-line init so the next live read re-runs its setup.
+            client.channelInitialized = false
+
+            // The RAM kernel is the user-selected file (Dev Mode -> SELECT KERNEL
+            // FILE), persisted as a SAF URI — never bundled, never a fixed path.
+            // Read it through the ContentResolver so it can live anywhere.
+            val kernelUriStr = host.state.settings.kernelUri
+            if (kernelUriStr == null) {
+                log("no kernel selected — Flash -> SELECT KERNEL FILE, then read")
+                host.setStatusMessage("Firmware read: no kernel selected (see BYTES log)")
+                return@launch
+            }
+            val kernel = try {
+                appContext.contentResolver.openInputStream(Uri.parse(kernelUriStr))?.use { it.readBytes() }
+            } catch (e: Exception) {
+                log("kernel read failed: ${e.message}")
+                null
+            }
+            if (kernel == null || kernel.isEmpty()) {
+                log("kernel unreadable — re-select it (SELECT KERNEL FILE)")
+                host.setStatusMessage("Firmware read: kernel unreadable (see BYTES log)")
+                return@launch
+            }
+            log("kernel ${kernel.size} B loaded (user-selected file)")
+            host.setStatusMessage("Firmware read: starting...")
+
+            // Which kernel grammar to drive, and whether the file is RAW (needs the
+            // pad + integrity + encrypt prep) or already in upload form (verbatim).
+            // Both are user choices — neither is derivable from the binary.
+            val protocol = host.state.settings.kernelProtocol
+            val uploadImage = if (host.state.settings.kernelNeedsPrep) {
+                val prepped = KernelImagePrep.prepare(kernel)
+                log("raw kernel ${kernel.size} B -> ${prepped.size} B upload image (pad + integrity + encrypt)")
+                prepped
+            } else kernel
+            log("kernel: protocol=$protocol, prep=${host.state.settings.kernelNeedsPrep}")
+
+            val transport = FirmwareCanTransport(client.rawIo)
+            val boot = UdsBootloaderClient(transport) { m -> log(m) }
+            if (!boot.connectAndStartKernel(uploadImage, protocol = protocol)) {
+                host.setStatusMessage("Firmware read: kernel did not start (see BYTES log)")
+                return@launch
+            }
+
+            val onProgress: (Int, Int) -> Unit = { done, total ->
+                if (done % (64 * 1024) == 0 || done >= total)
+                    host.setStatusMessage("Firmware read: ${done / 1024} / ${total / 1024} KB")
+            }
+            val image = if (protocol == KernelProtocol.BEEF)
+                BeefKernelReadClient(transport) { m -> log(m) }.readImage(onProgress = onProgress)
+            else
+                KernelReadClient(transport) { m -> log(m) }.readImage(onProgress = onProgress)
+            if (image == null) {
+                host.setStatusMessage("Firmware read: READ_AREA failed (see BYTES log)")
+                return@launch
+            }
+
+            val outFile = File(
+                appContext.getExternalFilesDir(null),
+                "firmware_image_${System.currentTimeMillis()}.bin"
+            )
+            try {
+                outFile.writeBytes(image)
+                log("IMAGE SAVED: ${outFile.absolutePath} (${image.size} B)")
+                host.setStatusMessage("Firmware read DONE: ${image.size / 1024} KB -> ${outFile.name}")
+            } catch (e: Exception) {
+                log("save failed: ${e.message}")
+                host.setStatusMessage("Firmware read: save failed: ${e.message}")
+            }
+          } catch (t: Throwable) {
+              // A firmware-read op must never take the whole app down — surface the
+              // failure in the BYTES log and the status line instead of crashing.
+              log("FATAL ${t.javaClass.simpleName}: ${t.message}")
+              host.setStatusMessage("Firmware read crashed — see BYTES log")
+          }
+        }
+    }
+
+    /**
+     * Dev-Mode firmware WRITE (reflash) — OpenPort CAN, BEEF kernel only. Uploads the
+     * same user-selected kernel as the read path, jumps to it, then drives the
+     * reflash via [BeefKernelWriteClient]: a read-only per-block CRC compare, then
+     * (only for blocks that differ) erase + write + commit.
+     *
+     * Two user files, both SAF URIs, never bundled: the KERNEL (SELECT KERNEL FILE)
+     * and the ROM image to flash (SELECT ROM TO WRITE). In TEST
+     * mode (caller-supplied testMode) — flash stays protected, the kernel only
+     * VALIDATEs, nothing is modified — until COMMIT is explicitly selected. Writing
+     * an image identical to what's on the ECU is a no-op (0 blocks differ).
+     *
+     * Bench targets only. Borrows the live link like every other dev op.
+     */
+    fun runFirmwareWrite(appContext: Context, testMode: Boolean) {
+        fun log(m: String) = ObdLinkTrafficLog.record("OUT", "· fw: $m")
+        if (host.state.settings.adapter != Adapter.OpenPort) {
+            log("write firmware: select OpenPort 2.0 first (CAN write path)")
+            return
+        }
+        host.scope.launch(Dispatchers.IO) {
+          try {
+            host.takeOverLink()
+            val client = host.tactrixClient()
+            if (client == null) {
+                log("write firmware: OpenPort not connected — plug in & grant USB first")
+                return@launch
+            }
+            client.channelInitialized = false
+
+            val kernelUriStr = host.state.settings.kernelUri
+            if (kernelUriStr == null) {
+                log("no kernel selected — Flash -> SELECT KERNEL FILE, then write")
+                host.setStatusMessage("Firmware write: no kernel selected (see BYTES log)")
+                return@launch
+            }
+            val romUriStr = host.state.settings.writeRomUri
+            if (romUriStr == null) {
+                log("no ROM selected — Flash -> SELECT ROM TO WRITE, then write")
+                host.setStatusMessage("Firmware write: no ROM selected (see BYTES log)")
+                return@launch
+            }
+            val kernel = try {
+                appContext.contentResolver.openInputStream(Uri.parse(kernelUriStr))?.use { it.readBytes() }
+            } catch (e: Exception) { log("kernel read failed: ${e.message}"); null }
+            if (kernel == null || kernel.isEmpty()) {
+                log("kernel unreadable — re-select it (SELECT KERNEL FILE)")
+                host.setStatusMessage("Firmware write: kernel unreadable (see BYTES log)")
+                return@launch
+            }
+            val rom = try {
+                appContext.contentResolver.openInputStream(Uri.parse(romUriStr))?.use { it.readBytes() }
+            } catch (e: Exception) { log("ROM read failed: ${e.message}"); null }
+            if (rom == null || rom.size != BeefKernelWriteClient.ROM_SIZE) {
+                log("ROM unreadable or wrong size (${rom?.size ?: 0} B, need ${BeefKernelWriteClient.ROM_SIZE}) — re-select (SELECT ROM TO WRITE)")
+                host.setStatusMessage("Firmware write: bad ROM (see BYTES log)")
+                return@launch
+            }
+            log("kernel ${kernel.size} B + ROM ${rom.size} B loaded; mode=${if (testMode) "TEST (non-destructive)" else "COMMIT (real write)"}")
+
+            val protocol = host.state.settings.kernelProtocol
+            val uploadImage = if (host.state.settings.kernelNeedsPrep) {
+                val prepped = KernelImagePrep.prepare(kernel)
+                log("raw kernel ${kernel.size} B -> ${prepped.size} B upload image (pad + integrity + encrypt)")
+                prepped
+            } else kernel
+
+            val transport = FirmwareCanTransport(client.rawIo)
+            val boot = UdsBootloaderClient(transport) { m -> log(m) }
+            if (!boot.connectAndStartKernel(uploadImage, protocol = protocol)) {
+                host.setStatusMessage("Firmware write: kernel did not start (see BYTES log)")
+                return@launch
+            }
+
+            val onProgress: (Int, Int) -> Unit = { done, total ->
+                if (total > 0 && (done % (32 * 1024) == 0 || done >= total))
+                    host.setStatusMessage("Firmware write: ${done / 1024} / ${total / 1024} KB")
+            }
+            val outcome = BeefKernelWriteClient(transport) { m -> log(m) }.writeImage(rom, testMode, onProgress)
+            host.setStatusMessage(
+                if (!outcome.ok) "Firmware write FAILED — see BYTES log"
+                else if (outcome.modifiedBlocks == 0) "Firmware write: ROM already matches ECU (no-op)"
+                else if (testMode) "Firmware TEST write PASS (${outcome.modifiedBlocks} blk) — see BYTES log"
+                else if (outcome.verified) "Firmware write DONE + VERIFIED (${outcome.modifiedBlocks} blk)"
+                else "Firmware write done — VERIFY FAILED (see BYTES log)"
+            )
+          } catch (t: Throwable) {
+              log("FATAL ${t.javaClass.simpleName}: ${t.message}")
+              host.setStatusMessage("Firmware write crashed — see BYTES log")
+          }
+        }
+    }
+
 }

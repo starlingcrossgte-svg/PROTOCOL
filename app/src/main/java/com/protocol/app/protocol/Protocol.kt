@@ -12,6 +12,7 @@ import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -22,10 +23,16 @@ import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import java.io.File
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModelProvider
 import com.protocol.app.UsbPermissionHelper
@@ -33,6 +40,25 @@ import com.protocol.app.obdlink.FtdiUsbSerial
 import com.protocol.app.openport2.OpenPort2SessionResult
 import com.protocol.app.openport2.OpenPort2UsbSessionManager
 import java.nio.charset.StandardCharsets
+
+/**
+ * [ActivityResultContracts.OpenDocument] that asks the system document picker to open
+ * at [initialFolder] — the folder the user chose in Home Settings — via EXTRA_INITIAL_URI.
+ * The folder is resolved lazily at launch so it always reflects the current setting. It is
+ * only a hint: the picker still lets the user navigate anywhere, and an unset/unsupported
+ * folder just falls back to the system default.
+ */
+private class OpenDocumentInFolder(
+    private val initialFolder: () -> Uri?,
+) : ActivityResultContracts.OpenDocument() {
+    override fun createIntent(context: Context, input: Array<String>): Intent {
+        val intent = super.createIntent(context, input)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            initialFolder()?.let { intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
+        }
+        return intent
+    }
+}
 
 class Protocol : ComponentActivity() {
 
@@ -155,6 +181,69 @@ class Protocol : ComponentActivity() {
         pickBackgroundLauncher.launch(
             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
         )
+    }
+
+    // Home Settings → Choose Kernel Folder. SAF tree picker; the chosen folder is
+    // persisted and used ONLY as the start location of the Dev-Mode SELECT KERNEL FILE
+    // picker, so it lands where the user keeps kernels instead of the last-used spot.
+    private val pickKernelFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Provider doesn't support a persistable grant — the hint still works this process.
+        }
+        viewModel.setKernelFolderUri(uri.toString())
+        Toast.makeText(this, "Kernel folder set", Toast.LENGTH_SHORT).show()
+    }
+
+    // Home Settings → Choose ROM Folder. SAF tree picker; the start location of the
+    // Dev-Mode SELECT ROM TO WRITE picker, so ROMs are reachable without an adb push.
+    private val pickRomFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+        }
+        viewModel.setRomFolderUri(uri.toString())
+        Toast.makeText(this, "ROM folder set", Toast.LENGTH_SHORT).show()
+    }
+
+    // Dev Mode → SELECT KERNEL FILE. SAF single-document picker; the chosen RAM
+    // kernel image (built separately, NEVER bundled in the APK) is persisted as a
+    // URI with a read grant that survives reboot, then read through the
+    // ContentResolver at firmware-read time. Lets the kernel live anywhere the
+    // user puts it — no fixed path, no adb push to one location.
+    private val pickKernelLauncher = registerForActivityResult(
+        OpenDocumentInFolder { viewModel.uiState.value.settings.kernelFolderUri?.let(Uri::parse) }
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Provider doesn't support a persistable grant — valid this process only.
+        }
+        viewModel.setKernelUri(uri.toString())
+        Toast.makeText(this, "Kernel selected", Toast.LENGTH_SHORT).show()
+    }
+
+    // Dev Mode → SELECT ROM TO WRITE: pick the ROM image the firmware WRITE flashes.
+    // Persisted as a SAF URI, read through the ContentResolver at write time. Never
+    // bundled; lives wherever the user puts it.
+    private val pickRomLauncher = registerForActivityResult(
+        OpenDocumentInFolder { viewModel.uiState.value.settings.romFolderUri?.let(Uri::parse) }
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+        }
+        viewModel.setWriteRomUri(uri.toString())
+        Toast.makeText(this, "ROM selected", Toast.LENGTH_SHORT).show()
     }
 
     // OBDLink Bluetooth: when the user picks OBDLink in Settings, request
@@ -309,6 +398,75 @@ class Protocol : ComponentActivity() {
         }
     }
 
+    // A file shared or opened into PROTOCOL ("Share -> PROTOCOL" / "Open with") —
+    // e.g. a kernel image received over WhatsApp/email that the messaging app
+    // won't let you save as a raw .bin. Android can't filter content URIs by
+    // extension, so the manifest matches the binary MIME; here we copy the bytes
+    // into the app's files dir and select them as the active firmware-read kernel,
+    // so receiving a kernel needs no file picker. The kernel is still external and
+    // user-supplied — this is just a second way in. Today the only file consumer
+    // is that kernel, so any imported file becomes the selected kernel.
+    @Suppress("DEPRECATION") // getParcelableExtra(String): the typed overload is API 33+ only
+    private fun handleIncomingFileIntent(intent: Intent?) {
+        if (intent == null) return
+        val uri: Uri = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+            else -> null
+        } ?: return
+        try {
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null || bytes.isEmpty()) {
+                Toast.makeText(this, "Import failed: file empty or unreadable", Toast.LENGTH_LONG).show()
+                return
+            }
+            // Drop any previously imported kernel copy first, so shared-in files
+            // don't pile up invisibly in our files dir (the import bug).
+            deleteOwnedKernelFile(viewModel.uiState.value.settings.kernelUri)
+            val name = incomingDisplayName(uri) ?: "imported_kernel.bin"
+            val dest = File(getExternalFilesDir(null), name)
+            dest.writeBytes(bytes)
+            viewModel.setKernelUri(Uri.fromFile(dest).toString())
+            Toast.makeText(this, "Kernel imported: $name (${bytes.size} B)", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun incomingDisplayName(uri: Uri): String? = try {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (_: Exception) { null }
+
+    // Delete a kernel file we own — one we imported into our own files dir via
+    // "Open with PROTOCOL". A picked content:// kernel is the user's file elsewhere,
+    // so we never touch it. Used by the import (clean up the prior copy) and the ✕.
+    private fun deleteOwnedKernelFile(uriStr: String?) {
+        if (uriStr == null) return
+        try {
+            val u = Uri.parse(uriStr)
+            if (u.scheme == "file") {
+                val path = u.path ?: return
+                val dir = getExternalFilesDir(null)?.absolutePath ?: return
+                val f = File(path)
+                if (f.absolutePath.startsWith(dir) && f.exists()) f.delete()
+            }
+        } catch (_: Exception) { }
+    }
+
+    // Dev Mode → the ✕ on the kernel button: delete the imported copy if we own it,
+    // then drop the selection.
+    private fun clearSelectedKernel() {
+        deleteOwnedKernelFile(viewModel.uiState.value.settings.kernelUri)
+        viewModel.setKernelUri(null)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingFileIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // installSplashScreen() must be called BEFORE super.onCreate so
         // the system swaps the splash theme out before content draws.
@@ -368,6 +526,10 @@ class Protocol : ComponentActivity() {
 
         syncAdapterPresenceAndAutoConnect()
 
+        // A kernel image shared/opened into PROTOCOL on a cold start (Share ->
+        // PROTOCOL). viewModel is ready above, so import + select it now.
+        handleIncomingFileIntent(intent)
+
         setContent {
             val uiState by viewModel.uiState.collectAsState()
 
@@ -385,6 +547,11 @@ class Protocol : ComponentActivity() {
             )
 
             MaterialTheme(colorScheme = colors) {
+                // Launch gate: the safety and liability disclaimer sits over the whole app on
+                // every cold start until the user taps I UNDERSTAND. Per process state, so
+                // it shows again on each fresh launch. See SafetyDialogs.kt.
+                var disclaimerAcknowledged by remember { mutableStateOf(false) }
+                Box(Modifier.fillMaxSize()) {
                 ProtocolScreen(
                     uiState = uiState,
                     onOpenSubPage = { page -> viewModel.openSubPage(page) },
@@ -398,7 +565,8 @@ class Protocol : ComponentActivity() {
                     },
                     onSendManualCommand = { cmd -> viewModel.devConsole.sendManualCommand(cmd, applicationContext) },
                     onReadDtc = { viewModel.readDtcs() },
-                    onCopyDtc = { copyDtcToClipboard() },
+                    onClearDtc = { viewModel.clearDtc() },
+                    onResetDtc = { viewModel.resetDtcs() },
                     onExportDtc = { launchExportDtc() },
                     onStartReadingLive = { runActionOrDiscover(PendingAction.ReadLive) },
                     onStopReadingLive = { viewModel.stopReadingLive() },
@@ -419,6 +587,14 @@ class Protocol : ComponentActivity() {
                     onKlineContinuousTest = { viewModel.devConsole.runKlineContinuousTest() },
                     onStartCanMonitor = { viewModel.devConsole.startCanMonitor() },
                     onStopCanMonitor = { viewModel.devConsole.stopCanMonitor() },
+                    onReadFirmware = { viewModel.devConsole.runFirmwareRead(applicationContext) },
+                    onSelectKernel = { pickKernelLauncher.launch(arrayOf("*/*")) },
+                    onClearKernel = { clearSelectedKernel() },
+                    onSelectKernelProtocol = { p -> viewModel.setKernelProtocol(p) },
+                    onSetKernelNeedsPrep = { b -> viewModel.setKernelNeedsPrep(b) },
+                    onWriteFirmware = { testMode -> viewModel.devConsole.runFirmwareWrite(applicationContext, testMode) },
+                    onSelectWriteRom = { pickRomLauncher.launch(arrayOf("*/*")) },
+                    onClearWriteRom = { viewModel.setWriteRomUri(null) },
                     onSelectAdapter = { a -> viewModel.setAdapter(a) },
                     onSelectProtocol = { p -> viewModel.setProtocol(p) },
                     onConnectAdapter = { connectSelectedAdapter() },
@@ -427,6 +603,8 @@ class Protocol : ComponentActivity() {
                     onResizeSessionLog = { dp -> viewModel.setSessionLogHeightDp(dp) },
                     onAutoSaveLogs = { autoSaveBothLogs() },
                     onPickCsvFolder = { launchPickCsvFolder() },
+                    onPickKernelFolder = { pickKernelFolderLauncher.launch(null) },
+                    onPickRomFolder = { pickRomFolderLauncher.launch(null) },
                     onRawLogNameChange = { name -> viewModel.setRawLogName(name) },
                     onSessionLogNameChange = { name -> viewModel.setSessionLogName(name) },
                     onResetLayout = { viewModel.resetLayout() },
@@ -434,6 +612,10 @@ class Protocol : ComponentActivity() {
                     onResetAdapter = { viewModel.devConsole.resetObdLinkAdapter(applicationContext) },
                     onShareSavedSession = { launchShareSavedSession() }
                 )
+                if (!disclaimerAcknowledged) {
+                    StartupDisclaimerGate(onAcknowledge = { disclaimerAcknowledged = true })
+                }
+                }
             }
         }
     }

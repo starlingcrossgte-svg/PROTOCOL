@@ -283,6 +283,34 @@ class ProtocolViewModel : ViewModel() {
     /** Persist the SAF folder URI the Lock-and-Tap auto-save writes CSVs into. */
     fun setCsvFolderUri(uri: String?) = updateSettings { it.copy(csvFolderUri = uri) }
 
+    /** Persist the SAF tree URI of the folder the Dev-Mode SELECT KERNEL FILE picker
+     *  opens to (set in Home Settings; a start-location hint only). */
+    fun setKernelFolderUri(uri: String?) = updateSettings { it.copy(kernelFolderUri = uri) }
+
+    /** Persist the SAF tree URI of the folder the Dev-Mode SELECT ROM TO WRITE picker
+     *  opens to (set in Home Settings; a start-location hint only). */
+    fun setRomFolderUri(uri: String?) = updateSettings { it.copy(romFolderUri = uri) }
+
+    /** Persist the SAF URI of the user-selected RAM kernel image (Dev-Mode
+     *  firmware read). The kernel is never bundled — always a picked file. */
+    fun setKernelUri(uri: String?) = updateSettings { it.copy(kernelUri = uri) }
+
+    /** Command grammar the selected kernel speaks (BARE vs BEEF). Per-kernel,
+     *  selected in Dev Mode — not derivable from the binary. */
+    fun setKernelProtocol(p: com.protocol.app.firmware.KernelProtocol) =
+        updateSettings { it.copy(kernelProtocol = p) }
+
+    /** Whether the selected kernel is raw and must be prepped (pad + integrity +
+     *  encrypt) before upload, vs already in upload form (sent verbatim). */
+    fun setKernelNeedsPrep(needsPrep: Boolean) =
+        updateSettings { it.copy(kernelNeedsPrep = needsPrep) }
+
+    /** Persist the SAF URI of the ROM image the Dev-Mode firmware WRITE flashes. */
+    fun setWriteRomUri(uri: String?) = updateSettings { it.copy(writeRomUri = uri) }
+
+    /** Flash WRITE mode: true = TEST (non-destructive), false = COMMIT (real write). */
+    fun setFlashTestMode(testMode: Boolean) = updateSettings { it.copy(flashTestMode = testMode) }
+
     /** Base name for the auto-saved RAW BYTES CSV (enumerated on write). */
     fun setRawLogName(name: String) = updateSettings { it.copy(rawLogName = name) }
 
@@ -1314,6 +1342,16 @@ class ProtocolViewModel : ViewModel() {
         }
     }
 
+    /** Wipe the on-screen DTC results (the Clear tab on the Diagnostics card). */
+    fun clearDtc() {
+        _uiState.value = _uiState.value.copy(
+            isReadingDtc = false,
+            dtcStatus = "",
+            dtcCurrent = emptyList(),
+            dtcStored = emptyList()
+        )
+    }
+
     private fun dtcFail(message: String) {
         _uiState.value = _uiState.value.copy(isReadingDtc = false, dtcStatus = message)
     }
@@ -1333,6 +1371,99 @@ class ProtocolViewModel : ViewModel() {
             dtcStatus = status,
             dtcCurrent = r.current.map { "${it.code}  ${it.description}" },
             dtcStored = r.stored.map { "${it.code}  ${it.description}" }
+        )
+    }
+
+    /**
+     * DTC reset — the SSM2 "clear memory" write that clears stored + current
+     * trouble codes (and, inherently, resets the ECU's adaptive learning). The
+     * first command in the app that writes to the ECU; everything else is
+     * read-only.
+     *
+     * Takes over the shared link like [readDtcs] — stops any poll loop and waits
+     * for it to finish so the write can't interleave with a poll on the same
+     * socket. ECM only. OpenPort paths only for now (K-line + CAN); the OBDLink
+     * paths are the next step.
+     */
+    fun resetDtcs() {
+        val state = _uiState.value
+        if (state.isReadingDtc || state.isResettingDtc) return
+        val adapter = state.settings.adapter
+        val protocol = state.settings.protocol
+        if (adapter == null || protocol == null) {
+            _uiState.value = state.copy(dtcStatus = "Pick ADAPTER and PROTOCOL in Settings first")
+            return
+        }
+        _uiState.value = state.copy(isResettingDtc = true, dtcStatus = "Clearing codes…")
+        viewModelScope.launch(Dispatchers.IO) {
+            // Take over the shared link so the write can't collide with a poll.
+            val active = runJob
+            runJob = null
+            active?.cancel()
+            active?.join()
+            try {
+                val result = when {
+                    adapter == Adapter.OpenPort && protocol == BusProtocol.KLine -> {
+                        val client = tactrixClient
+                        if (client == null) { resetFail("OpenPort not connected — tap OpenPort 2.0 in Settings"); return@launch }
+                        if (!client.channelInitialized) {
+                            client.drainResponseBuffer()
+                            client.resetRequestIdCounter(startFrom = 2)
+                            if (!Ssm2EcmProbe(client).initializeChannel(mutableListOf())) {
+                                resetFail("OpenPort K-line init failed — check the OBD connection"); return@launch
+                            }
+                        }
+                        com.protocol.app.openport2.Ssm2DtcClear.clearOpenPortKline(client)
+                    }
+                    adapter == Adapter.OpenPort && protocol == BusProtocol.CAN -> {
+                        val session = openSession
+                        if (session == null) { resetFail("OpenPort not connected — tap OpenPort 2.0 in Settings"); return@launch }
+                        val src = OpenPortCanLiveSource(TactrixBulkIo(session), emptyList())
+                        com.protocol.app.openport2.Ssm2DtcClear.clearOpenPortCan(src)
+                    }
+                    adapter == Adapter.OBDLink && protocol == BusProtocol.KLine -> {
+                        val t = obdLinkManager?.transport
+                        if (t == null) { resetFail("OBDLink not connected — pair it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcClear.clearObdLinkKline(t)
+                    }
+                    adapter == Adapter.OBDLink && protocol == BusProtocol.CAN -> {
+                        val t = obdLinkManager?.transport
+                        if (t == null) { resetFail("OBDLink not connected — pair it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcClear.clearObdLinkCan(t)
+                    }
+                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.KLine -> {
+                        val t = obdLinkUsbManager?.transport
+                        if (t == null) { resetFail("OBDLink EX not connected — tap it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcClear.clearObdLinkKline(t)
+                    }
+                    adapter == Adapter.OBDLinkEx && protocol == BusProtocol.CAN -> {
+                        val t = obdLinkUsbManager?.transport
+                        if (t == null) { resetFail("OBDLink EX not connected — tap it in Settings first"); return@launch }
+                        com.protocol.app.openport2.Ssm2DtcClear.clearObdLinkCan(t)
+                    }
+                    else -> {
+                        resetFail("Unsupported adapter/protocol combination for DTC reset."); return@launch
+                    }
+                }
+                applyResetResult(result)
+            } catch (e: Exception) {
+                resetFail("DTC reset failed: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    private fun resetFail(message: String) {
+        _uiState.value = _uiState.value.copy(isResettingDtc = false, dtcStatus = message)
+    }
+
+    private fun applyResetResult(r: com.protocol.app.openport2.Ssm2DtcClear.Result) {
+        _uiState.value = _uiState.value.copy(
+            isResettingDtc = false,
+            dtcStatus = r.message,
+            // On a confirmed clear, drop the now-stale on-screen codes; on
+            // failure leave the last read in place so the user still sees them.
+            dtcCurrent = if (r.ok) emptyList() else _uiState.value.dtcCurrent,
+            dtcStored = if (r.ok) emptyList() else _uiState.value.dtcStored
         )
     }
 

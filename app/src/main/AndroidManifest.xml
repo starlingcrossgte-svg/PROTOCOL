@@ -22,7 +22,7 @@
         <activity
             android:name=".protocol.Protocol"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.App.SplashScreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -41,6 +41,22 @@
             <meta-data
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
+
+            <!--
+              Receive a kernel image shared or opened into PROTOCOL ("Share ->
+              PROTOCOL" or "Open with") — e.g. one received over WhatsApp/email
+              that the messaging app won't let you save as a raw .bin. Android
+              can't reliably filter content URIs by extension, so this matches the
+              binary MIME (application/octet-stream), which covers .bin/.hex; the
+              Activity imports the bytes as the selected firmware-read kernel.
+              (.csv/.json handlers arrive with the data-import reform.)
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
         </activity>
 
         <provider

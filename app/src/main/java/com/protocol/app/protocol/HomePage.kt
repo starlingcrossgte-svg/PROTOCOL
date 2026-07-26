@@ -26,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -142,12 +141,12 @@ internal fun HomePage(
             verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            HomeMenuButton(label = "Settings", shape = y2kTopCutShape()) { onOpenSubPage(SubPage.Settings) }
+            HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
             HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
             HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
             HomeMenuButton(label = "Dev Mode") { onOpenSubPage(SubPage.Developer) }
             HomeMenuButton(label = "Library") { onOpenSubPage(SubPage.Library) }
-            HomeMenuButton(label = "Notices", shape = y2kBottomCutShape()) { onOpenSubPage(SubPage.Notices) }
+            HomeMenuButton(label = "Notices") { onOpenSubPage(SubPage.Notices) }
         }
         // Developer Mode is now its own page (Dev Mode button above) — no longer
         // inlined here.
@@ -157,12 +156,13 @@ internal fun HomePage(
 @Composable
 private fun HomeMenuButton(
     label: String,
-    shape: androidx.compose.ui.graphics.Shape = RectangleShape,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp),
     onClick: () -> Unit
 ) {
     // Box-based to avoid Material3 Button's offscreen clipping layer and
-    // ripple-indication layer. Y2K corner cut still rendered correctly by
-    // background(shape) + border(shape). Label is centered — no chevron.
+    // ripple-indication layer. Rounded corners (8.dp) via background(shape) +
+    // border(shape) — same curved style as the Dev console, but the home
+    // button's own size (16.dp padding / bodyLarge) is kept. Label centered.
     Box(
         modifier = Modifier
             .fillMaxWidth()

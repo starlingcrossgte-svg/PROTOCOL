@@ -23,6 +23,8 @@ object ObdLinkSsm2Can {
 
     private const val CMD_A8 = 0xA8
     private const val RSP_E8 = 0xE8
+    private const val CMD_B8 = 0xB8
+    private const val RSP_F8 = 0xF8
     private const val READ_FLAG_SINGLE = 0x00 // single response (0x01 would be continuous)
 
     /** Raw A8 read payload for [addresses]: `A8 00 <hi mid lo>...` (no wrapper, no checksum). */
@@ -38,6 +40,32 @@ object ObdLinkSsm2Can {
             out[base + 2] = a.low
         }
         return out
+    }
+
+    /**
+     * Raw B8 write payload for [address] = [value]: `B8 <hi mid lo> <value>`
+     * (no K-line wrapper, no flag byte, no checksum — the adapter/ECU handle
+     * ISO-TP framing + integrity over CAN). The write command, unlike the A8
+     * read, carries NO 0x00 flag byte after the command.
+     */
+    fun buildWritePayload(address: Ssm2Address, value: Byte): ByteArray {
+        val out = ByteArray(5)
+        out[0] = CMD_B8.toByte()
+        out[1] = address.high
+        out[2] = address.mid
+        out[3] = address.low
+        out[4] = value
+        return out
+    }
+
+    /**
+     * True only if a reassembled SSM2-over-CAN reply [payload] is a B8 positive
+     * response (0xF8) echoing [expectedValue] — i.e. the ECU accepted the write.
+     */
+    fun isWriteAck(payload: ByteArray, expectedValue: Byte): Boolean {
+        if (payload.size < 2) return false
+        if ((payload[0].toInt() and 0xFF) != RSP_F8) return false
+        return payload[1] == expectedValue
     }
 
     /**

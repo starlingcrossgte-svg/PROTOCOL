@@ -326,7 +326,7 @@ private fun ModeButtonsRow(
         //   cancels the lock (caller also stops any live poll/log). The
         //   stream -> log -> stop cycle is driven by tapping the gauge area
         //   while locked (see the overlay above).
-        val shape = y2kCornerShape()
+        val shape = RoundedCornerShape(8.dp)
         Row(
             modifier = Modifier
                 .weight(1f)
