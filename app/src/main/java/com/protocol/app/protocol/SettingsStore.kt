@@ -76,6 +76,10 @@ data class AppSettings(
      *  kernel only VALIDATEs buffer CRCs); false = COMMIT (real write). Defaults to
      *  TEST so the WRITE button can't modify flash until explicitly switched. */
     val flashTestMode: Boolean = true,
+    /** SAF URI (as String) of the user-supplied SSM2 logger definition file whose
+     *  parameters are merged into the live list. Null = none loaded (built-in
+     *  parameters only). Never bundled; read through the ContentResolver. */
+    val loggerDefUri: String? = null,
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -126,7 +130,8 @@ class SettingsStore(context: Context) {
         writeRomUri = prefs.getString(KEY_WRITE_ROM_URI, null),
         kernelFolderUri = prefs.getString(KEY_KERNEL_FOLDER, null),
         romFolderUri = prefs.getString(KEY_ROM_FOLDER, null),
-        flashTestMode = prefs.getBoolean(KEY_FLASH_TEST_MODE, true)
+        flashTestMode = prefs.getBoolean(KEY_FLASH_TEST_MODE, true),
+        loggerDefUri = prefs.getString(KEY_LOGGER_DEF_URI, null)
     )
 
     fun save(s: AppSettings) {
@@ -154,6 +159,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_KERNEL_FOLDER, s.kernelFolderUri)
             .putString(KEY_ROM_FOLDER, s.romFolderUri)
             .putBoolean(KEY_FLASH_TEST_MODE, s.flashTestMode)
+            .putString(KEY_LOGGER_DEF_URI, s.loggerDefUri)
             .apply()
     }
 
@@ -182,5 +188,6 @@ class SettingsStore(context: Context) {
         private const val KEY_KERNEL_FOLDER = "kernel_folder_uri"
         private const val KEY_ROM_FOLDER = "rom_folder_uri"
         private const val KEY_FLASH_TEST_MODE = "flash_test_mode"
+        private const val KEY_LOGGER_DEF_URI = "logger_def_uri"
     }
 }

@@ -103,6 +103,7 @@ fun ProtocolScreen(
     onReadFirmware: () -> Unit,
     onSelectKernel: () -> Unit,
     onClearKernel: () -> Unit,
+    onSelectDef: () -> Unit,
     onSelectKernelProtocol: (com.protocol.app.firmware.KernelProtocol) -> Unit,
     onSetKernelNeedsPrep: (Boolean) -> Unit,
     onWriteFirmware: (Boolean) -> Unit,
@@ -276,17 +277,20 @@ fun ProtocolScreen(
                     SubPage.Parameters -> ParametersBody(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.ECU,
-                        onTogglePid = onToggleGaugeForPid
+                        onTogglePid = onToggleGaugeForPid,
+                        onSelectDef = onSelectDef
                     )
                     SubPage.TcmParameters -> ParametersBody(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.TCM,
-                        onTogglePid = onToggleGaugeForPid
+                        onTogglePid = onToggleGaugeForPid,
+                        onSelectDef = onSelectDef
                     )
                     SubPage.Unverified -> ParametersBody(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.ECU,
                         onTogglePid = onToggleGaugeForPid,
+                        onSelectDef = onSelectDef,
                         showUnverified = true
                     )
                     SubPage.LiveDataSettings -> LiveDataSettingsBody(

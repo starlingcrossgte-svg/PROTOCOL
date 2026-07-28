@@ -1,7 +1,12 @@
 package com.protocol.app.protocol
 
+import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,39 +49,94 @@ internal fun ParametersBody(
     uiState: ProtocolUiState,
     category: Ssm2PidCategory,
     onTogglePid: (String) -> Unit,
+    onSelectDef: () -> Unit = {},
     // When true this is the Unverified page: it shows every candidate PID
     // (verified == false) regardless of [category], kept apart from the
     // trusted lists. The category pages instead show only verified PIDs.
     showUnverified: Boolean = false
 ) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val onLiveData = uiState.pidIdsOnLiveData
+            val pids = (Ssm2Pids.DEFAULT_DEMO_PIDS + uiState.loadedPids).filter {
+                if (showUnverified) !it.verified else it.category == category && it.verified
+            }
+
+            if (pids.isEmpty()) {
+                EmptyCategoryRow(
+                    when {
+                        showUnverified -> "No unverified parameters."
+                        category == Ssm2PidCategory.ECU -> "No ECU parameters available."
+                        else -> "No TCM parameters available yet."
+                    }
+                )
+            } else {
+                for (pid in pids) {
+                    ParameterRow(
+                        pid = pid,
+                        checked = pid.id in onLiveData,
+                        onClick = { onTogglePid(pid.id) }
+                    )
+                }
+            }
+        }
+        LoggerDefPickerRow(
+            fileName = uiState.settings.loggerDefUri
+                ?.let { Uri.parse(it).lastPathSegment?.substringAfterLast('/') },
+            loadedCount = uiState.loadedPids.size,
+            onSelect = onSelectDef
+        )
+    }
+}
+
+// File picker pinned at the bottom of the parameters pages. Tapping it opens the
+// system document picker to choose an SSM2 logger definition; the app parses it
+// and merges its parameters into the lists above. Once one is chosen the filename
+// and the number of parameters it added are shown.
+@Composable
+private fun LoggerDefPickerRow(
+    fileName: String?,
+    loadedCount: Int,
+    onSelect: () -> Unit
+) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        val onLiveData = uiState.pidIdsOnLiveData
-        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter {
-            if (showUnverified) !it.verified else it.category == category && it.verified
-        }
-
-        if (pids.isEmpty()) {
-            EmptyCategoryRow(
-                when {
-                    showUnverified -> "No unverified parameters."
-                    category == Ssm2PidCategory.ECU -> "No ECU parameters available."
-                    else -> "No TCM parameters available yet."
-                }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(SurfaceBg)
+                .border(1.dp, Accent, RoundedCornerShape(8.dp))
+                .clickable(onClick = onSelect)
+                .padding(vertical = 12.dp, horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                fileName ?: "LOAD PARAMETER DEFINITION",
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1
             )
-        } else {
-            for (pid in pids) {
-                ParameterRow(
-                    pid = pid,
-                    checked = pid.id in onLiveData,
-                    onClick = { onTogglePid(pid.id) }
-                )
-            }
+        }
+        if (fileName != null) {
+            Text(
+                "$loadedCount parameters loaded",
+                color = NeutralGray,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+            )
         }
     }
 }

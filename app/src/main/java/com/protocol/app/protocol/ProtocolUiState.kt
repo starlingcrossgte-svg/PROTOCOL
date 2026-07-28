@@ -79,7 +79,11 @@ data class ProtocolUiState(
     /** URI of the user-chosen background image. Null = default Y2K dark surface. */
     val backgroundUri: String? = null,
     /** Tunable preferences from the Settings sub-page. */
-    val settings: AppSettings = AppSettings()
+    val settings: AppSettings = AppSettings(),
+    /** Runtime parameters from a user-loaded logger definition, merged with the
+     *  built-in set everywhere the param universe is used. Empty = none loaded,
+     *  so the app behaves exactly as before. */
+    val loadedPids: List<com.protocol.app.openport2.Ssm2Pid> = emptyList()
 ) {
     /** PIDs currently placed on the Live Data page. Drives log/CSV columns. */
     val pidIdsOnLiveData: Set<String> get() = gaugeLayout.pidIds

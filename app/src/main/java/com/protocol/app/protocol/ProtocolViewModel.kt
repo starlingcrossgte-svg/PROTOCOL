@@ -1,7 +1,11 @@
 package com.protocol.app.protocol
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.protocol.app.defs.LoggerDefParser
+import com.protocol.app.defs.toSsm2Pid
 import com.protocol.app.obdlink.AdapterCommandLibrary
 import com.protocol.app.obdlink.CommandSequence
 import com.protocol.app.obdlink.LiveSampleSource
@@ -310,6 +314,33 @@ class ProtocolViewModel : ViewModel() {
 
     /** Flash WRITE mode: true = TEST (non-destructive), false = COMMIT (real write). */
     fun setFlashTestMode(testMode: Boolean) = updateSettings { it.copy(flashTestMode = testMode) }
+
+    /**
+     * Load a user-supplied SSM2 logger definition: parse it, bind each loggable
+     * parameter to a runtime PID, and merge the result into the param universe so
+     * the Parameters page, poller and log pick them up. Inert until a file is
+     * chosen — with none loaded the app behaves exactly as before. Built-in ids
+     * win, so a loaded parameter never shadows a verified one.
+     */
+    fun loadLoggerDef(context: Context, uriString: String) {
+        val loaded = try {
+            context.contentResolver.openInputStream(Uri.parse(uriString))?.use { stream ->
+                LoggerDefParser.parse(stream).mapNotNull { it.toSsm2Pid() }
+            } ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val builtInIds = Ssm2Pids.DEFAULT_DEMO_PIDS.mapTo(HashSet()) { it.id }
+        val merged = loaded.filter { it.id !in builtInIds }
+        _uiState.value = _uiState.value.copy(loadedPids = merged)
+        updateSettings { it.copy(loggerDefUri = uriString) }
+    }
+
+    /** Drop any loaded logger definition and revert to the built-in parameters. */
+    fun clearLoggerDef() {
+        _uiState.value = _uiState.value.copy(loadedPids = emptyList())
+        updateSettings { it.copy(loggerDefUri = null) }
+    }
 
     /** Base name for the auto-saved RAW BYTES CSV (enumerated on write). */
     fun setRawLogName(name: String) = updateSettings { it.copy(rawLogName = name) }
@@ -623,7 +654,7 @@ class ProtocolViewModel : ViewModel() {
         layoutStore?.save(next)
         // If a poll flow is running, hand it the new PID set without
         // tearing down — the next cycle picks it up automatically.
-        val livePids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in next.pidIds }
+        val livePids = (Ssm2Pids.DEFAULT_DEMO_PIDS + _uiState.value.loadedPids).filter { it.id in next.pidIds }
         runningPoller?.updatePids(livePids)
         runningLiveSource?.updatePids(livePids)
     }
@@ -778,7 +809,7 @@ class ProtocolViewModel : ViewModel() {
         val adapter = state.settings.adapter
         val protocol = state.settings.protocol
 
-        val pidsOnPage = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in state.gaugeLayout.pidIds }
+        val pidsOnPage = (Ssm2Pids.DEFAULT_DEMO_PIDS + state.loadedPids).filter { it.id in state.gaugeLayout.pidIds }
         if (pidsOnPage.isEmpty()) {
             _uiState.value = state.copy(
                 statusMessage = "Add gauges from the Parameters menu before reading live data."

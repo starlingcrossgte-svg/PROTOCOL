@@ -91,7 +91,9 @@ internal fun SnapGaugeGrid(
         return
     }
 
-    val pidById = remember { Ssm2Pids.DEFAULT_DEMO_PIDS.associateBy { it.id } }
+    val pidById = remember(uiState.loadedPids) {
+        (Ssm2Pids.DEFAULT_DEMO_PIDS + uiState.loadedPids).associateBy { it.id }
+    }
     val maxRow = layout.maxRow().coerceAtLeast(0)
     val rowCount = maxRow + 1
 

@@ -213,6 +213,22 @@ class Protocol : ComponentActivity() {
         Toast.makeText(this, "ROM folder set", Toast.LENGTH_SHORT).show()
     }
 
+    // Parameters page → LOAD PARAMETER DEFINITION. SAF single-document picker for a
+    // user-supplied SSM2 logger definition; never bundled, read through the
+    // ContentResolver and parsed into runtime parameters. Read grant persisted so
+    // the choice survives a restart.
+    private val pickLoggerDefLauncher = registerForActivityResult(
+        OpenDocumentInFolder { null }
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+        }
+        viewModel.loadLoggerDef(applicationContext, uri.toString())
+        Toast.makeText(this, "Loading parameter definition…", Toast.LENGTH_SHORT).show()
+    }
+
     // Dev Mode → SELECT KERNEL FILE. SAF single-document picker; the chosen RAM
     // kernel image (built separately, NEVER bundled in the APK) is persisted as a
     // URI with a read grant that survives reboot, then read through the
@@ -589,6 +605,7 @@ class Protocol : ComponentActivity() {
                     onStopCanMonitor = { viewModel.devConsole.stopCanMonitor() },
                     onReadFirmware = { viewModel.devConsole.runFirmwareRead(applicationContext) },
                     onSelectKernel = { pickKernelLauncher.launch(arrayOf("*/*")) },
+                    onSelectDef = { pickLoggerDefLauncher.launch(arrayOf("*/*")) },
                     onClearKernel = { clearSelectedKernel() },
                     onSelectKernelProtocol = { p -> viewModel.setKernelProtocol(p) },
                     onSetKernelNeedsPrep = { b -> viewModel.setKernelNeedsPrep(b) },

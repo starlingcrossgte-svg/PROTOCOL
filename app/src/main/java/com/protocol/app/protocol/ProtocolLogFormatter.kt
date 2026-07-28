@@ -13,7 +13,7 @@ object ProtocolLogFormatter {
     fun formatSessionLogCsv(uiState: ProtocolUiState): String {
         val log = uiState.sessionLog
         if (log.isEmpty()) return ""
-        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in uiState.pidIdsOnLiveData }
+        val pids = (Ssm2Pids.DEFAULT_DEMO_PIDS + uiState.loadedPids).filter { it.id in uiState.pidIdsOnLiveData }
         if (pids.isEmpty()) return ""
         val sb = StringBuilder()
         sb.append("Timestamp")
