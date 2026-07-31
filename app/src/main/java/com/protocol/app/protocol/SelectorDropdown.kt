@@ -60,7 +60,7 @@ internal fun SelectorDropdown(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { open = !open }
-                .background(SurfaceBg)
+                .background(LocalButtonFill.current)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween

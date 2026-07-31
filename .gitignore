@@ -16,3 +16,4 @@ build.ps1
 *.pcap
 *.pcapng
 *.csv
+*.hprof

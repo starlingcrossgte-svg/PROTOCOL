@@ -32,11 +32,13 @@ internal fun StubBody(page: SubPage) {
             "In development in its own app. It folds back into PROTOCOL only when it's proven bulletproof."
         )
         SubPage.Tuning -> Pair(
-            "Live RAM-resident tunables: rev limiter, fuel cutoff, idle target, etc. Reads via SSM2 0xA8, writes via 0xB8. Addresses come from the per-ECU calibration definitions.",
-            "Few weeks once we settle on which parameters are in scope and pull the EZ30R definitions in."
+            "This one will take a while to work on compatible ECUs.",
+            ""
         )
+        // Pages with a real body of their own never reach StubBody.
         SubPage.Parameters, SubPage.TcmParameters, SubPage.Unverified,
-        SubPage.LiveDataSettings, SubPage.Notices, SubPage.Library, SubPage.Developer -> Pair("", "")
+        SubPage.Presets, SubPage.Notices, SubPage.Library,
+        SubPage.Developer, SubPage.TableEditor, SubPage.Navigation -> Pair("", "")
     }
 
     Column(
@@ -58,12 +60,16 @@ internal fun StubBody(page: SubPage) {
             color = InkPrimary,
             style = MaterialTheme.typography.bodyMedium
         )
-        CategoryHeader("EFFORT")
-        Text(
-            text = eta,
-            color = InkPrimary,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace
-        )
+        // The effort note is optional. A page whose whole message is one line
+        // should show one line, not one line followed by an empty heading.
+        if (eta.isNotBlank()) {
+            CategoryHeader("EFFORT")
+            Text(
+                text = eta,
+                color = InkPrimary,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace
+            )
+        }
     }
 }

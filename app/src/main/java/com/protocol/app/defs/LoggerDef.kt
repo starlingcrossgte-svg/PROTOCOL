@@ -27,6 +27,10 @@ data class LoggerAddress(
 data class LoggerConversion(
     val units: String,
     val expr: String,
+    /** Raw storage type from the definition (int8|int16|uint8|uint16|int32|uint32|float);
+     *  null = treat the address bytes as an unsigned big-endian integer. Decides how the
+     *  bytes become `x` before [expr] runs. */
+    val storagetype: String? = null,
     val format: String? = null,
     val gaugeMin: Double? = null,
     val gaugeMax: Double? = null,

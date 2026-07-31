@@ -83,7 +83,12 @@ class ObdLinkBtManager(context: Context) {
                 log = { dir, text -> ObdLinkTrafficLog.record(dir, text) }
             )
             transport = t
-            if (sequence != null) runSequence(t, sequence) else initElmForSsm2Can(t)
+            if (sequence != null) {
+                runSequence(t, sequence)
+            } else {
+                initElmForSsm2Can(t)
+                deafSessionCheck(t, "ATI", ::info)?.let { return it }
+            }
             ConnectResult.Connected(device.name ?: "OBDLink")
         } catch (e: Exception) {
             disconnect()
@@ -170,7 +175,13 @@ class ObdLinkBtManager(context: Context) {
             if (sequence != null) {
                 runSequence(t, sequence)
             } else {
-                for (cmd in listOf("ATE0", "ATL0", "ATS0")) t.sendAscii(cmd, 800L)
+                // ATE0 doubles as a liveness gate: a leaked/deaf SPP session — e.g.
+                // reinstalling the app while it still held the OBDLink Bluetooth link —
+                // opens a socket that never reaches the STN, so nothing replies and the
+                // '?'-only check below would pass on empty replies and report "Connected"
+                // into silent, blank gauges.
+                deafSessionCheck(t, "ATE0", ::info)?.let { return it }
+                for (cmd in listOf("ATL0", "ATS0")) t.sendAscii(cmd, 800L)
                 for (cmd in KLINE_INIT_COMMANDS) {
                     val reply = t.sendAscii(cmd, timeoutMs = 1500L)
                     if (reply.contains("?")) {
@@ -217,8 +228,9 @@ class ObdLinkBtManager(context: Context) {
         t.drain()
         // No ATZ — a full reset isn't needed before opening a K-line channel; the STN keeps
         // its state. Just echo/linefeeds/spaces off so replies parse cleanly; the candidate
-        // supplies the full K-line init (protocol/baud/timing).
-        for (cmd in listOf("ATE0", "ATL0", "ATS0")) {
+        // supplies the full K-line init (protocol/baud/timing). ATE0 also gates a deaf session.
+        deafSessionCheck(t, "ATE0", ::info)?.let { return it }
+        for (cmd in listOf("ATL0", "ATS0")) {
             t.sendAscii(cmd, 800L)
         }
         info("preamble done — ready for K-line init probing")
@@ -318,6 +330,28 @@ class ObdLinkBtManager(context: Context) {
             )
             if (reply.contains("?")) info("seq '${step.command}' rejected (?) — continuing")
         }
+    }
+
+    /**
+     * Liveness gate against a leaked/deaf SPP session (e.g. reinstalling the app
+     * while it still held the OBDLink Bluetooth link): the RFCOMM socket opens but
+     * never reaches the STN command interface, so every command times out with no
+     * '>' prompt. A live STN always answers [probe] with a prompt. Returns null when
+     * alive; on a deaf session it logs, tears the link down, and returns a Failure
+     * for the caller to return as-is.
+     */
+    private fun deafSessionCheck(
+        t: ObdLinkBtTransport,
+        probe: String,
+        info: (String) -> Unit
+    ): ConnectResult.Failure? {
+        if (t.sendAscii(probe, timeoutMs = 1500L).contains(">")) return null
+        info("no reply to $probe — deaf/leaked SPP session")
+        disconnect()
+        return ConnectResult.Failure(
+            "OBDLink opened but isn't answering (deaf session) — force-stop the app, " +
+                "power-cycle the adapter, then reconnect"
+        )
     }
 
     fun disconnect() {

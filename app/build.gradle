@@ -65,4 +65,10 @@ dependencies {
     // Async image loading for the user-chosen background. URI -> ImageBitmap
     // with disk cache + downsampling out of the box. ~150 KB on the APK.
     implementation "io.coil-kt:coil-compose:2.5.0"
+
+    // Watch remote for the Live Data tap loop (optional feature — the app is
+    // complete without a watch). Only used by the message listener in the
+    // Activity; nothing on the logging or flash path touches it. Pinned below
+    // the releases that require compileSdk 35+.
+    implementation "com.google.android.gms:play-services-wearable:18.2.0"
 }

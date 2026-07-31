@@ -1,6 +1,7 @@
 package com.protocol.app.protocol
 
 import com.protocol.app.openport2.PollSample
+import com.protocol.app.openport2.Ssm2Pid
 import com.protocol.app.openport2.Ssm2Pids
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,9 +44,13 @@ object ProtocolLogFormatter {
     fun formatSessionLogCleanText(
         log: List<PollSample>,
         pidIdsOnPage: Set<String>,
-        oldestFirst: Boolean = false
+        oldestFirst: Boolean = false,
+        /** Parameters available to resolve the on-page ids — the built-ins plus
+         *  any loaded from a definition. Without the loaded set, a page made of
+         *  definition parameters formats as if it were empty. */
+        availablePids: List<Ssm2Pid> = Ssm2Pids.DEFAULT_DEMO_PIDS
     ): String {
-        val pids = Ssm2Pids.DEFAULT_DEMO_PIDS.filter { it.id in pidIdsOnPage }
+        val pids = availablePids.filter { it.id in pidIdsOnPage }
         if (pids.isEmpty()) {
             return "(no gauges — open the menu and add parameters to log them)"
         }

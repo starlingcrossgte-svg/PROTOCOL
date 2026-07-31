@@ -57,6 +57,16 @@ internal fun y2kBottomCutShape() = CutCornerShape(bottomStart = 10.dp, bottomEnd
 internal fun y2kRightCutShape() = CutCornerShape(topEnd = 6.dp, bottomEnd = 6.dp)
 internal fun y2kLeftCutShape() = CutCornerShape(topStart = 6.dp, bottomStart = 6.dp)
 
+/**
+ * Button fill only, dimmed by the Configuration transparency slider. Borders and
+ * labels are not routed through here, so a fully transparent button is still a
+ * white outline with a white label.
+ *
+ * Log surfaces deliberately do not read this — they must stay legible over the
+ * background photo.
+ */
+internal val LocalButtonFill = androidx.compose.runtime.compositionLocalOf { SurfaceBg }
+
 // Vertical gradient brushes — top of the surface a touch lighter than
 // the bottom, gives buttons and panels visible depth without needing
 // real shadows or textures. headerBrush is used by ProtocolHeader.

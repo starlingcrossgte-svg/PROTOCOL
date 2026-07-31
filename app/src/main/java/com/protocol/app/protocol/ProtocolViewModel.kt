@@ -23,6 +23,7 @@ import com.protocol.app.openport2.OpenPortCanLiveSource
 import com.protocol.app.openport2.PollSample
 import com.protocol.app.openport2.Ssm2EcmProbe
 import com.protocol.app.openport2.Ssm2Pid
+import com.protocol.app.openport2.Ssm2PidCategory
 import com.protocol.app.openport2.Ssm2Pids
 import com.protocol.app.openport2.Ssm2Poller
 import com.protocol.app.openport2.TactrixBulkIo
@@ -36,8 +37,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-private val DEFAULT_STARTER_PID_IDS = listOf("rpm", "coolant", "battery", "oil", "iat")
+/**
+ * Gauges placed on the Live Data page at first launch. Empty: with the parameter
+ * data supplied by a user-loaded definition, there is no id the app can name up
+ * front that is guaranteed to resolve. Naming ids that no longer exist produced
+ * tiles that render but can never read. The page starts empty and fills as the
+ * user checks parameters on the Parameters page.
+ */
+private val DEFAULT_STARTER_PID_IDS = emptyList<String>()
 
 /**
  * Fold a new batch of values into a running min-or-max map. [shouldReplace]
@@ -110,6 +119,10 @@ class ProtocolViewModel : ViewModel() {
     // separately so its lifecycle is independent of the real-BT manager.
     private var simulatorObdLink: ObdLinkTcpManager? = null
     private var layoutStore: GaugeLayoutStore? = null
+    private var presetStore: PresetStore? = null
+    /** Fingerprint of the parameter set the visible presets belong to. Kept so
+     *  a save files under the same drawer the presets were read from. */
+    private var currentParameterFingerprint: String = ""
     private var backgroundStore: BackgroundStore? = null
     private var settingsStore: SettingsStore? = null
     private var sessionLogStore: SessionLogStore? = null
@@ -170,6 +183,17 @@ class ProtocolViewModel : ViewModel() {
         }
         _uiState.value = _uiState.value.copy(gaugeLayout = layout)
         if (existing == null) store.save(layout)
+    }
+
+    /**
+     * Wire the preset store. Presets are read once the parameter set is known,
+     * which is why this does not load anything itself — a definition restored
+     * at startup arrives later, and loading now would file everything under the
+     * fingerprint of the built-ins alone.
+     */
+    fun attachPresetStore(store: PresetStore) {
+        presetStore = store
+        refreshPresetsForCurrentParameters()
     }
 
     /**
@@ -320,26 +344,146 @@ class ProtocolViewModel : ViewModel() {
      * parameter to a runtime PID, and merge the result into the param universe so
      * the Parameters page, poller and log pick them up. Inert until a file is
      * chosen — with none loaded the app behaves exactly as before. Built-in ids
-     * win, so a loaded parameter never shadows a verified one.
+     * win, so a loaded parameter never shadows a built-in one.
+     *
+     * [displayName] is resolved from the content provider by the caller: a
+     * document URI's last path segment is a provider-specific document id, not a
+     * filename, so it cannot be derived here.
      */
-    fun loadLoggerDef(context: Context, uriString: String) {
-        val loaded = try {
-            context.contentResolver.openInputStream(Uri.parse(uriString))?.use { stream ->
-                LoggerDefParser.parse(stream).mapNotNull { it.toSsm2Pid() }
-            } ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val builtInIds = Ssm2Pids.DEFAULT_DEMO_PIDS.mapTo(HashSet()) { it.id }
-        val merged = loaded.filter { it.id !in builtInIds }
-        _uiState.value = _uiState.value.copy(loadedPids = merged)
-        updateSettings { it.copy(loggerDefUri = uriString) }
+    fun loadLoggerDef(context: Context, uriString: String, displayName: String?) {
+        updateSettings { it.copy(loggerDefUri = uriString, loggerDefName = displayName) }
+        parseLoggerDef(context, uriString)
+    }
+
+    /**
+     * Re-read the definition chosen in an earlier session. Parsed parameters live
+     * in memory only — without this, a restart leaves a definition that still
+     * shows as chosen while supplying nothing, and every gauge referring to it
+     * reads blank.
+     */
+    fun restoreLoggerDef(context: Context) {
+        val uri = _uiState.value.settings.loggerDefUri ?: return
+        parseLoggerDef(context, uri)
+    }
+
+    /**
+     * A tap arrived from the paired watch. Only bumps a counter — the Live Data
+     * page turns it into the same action a screen tap performs. Deliberately
+     * does NOT start or stop anything itself: one tap loop, one owner.
+     */
+    fun onRemoteTap() {
+        _uiState.value = _uiState.value.copy(
+            remoteTapEventId = _uiState.value.remoteTapEventId + 1
+        )
+    }
+
+    /** Highest tap id already acted on. Held here, NOT in the composition: the
+     *  pager disposes and recomposes the Live Data page as the user moves
+     *  between pages, which restarts its effects. A guard stored in the UI would
+     *  reset with it and replay the last tap — engaging the lock unprompted. */
+    private var lastActedRemoteTap = 0
+
+    /**
+     * True exactly once per tap. Every later call for the same id returns false,
+     * so a replayed effect cannot re-fire an old tap.
+     */
+    fun consumeRemoteTap(eventId: Int): Boolean {
+        if (eventId <= 0 || eventId == lastActedRemoteTap) return false
+        lastActedRemoteTap = eventId
+        return true
     }
 
     /** Drop any loaded logger definition and revert to the built-in parameters. */
     fun clearLoggerDef() {
-        _uiState.value = _uiState.value.copy(loadedPids = emptyList())
-        updateSettings { it.copy(loggerDefUri = null) }
+        _uiState.value = _uiState.value.copy(
+            loadedPids = emptyList(),
+            loggerDefLoading = false,
+            loggerDefStatus = ""
+        )
+        updateSettings { it.copy(loggerDefUri = null, loggerDefName = null) }
+        // The parameter set changed, so the presets that belong to it changed
+        // too. The cleared definition's presets stay on disk under their own
+        // fingerprint and come back if it is loaded again.
+        refreshPresetsForCurrentParameters()
+    }
+
+    /**
+     * Read + parse off the main thread. A definition is megabytes of XML; parsing
+     * it on the UI thread stalls the picker and, on the startup restore, the app
+     * launch itself.
+     */
+    private fun parseLoggerDef(context: Context, uriString: String, ecuId: String? = null) {
+        _uiState.value = _uiState.value.copy(
+            loggerDefLoading = true,
+            loggerDefStatus = "Reading definition..."
+        )
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) { readLoggerDef(context, uriString, ecuId) }
+            when (outcome) {
+                is DefLoad.Ok -> {
+                    // Built-in ids win: a loaded parameter never shadows one of
+                    // the in-app computed views.
+                    val builtInIds = Ssm2Pids.DEFAULT_DEMO_PIDS.mapTo(HashSet()) { it.id }
+                    val merged = outcome.pids.filter { it.id !in builtInIds }
+                    val ecu = merged.count { it.category == Ssm2PidCategory.ECU }
+                    val tcm = merged.size - ecu
+                    // Extended parameters resolve per calibration, so they are
+                    // left out until the connected ECU's id is known.
+                    val note = if (ecuId == null) " (extended need ECU id)" else ""
+                    _uiState.value = _uiState.value.copy(
+                        loadedPids = merged,
+                        loggerDefLoading = false,
+                        loggerDefStatus = "$ecu ECU / $tcm TCM parameters loaded$note"
+                    )
+                }
+                DefLoad.Empty -> _uiState.value = _uiState.value.copy(
+                    loadedPids = emptyList(),
+                    loggerDefLoading = false,
+                    loggerDefStatus = "No parameters found - is this a logging definition?"
+                )
+                is DefLoad.Failed -> _uiState.value = _uiState.value.copy(
+                    loadedPids = emptyList(),
+                    loggerDefLoading = false,
+                    loggerDefStatus = outcome.reason
+                )
+            }
+            // Whatever the outcome, the parameter set is now settled — swap in
+            // the presets belonging to it. On a successful load this is what
+            // makes a returning definition bring its own presets back with it.
+            refreshPresetsForCurrentParameters()
+        }
+    }
+
+    /** Outcome of one definition read. Distinguishes "parsed but empty" from
+     *  "could not be read" — they need different answers from the user. */
+    private sealed class DefLoad {
+        data class Ok(val pids: List<Ssm2Pid>) : DefLoad()
+        object Empty : DefLoad()
+        data class Failed(val reason: String) : DefLoad()
+    }
+
+    private fun readLoggerDef(context: Context, uriString: String, ecuId: String?): DefLoad {
+        return try {
+            val stream = context.contentResolver.openInputStream(Uri.parse(uriString))
+            if (stream == null) {
+                DefLoad.Failed("Definition file could not be opened")
+            } else {
+                val parsed = stream.use {
+                    LoggerDefParser.parse(it, ecuId).mapNotNull { p -> p.toSsm2Pid() }
+                }
+                if (parsed.isEmpty()) DefLoad.Empty else DefLoad.Ok(parsed)
+            }
+        } catch (_: SecurityException) {
+            // A persisted read grant does not survive the document being moved
+            // or deleted; the file has to be picked again.
+            DefLoad.Failed("Access to the definition was lost - choose the file again")
+        } catch (e: Exception) {
+            // Report what actually failed. The app takes arbitrary user-supplied
+            // definitions, so "could not be read" alone leaves no way to tell a
+            // malformed file from an unsupported construct from an I/O error.
+            val detail = e.message?.take(160) ?: "no detail"
+            DefLoad.Failed("Read failed - ${e.javaClass.simpleName}: $detail")
+        }
     }
 
     /** Base name for the auto-saved RAW BYTES CSV (enumerated on write). */
@@ -674,18 +818,167 @@ class ProtocolViewModel : ViewModel() {
         updateLayout { if (it.contains(pidId)) it.withRemoved(pidId) else it.withAdded(pidId) }
     }
 
+    // ── User presets ────────────────────────────────────────────────────────
+    // Saved parameter groups, filed under the fingerprint of the parameter set
+    // they were built against. See UserPreset.kt for why the key is the content
+    // rather than the file name or the URI.
+
+    /** The parameter set as it stands right now, built-ins plus any definition. */
+    private fun availablePids(): List<Ssm2Pid> =
+        Ssm2Pids.DEFAULT_DEMO_PIDS + _uiState.value.loadedPids
+
     /**
-     * Replace the whole Live Data layout with [PidPresets] entry [index] —
-     * clears the current gauges and lays out that preset's PIDs in order.
-     * Goes through [updateLayout] so a running poll picks up the new PID set
-     * mid-flight (gauges swap without tearing down the connection).
+     * Re-read the presets belonging to the parameter set now in effect. Call
+     * after anything that changes the loaded parameters: a definition loaded,
+     * cleared, or restored at startup. Presets for other definitions stay on
+     * disk untouched, so switching back brings them straight back.
      */
-    fun applyPreset(index: Int) {
-        val preset = PidPresets.PRESETS.getOrNull(index) ?: return
+    fun refreshPresetsForCurrentParameters() {
+        val store = presetStore ?: return
+        val fingerprint = parameterSetFingerprint(availablePids())
+        currentParameterFingerprint = fingerprint
+        _uiState.value = _uiState.value.copy(userPresets = store.load(fingerprint))
+    }
+
+    /** Start building a preset and jump to the Parameters page to pick them. */
+    fun beginPresetDraft() {
+        _uiState.value = _uiState.value.copy(
+            presetDraft = PresetDraft(),
+            activeSubPage = SubPage.Parameters,
+            editMode = false
+        )
+    }
+
+    /**
+     * Add or remove a parameter from the draft. Silently refuses past
+     * [MAX_PRESET_PIDS] rather than dropping an earlier pick, so a stray tap at
+     * the limit cannot quietly rewrite a selection the user already made.
+     */
+    fun togglePresetDraftPid(pidId: String) {
+        val draft = _uiState.value.presetDraft ?: return
+        val next = when {
+            pidId in draft.pidIds -> draft.pidIds - pidId
+            draft.isFull -> return
+            else -> draft.pidIds + pidId
+        }
+        _uiState.value = _uiState.value.copy(presetDraft = draft.copy(pidIds = next))
+    }
+
+    /** DONE pressed: move to naming. Refuses an empty preset. */
+    fun requestPresetName() {
+        val draft = _uiState.value.presetDraft ?: return
+        if (draft.pidIds.isEmpty()) return
+        _uiState.value = _uiState.value.copy(presetDraft = draft.copy(awaitingName = true))
+    }
+
+    /** Back out of naming to carry on selecting. */
+    fun dismissPresetName() {
+        val draft = _uiState.value.presetDraft ?: return
+        _uiState.value = _uiState.value.copy(presetDraft = draft.copy(awaitingName = false))
+    }
+
+    /** Abandon the draft. The Live Data layout was never touched, so there is
+     *  nothing to undo. */
+    fun cancelPresetDraft() {
+        if (_uiState.value.presetDraft == null) return
+        _uiState.value = _uiState.value.copy(
+            presetDraft = null,
+            activeSubPage = SubPage.Presets
+        )
+    }
+
+    /** Save the draft under [name] and return to the preset list. */
+    fun commitPresetDraft(name: String) {
+        val store = presetStore ?: return
+        val draft = _uiState.value.presetDraft ?: return
+        if (draft.pidIds.isEmpty()) return
+        val trimmed = name.trim().ifEmpty { "Preset ${_uiState.value.userPresets.size + 1}" }
+        val preset = UserPreset(
+            id = java.util.UUID.randomUUID().toString(),
+            name = trimmed,
+            pidIds = draft.pidIds
+        )
+        val next = _uiState.value.userPresets + preset
+        store.save(currentParameterFingerprint, next)
+        _uiState.value = _uiState.value.copy(
+            userPresets = next,
+            presetDraft = null,
+            activeSubPage = SubPage.Presets
+        )
+    }
+
+    fun deleteUserPreset(presetId: String) {
+        val store = presetStore ?: return
+        val next = _uiState.value.userPresets.filterNot { it.id == presetId }
+        store.save(currentParameterFingerprint, next)
+        _uiState.value = _uiState.value.copy(userPresets = next)
+    }
+
+    /**
+     * Replace the Live Data layout with [presetId]'s parameters, in the order
+     * they were selected. Goes through [updateLayout], so a poll already
+     * running picks up the new set mid-flight without dropping the link.
+     */
+    fun applyUserPreset(presetId: String) {
+        val preset = _uiState.value.userPresets.firstOrNull { it.id == presetId } ?: return
         updateLayout { preset.pidIds.fold(GaugeLayout()) { acc, id -> acc.withAdded(id) } }
-        // Remember which preset is active so the hamburger picker can mark it
-        // and the choice survives a restart.
-        updateSettings { it.copy(selectedPresetIndex = index) }
+    }
+
+    // ── Staged preset selection (rotary remote) ─────────────────────────────
+    // Stepping only marks a choice. Nothing reaches the gauges until a tap
+    // confirms it — see [ProtocolUiState.stagedPresetId] for why.
+
+    /**
+     * Move the staged selection [delta] places, wrapping at both ends so a
+     * continuous rotation keeps working rather than stopping at a boundary the
+     * user cannot see.
+     *
+     * With nothing staged yet, stepping starts from whichever preset the page
+     * currently matches, so the first movement goes somewhere adjacent to where
+     * the user actually is instead of jumping to the top of the list.
+     */
+    fun stepStagedPreset(delta: Int) {
+        if (delta == 0) return
+        val presets = _uiState.value.userPresets
+        if (presets.isEmpty()) return
+        val stagedIndex = presets.indexOfFirst { it.id == _uiState.value.stagedPresetId }
+        val from = if (stagedIndex >= 0) {
+            stagedIndex
+        } else {
+            val onPage = _uiState.value.pidIdsOnLiveData
+            presets.indexOfFirst { it.pidIds.isNotEmpty() && onPage.containsAll(it.pidIds) }
+        }
+        // No staged preset and the page matches none: land on the first step
+        // rather than treating an unknown position as index zero.
+        val next = if (from < 0) {
+            if (delta > 0) 0 else presets.size - 1
+        } else {
+            Math.floorMod(from + delta, presets.size)
+        }
+        _uiState.value = _uiState.value.copy(stagedPresetId = presets[next].id)
+    }
+
+    /**
+     * Apply the staged preset, if there is one. Returns true when it consumed
+     * the tap, so the caller knows not to also advance the read/log loop — one
+     * tap must never mean two things at once.
+     */
+    fun commitStagedPreset(): Boolean {
+        val id = _uiState.value.stagedPresetId ?: return false
+        _uiState.value = _uiState.value.copy(stagedPresetId = null)
+        applyUserPreset(id)
+        return true
+    }
+
+    fun clearStagedPreset() {
+        if (_uiState.value.stagedPresetId == null) return
+        _uiState.value = _uiState.value.copy(stagedPresetId = null)
+    }
+
+    /** Name of the staged preset, for the watch face and the on-screen hint. */
+    fun stagedPresetName(): String? {
+        val id = _uiState.value.stagedPresetId ?: return null
+        return _uiState.value.userPresets.firstOrNull { it.id == id }?.name
     }
 
     fun openSubPage(page: SubPage) {
@@ -693,11 +986,40 @@ class ProtocolViewModel : ViewModel() {
         // Switching screens implicitly exits edit mode — drag handles would
         // be confusing if they hung around after the user moved off Live Data.
         _uiState.value = _uiState.value.copy(activeSubPage = page, editMode = false)
+        // Opening one of the two announced pages retires its pulse for good.
+        // Marked on OPEN rather than on close, because the pulse has done its
+        // job the moment the user arrives — making it survive until they read
+        // to the bottom would just be nagging.
+        when (page) {
+            SubPage.Navigation ->
+                if (!_uiState.value.settings.visitedHowToUse) {
+                    updateSettings { it.copy(visitedHowToUse = true) }
+                }
+            SubPage.Notices ->
+                if (!_uiState.value.settings.visitedNotices) {
+                    updateSettings { it.copy(visitedNotices = true) }
+                }
+            else -> Unit
+        }
+    }
+
+    fun setButtonFillPercent(percent: Int) = updateSettings {
+        it.copy(
+            buttonFillPercent = percent.coerceIn(
+                AppSettings.BUTTON_FILL_MIN,
+                AppSettings.BUTTON_FILL_MAX
+            )
+        )
     }
 
     fun closeSubPage() {
         if (_uiState.value.activeSubPage == null) return
-        _uiState.value = _uiState.value.copy(activeSubPage = null)
+        // Leaving the page ABANDONS any half-built preset. Without this the
+        // draft outlived the visit: back out mid-selection and it stayed set, so
+        // the next ordinary trip to a parameter page opened with CANCEL and DONE
+        // pinned across the top and taps collecting into a preset the user had
+        // walked away from. A draft is only meaningful while its page is open.
+        _uiState.value = _uiState.value.copy(activeSubPage = null, presetDraft = null)
     }
 
     fun enterEditMode() {

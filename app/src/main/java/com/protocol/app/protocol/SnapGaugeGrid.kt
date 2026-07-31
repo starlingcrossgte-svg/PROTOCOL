@@ -124,7 +124,12 @@ internal fun SnapGaugeGrid(
                 }
         ) {
             for (entry in layout.entries) {
-                val pid = pidById[entry.pidId] ?: continue
+                // A laid-out parameter the current set doesn't provide — a layout
+                // saved while a different definition was loaded, or none at all.
+                // It gets a placeholder rather than being skipped: a skipped entry
+                // still holds its cells and still counts toward the row height, so
+                // it blocks placement invisibly with nothing on screen to remove.
+                val pid = pidById[entry.pidId] ?: stalePidPlaceholder(entry.pidId)
                 val xOffset = (cellWidth + GAUGE_GRID_SPACING) * entry.col
                 val yOffset = (cellHeight + GAUGE_GRID_SPACING) * entry.row
                 val tileWidth = cellWidth * entry.width +
@@ -154,6 +159,23 @@ internal fun SnapGaugeGrid(
         }
     }
 }
+
+/**
+ * Stand-in for a gauge whose parameter isn't in the current set, so the tile
+ * stays visible and can be removed with its own X instead of holding cells
+ * invisibly. Marked "stale" so it can't be mistaken for a gauge waiting on data.
+ *
+ * Never polled: the poll set is built from the real parameter list, which by
+ * definition doesn't contain this id — so the empty address list is never read.
+ */
+private fun stalePidPlaceholder(pidId: String) = Ssm2Pid(
+    id = pidId,
+    displayName = pidId,
+    unit = "stale",
+    addresses = emptyList(),
+    decode = { 0.0 },
+    longName = pidId
+)
 
 @Composable
 private fun GaugeTile(

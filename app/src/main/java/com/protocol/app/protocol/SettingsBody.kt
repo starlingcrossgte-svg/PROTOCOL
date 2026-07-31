@@ -52,6 +52,9 @@ internal fun SettingsBody(
     onProtocolChange: (BusProtocol?) -> Unit,
     onPollingModeChange: (PollingMode) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
+    onSessionLogMaxChange: (Int) -> Unit,
+    onButtonFillChange: (Int) -> Unit,
+    onShareSavedSession: () -> Unit,
     onDisconnectObdLink: () -> Unit,
     onResetAdapter: () -> Unit,
     onPickBackground: () -> Unit,
@@ -72,14 +75,12 @@ internal fun SettingsBody(
             // Keep the text field above the keyboard in edge-to-edge mode.
             .imePadding()
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // ── Connection config ──────────────────────────────────────
-        // Shared by Live Data, Diagnostics, and future Flash — set once
-        // here and every feature reads the same values.
-        CategoryHeader("ADAPTER")
+        // No section headers. Each control's placeholder IS its label, and it
+        // shows its value once set. Keep new controls self-describing.
         SelectorDropdown(
-            placeholder = "SELECT ADAPTER",
+            placeholder = "select adapter",
             items = listOf(
                 DropdownItem("OpenPort 2.0"),
                 DropdownItem("OBDLink MX+"),
@@ -108,13 +109,12 @@ internal fun SettingsBody(
             SettingsHelp("Sends ATPP FF OFF / ATD / ATZ — clears the adapter's stored programmable parameters, restores factory defaults, then reboots it. The adapter drops its link after the reset; power-cycle and reconnect. Deep troubleshooting only.")
         }
 
-        CategoryHeader("PROTOCOL")
         // CAN · Broadcast is the '06 Outback's listen-only powertrain CAN. Kept a
         // separate selection (not "CAN") as a SAFETY gate: it routes to a monitor
         // source that NEVER transmits, whereas request mode on a broadcast bus
-        // could inject commands. Picking it forces POLLING MODE → Monitor.
+        // could inject commands. Picking it forces the poll method → Monitor.
         SelectorDropdown(
-            placeholder = "SELECT PROTOCOL",
+            placeholder = "select protocol",
             items = listOf(
                 DropdownItem("K-Line"),
                 DropdownItem("CAN · Diagnostic"),
@@ -127,14 +127,13 @@ internal fun SettingsBody(
             }
         )
 
-        CategoryHeader("POLLING MODE")
-        // Which modes are offered depends on the chosen ADAPTER + PROTOCOL: the
+        // Which modes are offered depends on the chosen adapter + protocol: the
         // route's capability flags drive the greying so the UI can't offer a mode
         // the transport won't run. Stream = K-line ECM streaming (A8 01); Monitor
         // = listen-only broadcast decode (CanBroadcast, not wired yet).
         val pollingRoute = TransportRoute.of(s.adapter, s.protocol)
         SelectorDropdown(
-            placeholder = "SELECT MODE",
+            placeholder = "select poll method",
             items = listOf(
                 DropdownItem("Poll"),
                 DropdownItem("Stream", enabled = pollingRoute?.supportsStream == true),
@@ -144,10 +143,10 @@ internal fun SettingsBody(
             onSelect = { i -> onPollingModeChange(PollingMode.values()[i]) }
         )
 
-        // Poll interval is the minimum cycle period for POLL mode only. Stream
+        // Poll interval is the minimum cycle period for Poll mode only. Stream
         // rides the ECU's self-paced A8 01 stream and Monitor listens passively,
-        // so neither honors it — grey it out there to make that explicit.
-        CategoryHeader("POLL INTERVAL")
+        // so neither honors it — grey it out there to make that explicit. The
+        // slider carries its own inline label, so it needs no header either.
         val pollEnabled = s.pollingMode == PollingMode.Poll
         SliderRow(
             label = "Poll interval",
@@ -160,74 +159,86 @@ internal fun SettingsBody(
         )
         SettingsHelp(
             if (pollEnabled)
-                "Minimum poll period — lower = faster gauge updates, more bus traffic. Mainly bounds CAN and the simulator; on K-line the wire is usually the limit. Applies on the next Read Live Data."
-            else
-                "Only applies in Poll mode. Stream and Monitor run at the ECU's own rate."
+                "Wait time between a reply and the next request. Lower is faster and busier."
+                else "Poll mode only. Stream and Monitor run at the module's own rate."
         )
 
-        // ── Background ─────────────────────────────────────────────
-        CategoryHeader("BACKGROUND")
-        SettingsButton(label = "Choose from Gallery", shape = SETTINGS_SHAPE, onClick = onPickBackground)
+        SliderRow(
+            label = "Module log rows",
+            value = s.sessionLogMaxSize,
+            suffix = "",
+            range = AppSettings.SESSION_LOG_MIN..AppSettings.SESSION_LOG_MAX,
+            stepDp = 500,
+            onChange = onSessionLogMaxChange
+        )
+        SettingsHelp("Oldest rows drop off at the cap. Applies to a running log straight away.")
+
+        SliderRow(
+            label = "Button fill",
+            value = s.buttonFillPercent,
+            suffix = "%",
+            range = AppSettings.BUTTON_FILL_MIN..AppSettings.BUTTON_FILL_MAX,
+            stepDp = 10,
+            onChange = onButtonFillChange
+        )
+        SettingsHelp("Only the grey fill fades. White outlines and white text stay, and logs are never affected.")
+
+        SettingsButton(label = "select background", shape = SETTINGS_SHAPE, onClick = onPickBackground)
         if (uiState.backgroundUri != null) {
-            SettingsButton(label = "Remove", shape = SETTINGS_SHAPE, onClick = onClearBackground)
+            SettingsButton(label = "remove background", shape = SETTINGS_SHAPE, onClick = onClearBackground)
         }
 
-        // ── CSV Output ─────────────────────────────────────────────
-        // Destination folder + base file names for the Lock-and-Tap auto-save.
-        // Both logs save into this one folder, each under its own name with a
-        // numeric suffix (rawbytes1.csv, rawbytes2.csv …).
-        CategoryHeader("CSV OUTPUT")
-        SettingsButton(label = "Choose CSV Folder", shape = SETTINGS_SHAPE, onClick = onPickCsvFolder)
+        // Destination for the Lock-and-Tap auto-save. Both logs go here, each
+        // under its own name with a numeric suffix.
         val folderLabel = s.csvFolderUri?.let { CsvDestination.prettyFolderLabel(Uri.parse(it)) }
-        SettingsHelp(
-            if (folderLabel != null) "Saving to: $folderLabel"
-            else "No folder chosen — Lock-and-Tap auto-save is off until you pick one."
+        SettingsButton(
+            label = folderLabel ?: "select csv folder",
+            shape = SETTINGS_SHAPE,
+            onClick = onPickCsvFolder
         )
+        if (folderLabel == null) {
+            SettingsHelp("Auto save stays off until a folder is chosen.")
+        }
 
         var rawNameField by remember(s.rawLogName) { mutableStateOf(s.rawLogName) }
         NameField(
-            label = "RAW BYTE LOG NAME",
+            label = "transport log name",
             value = rawNameField,
             onValueChange = { rawNameField = it; onRawLogNameChange(it) }
         )
         var sessionNameField by remember(s.sessionLogName) { mutableStateOf(s.sessionLogName) }
         NameField(
-            label = "SESSION LOG NAME",
+            label = "module log name",
             value = sessionNameField,
             onValueChange = { sessionNameField = it; onSessionLogNameChange(it) }
         )
 
-        // File-picker start folders. No section header — each button's own label is
-        // the control: it sets WHERE the Flash page's SELECT KERNEL / SELECT ROM
-        // pickers open. The files themselves are chosen over on the Flash page.
+        // Start folders only — the files themselves are picked on the ROM page.
         val kernelFolder = s.kernelFolderUri?.let { CsvDestination.prettyFolderLabel(Uri.parse(it)) }
         SettingsButton(
-            label = if (kernelFolder != null) "Kernel Folder: $kernelFolder" else "Choose Kernel Folder",
+            label = kernelFolder ?: "select kernel folder",
             shape = SETTINGS_SHAPE,
             onClick = onPickKernelFolder
         )
         val romFolder = s.romFolderUri?.let { CsvDestination.prettyFolderLabel(Uri.parse(it)) }
         SettingsButton(
-            label = if (romFolder != null) "ROM Folder: $romFolder" else "Choose ROM Folder",
+            label = romFolder ?: "select rom folder",
             shape = SETTINGS_SHAPE,
             onClick = onPickRomFolder
         )
 
-        // ── Kernel handling ────────────────────────────────────────
-        // How the Flash page treats the selected kernel file. These change rarely
-        // (per kernel family), so they live here rather than in the silo:
-        //   BARE = bare cmd grammar / reply cmd|0x80 (already in upload form).
-        //   BEEF = BE EF wrapped / reply cmd|0x40 (raw external kernels).
-        //   PREP = pad + integrity word + encrypt before upload; VERBATIM = send as-is.
-        CategoryHeader("KERNEL")
+        // How the ROM page treats the kernel. Changes per kernel family, so it
+        // lives here rather than in the silo.
+        //   BARE = bare cmd, reply cmd|0x80.  BEEF = wrapped, reply cmd|0x40.
+        //   PREP = pad + integrity word + encrypt before upload.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            ProtocolToggleButton("BARE", s.kernelProtocol == KernelProtocol.BARE, Modifier.weight(1f)) {
+            ProtocolToggleButton("bare kernel", s.kernelProtocol == KernelProtocol.BARE, Modifier.weight(1f)) {
                 onSelectKernelProtocol(KernelProtocol.BARE)
             }
-            ProtocolToggleButton("BEEF", s.kernelProtocol == KernelProtocol.BEEF, Modifier.weight(1f)) {
+            ProtocolToggleButton("beef kernel", s.kernelProtocol == KernelProtocol.BEEF, Modifier.weight(1f)) {
                 onSelectKernelProtocol(KernelProtocol.BEEF)
             }
         }
@@ -235,13 +246,16 @@ internal fun SettingsBody(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            ProtocolToggleButton("PREP", s.kernelNeedsPrep, Modifier.weight(1f)) {
+            ProtocolToggleButton("prep kernel", s.kernelNeedsPrep, Modifier.weight(1f)) {
                 onSetKernelNeedsPrep(true)
             }
-            ProtocolToggleButton("VERBATIM", !s.kernelNeedsPrep, Modifier.weight(1f)) {
+            ProtocolToggleButton("send verbatim", !s.kernelNeedsPrep, Modifier.weight(1f)) {
                 onSetKernelNeedsPrep(false)
             }
         }
+
+        // Crash recovery: hands the last autosaved module log to the share sheet.
+        SettingsButton(label = "recover last module log", shape = SETTINGS_SHAPE, onClick = onShareSavedSession)
     }
 }
 
@@ -293,7 +307,7 @@ internal fun SettingsButton(label: String, shape: Shape = RoundedCornerShape(8.d
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
-            containerColor = SurfaceBg,
+            containerColor = LocalButtonFill.current,
             contentColor = Color.White
         ),
         shape = shape,

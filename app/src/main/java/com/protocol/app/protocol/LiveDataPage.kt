@@ -9,7 +9,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,10 +69,22 @@ internal fun LiveDataPage(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenUnverified: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit,
-    onApplyPreset: (Int) -> Unit,
+    onOpenPresets: () -> Unit,
+    onResetLayout: () -> Unit,
     onResizeSessionLog: (Float) -> Unit,
-    onAutoSaveLogs: () -> Unit
+    onAutoSaveLogs: () -> Unit,
+    onWatchState: (String) -> Unit = {},
+    /** Applies a staged preset if one is pending. Returns true when it consumed
+     *  the tap, so the caller does not also advance the read/log loop. */
+    onCommitStagedPreset: () -> Boolean = { false },
+    /** Returns true exactly once per watch-tap id, so a restarted effect cannot
+     *  replay an old tap. The guard lives in the ViewModel — see there. */
+    onConsumeRemoteTap: (Int) -> Boolean = { false },
+    /** True only when Live Data is the page actually on screen. The pager keeps
+     *  neighbouring pages composed, so without this a watch tap would act while
+     *  the user is on Home — engaging the lock, which freezes the pager and
+     *  traps them on a page they can't swipe off. */
+    isVisiblePage: Boolean = true
 ) {
     BackHandler(enabled = uiState.editMode) { onExitEditMode() }
 
@@ -118,6 +129,31 @@ internal fun LiveDataPage(
         }
     }
 
+    // Mirror the phone's state onto the watch face. Strapped to a wheel the
+    // watch is the only readable surface, so it must show what the phone is
+    // actually doing rather than what the last tap was assumed to do.
+    // Sent as part of the state string, not a second message: two messages could
+    // arrive out of order and disagree.
+    val stagedPresetName = uiState.stagedPresetId?.let { id ->
+        uiState.userPresets.firstOrNull { it.id == id }?.name
+    }
+    LaunchedEffect(
+        locked,
+        uiState.isReadingLive,
+        uiState.isLogging,
+        autoSaveArmed,
+        stagedPresetName
+    ) {
+        val base = when {
+            !locked -> "Unlocked"
+            autoSaveArmed -> "Saving"
+            uiState.isLogging -> "Logging"
+            uiState.isReadingLive -> "Reading"
+            else -> "Idle"
+        }
+        onWatchState(if (stagedPresetName != null) "$base|$stagedPresetName" else base)
+    }
+
     // Lock/Tap flash: instead of a constant white outline, the gauges + log
     // outline flash white — 3x when entering lock mode, once per tap while
     // locked. One shared value drives both the gauge tiles and the log card.
@@ -134,6 +170,50 @@ internal fun LiveDataPage(
             // Unlocking (Cancel button / back / ON_STOP) also drops any pending
             // auto-save so the popup can't linger after leaving lock mode.
             autoSaveArmed = false
+        }
+    }
+
+    /**
+     * ONE entry point for a tap, whatever produced it — a finger on the gauge
+     * area or a tap relayed from the watch. Advances the loop and fires the
+     * single white flash together.
+     *
+     * The flash used to live inside the touch gesture handler alongside the
+     * cycle call, so a watch tap advanced the loop silently: the action happened
+     * with no visual confirmation. Keeping both here means the confirmation
+     * cannot drift away from the action again.
+     */
+    val handleTap: () -> Unit = {
+        // A staged preset takes the tap; one tap never means two things.
+        if (!onCommitStagedPreset()) currentCycleTap.value()
+        flashScope.launch {
+            lockFlash.snapTo(1f)
+            lockFlash.animateTo(0f, tween(220))
+        }
+    }
+    val currentHandleTap = rememberUpdatedState(handleTap)
+
+    // A tap arrived from a paired watch. It goes through the SAME entry point a
+    // finger tap uses — while unlocked it engages the lock (matching the
+    // on-screen "Lock and Tap" button), and thereafter it advances the cycle.
+    //
+    // The id is consumed through the ViewModel rather than compared against a
+    // local remember: the pager disposes this page when the user swipes away,
+    // which restarts this effect with the SAME key. A local guard would reset on
+    // disposal and replay the last tap — which is what was engaging the lock by
+    // itself on the Home page.
+    LaunchedEffect(uiState.remoteTapEventId, isVisiblePage) {
+        // Only act when this really is the page on screen. The tap is still
+        // consumed either way, so a tap made from another page is discarded
+        // rather than queued up to fire on return.
+        if (onConsumeRemoteTap(uiState.remoteTapEventId) && isVisiblePage) {
+            when {
+                // First, and regardless of lock state: bezel-then-tap must mean
+                // "apply that", never "engage the lock".
+                onCommitStagedPreset() -> Unit
+                !locked -> onToggleLock()
+                else -> currentHandleTap.value()
+            }
         }
     }
 
@@ -170,17 +250,14 @@ internal fun LiveDataPage(
 
                 Spacer(Modifier.height(9.dp))
 
-                // Clear Log / Export CSV moved to the pinned bottom action bar;
-                // only the section header stays above the log card here.
-                CategoryHeader("Session Log")
-
-                Spacer(Modifier.height(9.dp))
-
+                // Title lives inside the card's top row, like the transport log.
                 SessionLogCard(
                     uiState = uiState,
                     locked = locked,
                     onEnterEditMode = onEnterEditMode,
                     onResizeSessionLog = onResizeSessionLog,
+                    onClearSessionLog = onClearSessionLog,
+                    onExportSessionLog = onExportSessionLog,
                     flash = lockFlash.value
                 )
             }
@@ -193,13 +270,7 @@ internal fun LiveDataPage(
                     modifier = Modifier
                         .matchParentSize()
                         .pointerInput(Unit) {
-                            detectTapGestures(onTap = {
-                                currentCycleTap.value()
-                                flashScope.launch {
-                                    lockFlash.snapTo(1f)
-                                    lockFlash.animateTo(0f, tween(220))
-                                }
-                            })
+                            detectTapGestures(onTap = { currentHandleTap.value() })
                         }
                 )
             }
@@ -242,10 +313,8 @@ internal fun LiveDataPage(
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenUnverified = onOpenUnverified,
-            onOpenLiveDataSettings = onOpenLiveDataSettings,
-            onApplyPreset = onApplyPreset,
-            devMode = uiState.settings.devMode,
-            selectedPresetIndex = uiState.settings.selectedPresetIndex
+            onOpenPresets = onOpenPresets,
+            onResetLayout = onResetLayout
         )
     }
 }
@@ -294,10 +363,8 @@ private fun ModeButtonsRow(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenUnverified: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit,
-    onApplyPreset: (Int) -> Unit,
-    devMode: Boolean,
-    selectedPresetIndex: Int
+    onOpenPresets: () -> Unit,
+    onResetLayout: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -311,10 +378,8 @@ private fun ModeButtonsRow(
             onOpenParameters = onOpenParameters,
             onOpenTcmParameters = onOpenTcmParameters,
             onOpenUnverified = onOpenUnverified,
-            onOpenLiveDataSettings = onOpenLiveDataSettings,
-            onApplyPreset = onApplyPreset,
-            devMode = devMode,
-            selectedPresetIndex = selectedPresetIndex,
+            onOpenPresets = onOpenPresets,
+            onResetLayout = onResetLayout,
             enabled = !locked
         )
         // Combined action bar filling the slot the lone "Lock and Tap" button
@@ -332,7 +397,7 @@ private fun ModeButtonsRow(
                 .weight(1f)
                 .height(IntrinsicSize.Min)
                 .clip(shape)
-                .background(SurfaceBg, shape)
+                .background(LocalButtonFill.current, shape)
                 .border(1.dp, Accent, shape),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -396,26 +461,39 @@ private fun SegmentDivider() {
 private const val MIN_LOG_HEIGHT_DP = AppSettings.SESSION_LOG_HEIGHT_MIN
 private const val MAX_LOG_HEIGHT_DP = AppSettings.SESSION_LOG_HEIGHT_MAX
 
+/** Only the newest rows can be on screen. Formatting the whole session to draw
+ *  twenty lines is what made logging stutter. */
+private const val SESSION_PREVIEW_ROWS = 60
+
 @Composable
 private fun SessionLogCard(
     uiState: ProtocolUiState,
     locked: Boolean,
     onEnterEditMode: () -> Unit,
     onResizeSessionLog: (Float) -> Unit,
+    onClearSessionLog: () -> Unit,
+    onExportSessionLog: () -> Unit,
     flash: Float
 ) {
-    // Reformat the entire session log only when the row count or the PID
-    // set actually changes. Without this, every 200ms poll sample
-    // triggered a full ~1000-row × ~10-PID reformat — wasteful even on
-    // fast phones. The new sample appended each cycle is enough of an
-    // identity change to bypass the cache (sessionLog.size differs).
     val sessionLog = uiState.sessionLog
     val pidIds = uiState.pidIdsOnLiveData
-    val formattedText = androidx.compose.runtime.remember(
+    val loadedPids = uiState.loadedPids
+    val availablePids = com.protocol.app.openport2.Ssm2Pids.DEFAULT_DEMO_PIDS + loadedPids
+
+    // Bounded slice. Caching on sessionLog.size never hit while logging, so the
+    // whole session reformatted on the main thread every poll.
+    val previewText = androidx.compose.runtime.remember(
         sessionLog.size,
-        pidIds
+        pidIds,
+        loadedPids
     ) {
-        ProtocolLogFormatter.formatSessionLogCleanText(sessionLog, pidIds)
+        ProtocolLogFormatter.formatSessionLogCleanText(
+            if (sessionLog.size > SESSION_PREVIEW_ROWS)
+                sessionLog.subList(sessionLog.size - SESSION_PREVIEW_ROWS, sessionLog.size)
+            else sessionLog,
+            pidIds,
+            availablePids = availablePids
+        )
     }
 
     // User-resizable height, but only in edit mode (same long-press gesture
@@ -426,6 +504,7 @@ private fun SessionLogCard(
     var logHeightDp by remember(uiState.settings.sessionLogHeightDp) {
         mutableStateOf(uiState.settings.sessionLogHeightDp)
     }
+    val logHost = LocalFullscreenLogHost.current
 
     Card(
         shape = RoundedCornerShape(8.dp),
@@ -435,6 +514,25 @@ private fun SessionLogCard(
         border = BorderStroke(1.dp, lerp(BorderGray, Accent, flash.coerceIn(0f, 1f))),
         modifier = Modifier.fillMaxWidth()
     ) {
+        // Clear and Export live in the pinned bottom bar, so the tab is Expand
+        // only, hidden while locked.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                LogSource.Session.title,
+                color = Color.White,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
+            )
+            if (!locked) {
+                LogActionTab(onExpand = { logHost.source = LogSource.Session })
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -448,21 +546,20 @@ private fun SessionLogCard(
                     }
                 }
         ) {
+            // No scroll, no selection: the old horizontalScroll here consumed
+            // the pager's drag and trapped the user once the log filled up.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(10.dp)
-                    .verticalScroll(rememberScrollState())
             ) {
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                    Text(
-                        text = formattedText,
-                        color = Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        softWrap = false
-                    )
-                }
+                Text(
+                    text = previewText,
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    softWrap = false
+                )
             }
             // Resize grip — shown only in edit mode. Sits inside the card on its
             // bottom edge; drag it vertically to grow/shrink the log.
@@ -497,4 +594,6 @@ private fun SessionLogCard(
             }
         }
     }
+
+    // Expand names a source; the root overlay renders it. See LogSurface.kt.
 }

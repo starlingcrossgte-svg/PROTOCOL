@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +94,7 @@ fun ProtocolScreen(
     onPollingModeChange: (PollingMode) -> Unit,
     onPollIntervalChange: (Int) -> Unit,
     onSessionLogMaxChange: (Int) -> Unit,
+    onButtonFillChange: (Int) -> Unit,
     onDevModeChange: (Boolean) -> Unit,
     onSimulatorModeChange: (Boolean) -> Unit,
     onSimulatorPortChange: (Int) -> Unit,
@@ -104,6 +106,7 @@ fun ProtocolScreen(
     onSelectKernel: () -> Unit,
     onClearKernel: () -> Unit,
     onSelectDef: () -> Unit,
+    onClearDef: () -> Unit,
     onSelectKernelProtocol: (com.protocol.app.firmware.KernelProtocol) -> Unit,
     onSetKernelNeedsPrep: (Boolean) -> Unit,
     onWriteFirmware: (Boolean) -> Unit,
@@ -113,7 +116,15 @@ fun ProtocolScreen(
     onSelectProtocol: (BusProtocol?) -> Unit,
     onConnectAdapter: () -> Unit,
     onRunSequence: (List<String>, List<Long>, (Int, String) -> Unit) -> Unit,
-    onApplyPreset: (Int) -> Unit,
+    // ── user presets ──
+    onCreatePreset: () -> Unit,
+    onApplyUserPreset: (String) -> Unit,
+    onDeleteUserPreset: (String) -> Unit,
+    onToggleDraftPid: (String) -> Unit,
+    onCancelDraft: () -> Unit,
+    onDoneDraft: () -> Unit,
+    onSavePreset: (String) -> Unit,
+    onDismissPresetName: () -> Unit,
     onResizeSessionLog: (Float) -> Unit,
     onAutoSaveLogs: () -> Unit,
     onPickCsvFolder: () -> Unit,
@@ -125,11 +136,21 @@ fun ProtocolScreen(
     onDisconnectObdLink: () -> Unit,
     onResetAdapter: () -> Unit,
     onShareSavedSession: () -> Unit,
+    /** Report the current tap-loop state to a paired watch. No-op without one. */
+    onWatchState: (String) -> Unit = {},
+    /** Applies a preset staged from the watch bezel. True = the tap was used. */
+    onCommitStagedPreset: () -> Boolean = { false },
+    /** Returns true exactly once per watch-tap id. */
+    onConsumeRemoteTap: (Int) -> Boolean = { false },
     modifier: Modifier = Modifier
 ) {
     // Hoisted here so the user's currently-visible page (Home vs Live Data)
     // is preserved when they pop into a sub-page and back.
     val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
+
+    // The expanded-log overlay is the LAST child of the root Box below — the
+    // only un-inset, full-panel surface, which is what makes it edge to edge.
+    val fullscreenLogHost = remember { FullscreenLogHost() }
 
     // Sub-page BackHandler. LiveDataPage's edit-mode BackHandler is nested
     // deeper and stacks above this one when both could be relevant — but
@@ -214,6 +235,14 @@ fun ProtocolScreen(
             Canvas(modifier = Modifier.fillMaxSize()) { drawY2kBackgroundDecor(this) }
         }
 
+        // Provided here rather than threaded through the callback list. Log
+        // surfaces stay opaque simply by not reading LocalButtonFill.
+        CompositionLocalProvider(
+            LocalFullscreenLogHost provides fullscreenLogHost,
+            LocalButtonFill provides SurfaceBg.copy(
+                alpha = (uiState.settings.buttonFillPercent / 100f).coerceIn(0f, 1f)
+            )
+        ) {
         Column(modifier = Modifier
             .fillMaxSize()
             // Top inset = the status bar height, so content (and the gauges)
@@ -249,6 +278,7 @@ fun ProtocolScreen(
                                 onExportDtc = onExportDtc
                             )
                             1 -> HomePage(
+                                uiState = uiState,
                                 onOpenSubPage = onOpenSubPage
                             )
                             else -> LiveDataPage(
@@ -267,10 +297,20 @@ fun ProtocolScreen(
                                 onOpenParameters = { onOpenSubPage(SubPage.Parameters) },
                                 onOpenTcmParameters = { onOpenSubPage(SubPage.TcmParameters) },
                                 onOpenUnverified = { onOpenSubPage(SubPage.Unverified) },
-                                onOpenLiveDataSettings = { onOpenSubPage(SubPage.LiveDataSettings) },
-                                onApplyPreset = onApplyPreset,
+                                onOpenPresets = { onOpenSubPage(SubPage.Presets) },
+                                onResetLayout = onResetLayout,
                                 onResizeSessionLog = onResizeSessionLog,
-                                onAutoSaveLogs = onAutoSaveLogs
+                                onAutoSaveLogs = onAutoSaveLogs,
+                                onWatchState = onWatchState,
+                                onCommitStagedPreset = onCommitStagedPreset,
+                                onConsumeRemoteTap = onConsumeRemoteTap,
+                                // The pager keeps neighbouring pages composed, so
+                                // Live Data is alive even while Home is showing.
+                                // A watch tap must only act when it is genuinely
+                                // the visible page. (A sub-page being open is
+                                // already excluded — this branch only runs when
+                                // activeSubPage is null.)
+                                isVisiblePage = pagerState.currentPage == page
                             )
                         }
                     }
@@ -278,26 +318,39 @@ fun ProtocolScreen(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.ECU,
                         onTogglePid = onToggleGaugeForPid,
-                        onSelectDef = onSelectDef
+                        onSelectDef = onSelectDef,
+                        onClearDef = onClearDef,
+                        onToggleDraftPid = onToggleDraftPid,
+                        onCancelDraft = onCancelDraft,
+                        onDoneDraft = onDoneDraft
                     )
+                    // Draft selection works here too, so presets can hold TCM params.
                     SubPage.TcmParameters -> ParametersBody(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.TCM,
                         onTogglePid = onToggleGaugeForPid,
-                        onSelectDef = onSelectDef
+                        onSelectDef = onSelectDef,
+                        onClearDef = onClearDef,
+                        onToggleDraftPid = onToggleDraftPid,
+                        onCancelDraft = onCancelDraft,
+                        onDoneDraft = onDoneDraft
                     )
                     SubPage.Unverified -> ParametersBody(
                         uiState = uiState,
                         category = com.protocol.app.openport2.Ssm2PidCategory.ECU,
                         onTogglePid = onToggleGaugeForPid,
                         onSelectDef = onSelectDef,
-                        showUnverified = true
+                        onClearDef = onClearDef,
+                        showUnverified = true,
+                        onToggleDraftPid = onToggleDraftPid,
+                        onCancelDraft = onCancelDraft,
+                        onDoneDraft = onDoneDraft
                     )
-                    SubPage.LiveDataSettings -> LiveDataSettingsBody(
+                    SubPage.Presets -> PresetsBody(
                         uiState = uiState,
-                        onSessionLogMaxChange = onSessionLogMaxChange,
-                        onResetLayout = onResetLayout,
-                        onShareSavedSession = onShareSavedSession
+                        onCreatePreset = onCreatePreset,
+                        onApplyPreset = onApplyUserPreset,
+                        onDeletePreset = onDeleteUserPreset
                     )
                     SubPage.Settings -> SettingsBody(
                         uiState = uiState,
@@ -305,6 +358,9 @@ fun ProtocolScreen(
                         onProtocolChange = onProtocolChange,
                         onPollingModeChange = onPollingModeChange,
                         onPollIntervalChange = onPollIntervalChange,
+                        onSessionLogMaxChange = onSessionLogMaxChange,
+                        onButtonFillChange = onButtonFillChange,
+                        onShareSavedSession = onShareSavedSession,
                         onDisconnectObdLink = onDisconnectObdLink,
                         onResetAdapter = onResetAdapter,
                         onPickBackground = onPickBackground,
@@ -328,6 +384,8 @@ fun ProtocolScreen(
                     )
                     SubPage.Tuning ->
                         StubBody(page = uiState.activeSubPage)
+                    SubPage.TableEditor -> TableEditorBody()
+                    SubPage.Navigation -> NavigationBody()
                     SubPage.Notices -> NoticesBody()
                     SubPage.Library -> LibraryBody()
                     SubPage.Developer -> DeveloperBody(
@@ -347,6 +405,7 @@ fun ProtocolScreen(
                     )
                 }
             }
+        }
         }
 
         // Side edges: the connection-status + lock indicator (3 dp, replaces
@@ -383,5 +442,25 @@ fun ProtocolScreen(
                     }
                 }
         )
+
+        // LAST child, so an expanded log covers the pages, photo and stripes.
+        FullscreenLogOverlay(
+            host = fullscreenLogHost,
+            uiState = uiState,
+            onClearSessionLog = onClearSessionLog,
+            onExportSessionLog = onExportSessionLog,
+            onClearDtc = onClearDtc,
+            onExportDtc = onExportDtc
+        )
+
+        // At the root so the parameter list cannot scroll it away.
+        val draft = uiState.presetDraft
+        if (draft != null && draft.awaitingName) {
+            PresetNameDialog(
+                count = draft.pidIds.size,
+                onDismiss = onDismissPresetName,
+                onSave = onSavePreset
+            )
+        }
     }
 }

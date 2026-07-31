@@ -1,0 +1,79 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// Wear OS companion app. Deliberately built against the SAME toolchain and the
+// SAME Compose BOM as :app — no separate versions to keep in step.
+//
+// compileSdk/targetSdk stay at 34 rather than 36 (Wear OS 6). Targeting 36
+// would force an upgrade of AGP, Kotlin, the Compose compiler and Gradle across
+// the whole project; an app built against 34 installs and runs on a Wear OS 6
+// watch regardless. targetSdk governs opt-in behaviour and store policy, not
+// device compatibility, and this app is sideloaded.
+//
+// minSdk 30 = Wear OS 3, the oldest Wear OS built on modern Android.
+
+android {
+    namespace 'com.protocol.wear'
+    compileSdk 34
+
+    defaultConfig {
+        // MUST match :app. The Data Layer routes messages only between apps
+        // sharing an applicationId and signing key — a mismatch fails silently:
+        // both sides connect, taps send, nothing ever arrives. The two live on
+        // different devices, so there is no install conflict.
+        // (namespace stays com.protocol.wear — that is the Kotlin/R namespace,
+        // not the install identity.)
+        applicationId "com.protocol.app"
+        minSdk 30
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        debug {
+            debuggable true
+        }
+    }
+}
+
+dependencies {
+    implementation "androidx.core:core-ktx:1.12.0"
+    implementation "androidx.activity:activity-compose:1.8.2"
+
+    // Same BOM as :app so the Compose versions cannot drift apart.
+    implementation platform("androidx.compose:compose-bom:2023.10.01")
+    implementation "androidx.compose.ui:ui"
+    implementation "androidx.compose.foundation:foundation"
+    implementation "androidx.compose.material3:material3"
+
+    implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.6.2"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+
+    // Phone <-> watch messaging. The only dependency this feature adds, and the
+    // only one available for the job: a Wear app cannot open its own Bluetooth
+    // socket to the phone. Pinned below the releases that require compileSdk 35+.
+    implementation "com.google.android.gms:play-services-wearable:18.2.0"
+}

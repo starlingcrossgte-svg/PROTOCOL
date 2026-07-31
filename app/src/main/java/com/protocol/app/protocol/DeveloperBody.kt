@@ -120,7 +120,7 @@ internal fun DeveloperBody(
     LaunchedEffect(Unit) { onDevModeChange(true) }
     // Transport log (USB + OBDLink) + its CSV export — both shared with the Flash
     // silo via the helpers below, so the two pages render the same TRANSPORT card.
-    val merged = rememberMergedTransportLog()
+    val merged = rememberMergedTransportLog(LOG_PREVIEW_LINES)
     val exportLog = rememberTransportLogExport()
 
     Column(
@@ -158,10 +158,15 @@ internal fun DeveloperBody(
         // Combined transport log (USB + OBDLink), newest at the bottom. The
         // "TRANSPORT" label + Clear / Export live inside the card's top row
         // (no separate header above it).
+        // Proportional, not weight: the page must keep scrolling because the
+        // sequence generator expands to ten rows.
+        val logHeight = (LocalConfiguration.current.screenHeightDp * 0.34f)
+            .dp.coerceIn(200.dp, 420.dp)
         CombinedLogCard(
             lines = merged,
             onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
-            onExportCsv = { exportLog(merged, "protocol-traffic.csv") }
+            onExportCsv = { exportLog(merged, "protocol-traffic.csv") },
+            compactHeight = logHeight
         )
 
         // Action buttons below the log, above the manual command box — two rows
@@ -217,7 +222,7 @@ private fun ManualCommandRow(family: CommandFamily, onSend: (String) -> Unit) {
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
             .clip(shape)
-            .background(SurfaceBg, shape)
+            .background(LocalButtonFill.current, shape)
             .border(1.dp, Accent, shape),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -358,7 +363,7 @@ private fun CommandPalette(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(340.dp)
-                    .background(SurfaceBg)
+                    .background(LocalButtonFill.current)
             ) {
                 grouped.forEach { (group, cmds) ->
                     if (group.isNotBlank()) {
@@ -439,7 +444,7 @@ private fun AdapterButton(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceBg)
+            .background(LocalButtonFill.current)
             .border(1.dp, line, RoundedCornerShape(8.dp))
             .clickable { onSelect(if (isSelected) null else adapter) }
             .padding(vertical = 12.dp),
@@ -467,7 +472,7 @@ internal fun DevActionButton(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceBg)
+            .background(LocalButtonFill.current)
             .border(1.dp, border, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
@@ -506,7 +511,7 @@ private fun InitDropdown(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { open = !open }
-                .background(SurfaceBg)
+                .background(LocalButtonFill.current)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -586,95 +591,77 @@ private fun InitDropdown(
     }
 }
 
-// One thin segment of the RAW BYTES log's top-right action tab. White label,
-// small padding so the tab stays slim. Mirrors the Live Data SegmentButton.
-@Composable
-internal fun LogTabButton(text: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxHeight()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text,
-            color = Color.White,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.bodySmall
-        )
-    }
-}
-
-internal data class LogLine(
-    val ts: Long,
-    val isOut: Boolean,
-    val payload: String,        // hex (USB) or ASCII text (OBDLink)
-    val byteCount: Int? = null, // USB only
-    val ascii: String? = null   // USB only — printable rendering of the bytes
-)
-
+/** Transport log card (dev console + ROM page). Inline = preview only; see
+ *  LogSurface.kt. Caller supplies [lines] already trimmed. */
 @Composable
 internal fun CombinedLogCard(
+    title: String = "TRANSPORT",
     lines: List<LogLine>,
     onClear: () -> Unit,
     onExportCsv: () -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth(),
-    // null → the log fills the card's remaining height (scrollable); a value →
-    // fixed compact inline height (the Dev console default).
+    /** Identity of the module these bytes came from. Shown full screen so an
+     *  exported capture can still be attributed to a car later. */
+    ecuSubtitle: String? = null,
+    // null → the log fills the card's remaining height; a value → fixed compact
+    // inline height (the Dev console default).
     compactHeight: Dp? = 200.dp
 ) {
+    val logHost = LocalFullscreenLogHost.current
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF14161A)),
         border = BorderStroke(1.dp, BorderGray),
         modifier = modifier
     ) {
-        // "TRANSPORT" label on the left + the Clear / Export folder-tab on
-        // the log's inner top-right corner (replaces the old header above the card).
+        // Title on the left + the Clear / Export / Expand folder-tab on the
+        // log's inner top-right corner (replaces the old header above the card).
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "TRANSPORT",
-                color = Color.White,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(start = 12.dp)
-            )
-            val tabShape = RoundedCornerShape(bottomStart = 10.dp)
-            Row(
-                modifier = Modifier
-                    .height(IntrinsicSize.Min)
-                    .clip(tabShape)
-                    .background(SurfaceAlt, tabShape),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                LogTabButton("Clear", onClear)
-                Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White))
-                LogTabButton("Export", onExportCsv)
+            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(
+                    title,
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (ecuSubtitle != null) {
+                    Text(
+                        ecuSubtitle,
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
+            LogActionTab(
+                onClear = onClear,
+                onExport = onExportCsv,
+                onExpand = { logHost.source = LogSource.Transport }
+            )
         }
         if (compactHeight != null) {
-            LogList(lines = lines, height = compactHeight, userScrollEnabled = false)
+            LogList(lines = lines, height = compactHeight)
         } else {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                LogList(lines = lines, height = null, userScrollEnabled = true)
+                LogList(lines = lines, height = null)
             }
         }
     }
 }
 
-// Scrollable, selectable list of log lines, snapped to the newest. Shared by
-// the compact card (fixed [height]) and the fullscreen view ([height] = null →
-// fills its parent). An instant snap (no animation) avoids fighting the pager's
-// horizontal swipe when this page scrolls into view.
+/** Log lines, snapped to newest. [interactive] false inline so gestures pass
+ *  through to the page; true full screen. */
 @Composable
-internal fun LogList(lines: List<LogLine>, height: Dp?, userScrollEnabled: Boolean = true) {
+internal fun LogList(
+    lines: List<LogLine>,
+    height: Dp?,
+    interactive: Boolean = false
+) {
     val listState = rememberLazyListState()
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
@@ -683,7 +670,7 @@ internal fun LogList(lines: List<LogLine>, height: Dp?, userScrollEnabled: Boole
     if (lines.isEmpty()) {
         Box(modifier = sizeMod.padding(12.dp), contentAlignment = Alignment.Center) {
             Text(
-                "No traffic yet. Connect an adapter (or arm the Emulator) and Read Live Data.",
+                "No traffic yet. Connect an adapter, or arm the emulator, then start a read.",
                 color = NeutralGray,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
@@ -691,15 +678,17 @@ internal fun LogList(lines: List<LogLine>, height: Dp?, userScrollEnabled: Boole
         }
         return
     }
-    SelectionContainer {
+    val list = @Composable {
         LazyColumn(
             state = listState,
-            userScrollEnabled = userScrollEnabled,
+            userScrollEnabled = interactive,
             modifier = sizeMod.padding(8.dp)
         ) {
             items(lines) { line -> CombinedLogRow(line) }
         }
     }
+    // SelectionContainer's long-press would compete with the page inline.
+    if (interactive) SelectionContainer { list() } else list()
 }
 
 @Composable
@@ -782,7 +771,7 @@ internal fun ProtocolToggleButton(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceBg)
+            .background(LocalButtonFill.current)
             .border(1.dp, line, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
@@ -820,7 +809,7 @@ private fun EmulatorDropdown(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { open = !open }
-                .background(SurfaceBg)
+                .background(LocalButtonFill.current)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -874,7 +863,7 @@ private fun EmulatorDropdown(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(SurfaceBg)
+                            .background(LocalButtonFill.current)
                             .border(1.dp, BorderGray, RoundedCornerShape(6.dp))
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     )
@@ -927,7 +916,7 @@ private fun SequenceGenerator(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { open = !open }
-                    .background(SurfaceBg)
+                    .background(LocalButtonFill.current)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -1001,7 +990,7 @@ private fun SequenceRow(
                 .fillMaxWidth()
                 .height(IntrinsicSize.Min)
                 .clip(RoundedCornerShape(6.dp))
-                .background(SurfaceBg)
+                .background(LocalButtonFill.current)
                 .border(1.dp, BorderGray, RoundedCornerShape(6.dp)),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1075,7 +1064,7 @@ private fun SequenceRow(
                     .width(94.dp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(SurfaceBg)
+                    .background(LocalButtonFill.current)
                     .border(1.dp, BorderGray, RoundedCornerShape(6.dp))
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1132,25 +1121,7 @@ private fun formatCombined(lines: List<LogLine>): String =
 // These helpers keep that single source of truth in one place so neither page
 // duplicates the snapshot/merge or the SAF save plumbing.
 
-/** Process-wide USB + OBDLink traffic merged into one time-ordered list.
- *  Recomposes only when either ring buffer's revision bumps; the O(n) snapshot
- *  copy stays off the wire-recording hot path. */
-@Composable
-internal fun rememberMergedTransportLog(): List<LogLine> {
-    val usbRevision by UsbTrafficLog.revision.collectAsState()
-    val btRevision by ObdLinkTrafficLog.revision.collectAsState()
-    return remember(usbRevision, btRevision) {
-        val trafficEvents = UsbTrafficLog.snapshot()
-        val btEvents = ObdLinkTrafficLog.snapshot()
-        val lines = ArrayList<LogLine>(trafficEvents.size + btEvents.size)
-        for (e in trafficEvents)
-            lines.add(LogLine(e.timestampMs, e.direction == TrafficEvent.Direction.OUT, e.hex, e.byteCount, e.ascii))
-        for (e in btEvents)
-            lines.add(LogLine(e.timestampMs, e.direction == ObdLinkTrafficEvent.Direction.OUT, e.text, e.text.length))
-        lines.sortBy { it.ts }
-        lines
-    }
-}
+// rememberMergedTransportLog lives in LogSurface.kt.
 
 /** SAF "create document" CSV export for a transport log. Returns a lambda: call
  *  it with the lines to save + a suggested filename, and the system save dialog

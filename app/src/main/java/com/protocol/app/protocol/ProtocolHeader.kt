@@ -40,10 +40,8 @@ internal fun HamburgerMenu(
     onOpenParameters: () -> Unit,
     onOpenTcmParameters: () -> Unit,
     onOpenUnverified: () -> Unit,
-    onOpenLiveDataSettings: () -> Unit,
-    onApplyPreset: (Int) -> Unit = {},
-    devMode: Boolean = false,
-    selectedPresetIndex: Int = -1,
+    onOpenPresets: () -> Unit = {},
+    onResetLayout: () -> Unit = {},
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -73,20 +71,6 @@ internal fun HamburgerMenu(
                 .background(SurfaceBg)
                 .border(BorderStroke(1.dp, Accent))
         ) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        "Live Data Settings",
-                        color = Color.White,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    onOpenLiveDataSettings()
-                }
-            )
             DropdownMenuItem(
                 text = {
                     Text(
@@ -129,37 +113,35 @@ internal fun HamburgerMenu(
                     onOpenUnverified()
                 }
             )
-            // Dev-only: quick PID presets, one row each. Selecting one replaces
-            // the Live Data gauges with that preset's parameters; the active
-            // preset is marked (▸) and remembered across restarts.
-            if (devMode && PidPresets.PRESETS.isNotEmpty()) {
-                Text(
-                    "PID PRESETS",
-                    color = AccentDim,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-                PidPresets.PRESETS.forEachIndexed { index, preset ->
-                    val isSelected = index == selectedPresetIndex
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                (if (isSelected) "▸ " else "    ") +
-                                    "${preset.label}  (${preset.pidIds.size})",
-                                color = Color.White,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
-                            )
-                        },
-                        onClick = {
-                            expanded = false
-                            onApplyPreset(index)
-                        }
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "Presets",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
                     )
+                },
+                onClick = {
+                    expanded = false
+                    onOpenPresets()
                 }
-            }
+            )
+            // Standalone action, not a destination.
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "Reset Layout",
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onResetLayout()
+                }
+            )
         }
     }
 }

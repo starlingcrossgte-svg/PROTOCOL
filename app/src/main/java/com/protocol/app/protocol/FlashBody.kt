@@ -46,9 +46,9 @@ internal fun FlashBody(
     onWriteFirmware: (Boolean) -> Unit
 ) {
     val s = uiState.settings
-    // Shared TRANSPORT log + CSV export (defined in DeveloperBody) — same readout
-    // both pages render, so flash progress and proof capture live in one place.
-    val merged = rememberMergedTransportLog()
+    // Tail cap matters most here: this log is fed by a multi-megabyte transfer,
+    // and an unbounded main-thread merge is an ANR mid write.
+    val merged = rememberMergedTransportLog(LOG_PREVIEW_LINES)
     val exportLog = rememberTransportLogExport()
 
     val kernelName = s.kernelUri?.let {
@@ -71,6 +71,7 @@ internal fun FlashBody(
         // Log owns the top — fills all the space above the controls (scrollable),
         // so flash progress is the focus. compactHeight = null = fill mode.
         CombinedLogCard(
+            title = "FIRMWARE",
             lines = merged,
             onClear = { UsbTrafficLog.clear(); ObdLinkTrafficLog.clear() },
             onExportCsv = { exportLog(merged, "protocol-flash.csv") },
@@ -124,7 +125,7 @@ private fun FilePickerRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceBg)
+            .background(LocalButtonFill.current)
             .border(1.dp, Accent, RoundedCornerShape(8.dp)),
         verticalAlignment = Alignment.CenterVertically
     ) {

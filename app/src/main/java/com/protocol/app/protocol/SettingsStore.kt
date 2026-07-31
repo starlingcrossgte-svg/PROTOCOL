@@ -30,6 +30,11 @@ data class AppSettings(
     val pollingMode: PollingMode = PollingMode.Poll,
     val simulatorMode: Boolean = false,
     val simulatorPort: Int = DEFAULT_SIMULATOR_PORT,
+    /** Button fill opacity 0..100. Borders and text unaffected; logs ignore it. */
+    val buttonFillPercent: Int = DEFAULT_BUTTON_FILL,
+    /** Home buttons pulse until visited. */
+    val visitedHowToUse: Boolean = false,
+    val visitedNotices: Boolean = false,
     /** SAF tree URI (as String) of the folder CSV logs are saved into by the
      *  Lock-and-Tap auto-save. Null = not chosen yet (auto-save is skipped). */
     val csvFolderUri: String? = null,
@@ -42,9 +47,6 @@ data class AppSettings(
     /** Height (dp) of the Live Data session-log card. Persisted so a resize
      *  survives an app restart, not just rotation. */
     val sessionLogHeightDp: Float = DEFAULT_SESSION_LOG_HEIGHT_DP,
-    /** Index into PidPresets.PRESETS of the last preset loaded onto the Live
-     *  Data gauges, or [NO_PRESET] if none. Dev-only. */
-    val selectedPresetIndex: Int = NO_PRESET,
     /** Id of the chosen AdapterCommandLibrary sequence (null = library default).
      *  DEV-ONLY: consulted only when connecting from the Dev page CONNECT button.
      *  Live Data always connects with the verified standard init, never this. */
@@ -80,6 +82,11 @@ data class AppSettings(
      *  parameters are merged into the live list. Null = none loaded (built-in
      *  parameters only). Never bundled; read through the ContentResolver. */
     val loggerDefUri: String? = null,
+    /** Human-readable name of the loaded definition, resolved from the content
+     *  provider when the file is picked. A document URI's last path segment is a
+     *  provider-specific document id, not a filename, so the name is resolved once
+     *  at pick time and kept here rather than derived from the URI. */
+    val loggerDefName: String? = null,
 ) {
     companion object {
         const val DEFAULT_POLL_INTERVAL_MS = 200
@@ -96,7 +103,9 @@ data class AppSettings(
         const val DEFAULT_SESSION_LOG_HEIGHT_DP = 300f
         const val SESSION_LOG_HEIGHT_MIN = 120f
         const val SESSION_LOG_HEIGHT_MAX = 800f
-        const val NO_PRESET = -1
+        const val DEFAULT_BUTTON_FILL = 100
+        const val BUTTON_FILL_MIN = 0
+        const val BUTTON_FILL_MAX = 100
     }
 }
 
@@ -116,13 +125,15 @@ class SettingsStore(context: Context) {
         pollingMode = PollingMode.values().getOrNull(prefs.getInt(KEY_POLLING_MODE, 0)) ?: PollingMode.Poll,
         simulatorMode = prefs.getBoolean(KEY_SIMULATOR_MODE, false),
         simulatorPort = prefs.getInt(KEY_SIMULATOR_PORT, AppSettings.DEFAULT_SIMULATOR_PORT),
+        buttonFillPercent = prefs.getInt(KEY_BUTTON_FILL, AppSettings.DEFAULT_BUTTON_FILL),
+        visitedHowToUse = prefs.getBoolean(KEY_VISITED_HOWTO, false),
+        visitedNotices = prefs.getBoolean(KEY_VISITED_NOTICES, false),
         csvFolderUri = prefs.getString(KEY_CSV_FOLDER, null),
         rawLogName = prefs.getString(KEY_RAW_LOG_NAME, AppSettings.DEFAULT_RAW_LOG_NAME)
             ?: AppSettings.DEFAULT_RAW_LOG_NAME,
         sessionLogName = prefs.getString(KEY_SESSION_LOG_NAME, AppSettings.DEFAULT_SESSION_LOG_NAME)
             ?: AppSettings.DEFAULT_SESSION_LOG_NAME,
         sessionLogHeightDp = prefs.getFloat(KEY_SESSION_LOG_HEIGHT, AppSettings.DEFAULT_SESSION_LOG_HEIGHT_DP),
-        selectedPresetIndex = prefs.getInt(KEY_SELECTED_PRESET, AppSettings.NO_PRESET),
         selectedInitSequenceId = prefs.getString(KEY_INIT_SEQ, null),
         kernelUri = prefs.getString(KEY_KERNEL_URI, null),
         kernelProtocol = KernelProtocol.values().getOrNull(prefs.getInt(KEY_KERNEL_PROTOCOL, 0)) ?: KernelProtocol.BARE,
@@ -131,7 +142,8 @@ class SettingsStore(context: Context) {
         kernelFolderUri = prefs.getString(KEY_KERNEL_FOLDER, null),
         romFolderUri = prefs.getString(KEY_ROM_FOLDER, null),
         flashTestMode = prefs.getBoolean(KEY_FLASH_TEST_MODE, true),
-        loggerDefUri = prefs.getString(KEY_LOGGER_DEF_URI, null)
+        loggerDefUri = prefs.getString(KEY_LOGGER_DEF_URI, null),
+        loggerDefName = prefs.getString(KEY_LOGGER_DEF_NAME, null)
     )
 
     fun save(s: AppSettings) {
@@ -146,11 +158,13 @@ class SettingsStore(context: Context) {
             .putInt(KEY_POLLING_MODE, s.pollingMode.ordinal)
             .putBoolean(KEY_SIMULATOR_MODE, s.simulatorMode)
             .putInt(KEY_SIMULATOR_PORT, s.simulatorPort)
+            .putInt(KEY_BUTTON_FILL, s.buttonFillPercent)
+            .putBoolean(KEY_VISITED_HOWTO, s.visitedHowToUse)
+            .putBoolean(KEY_VISITED_NOTICES, s.visitedNotices)
             .putString(KEY_CSV_FOLDER, s.csvFolderUri)
             .putString(KEY_RAW_LOG_NAME, s.rawLogName)
             .putString(KEY_SESSION_LOG_NAME, s.sessionLogName)
             .putFloat(KEY_SESSION_LOG_HEIGHT, s.sessionLogHeightDp)
-            .putInt(KEY_SELECTED_PRESET, s.selectedPresetIndex)
             .putString(KEY_INIT_SEQ, s.selectedInitSequenceId)
             .putString(KEY_KERNEL_URI, s.kernelUri)
             .putInt(KEY_KERNEL_PROTOCOL, s.kernelProtocol.ordinal)
@@ -160,6 +174,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_ROM_FOLDER, s.romFolderUri)
             .putBoolean(KEY_FLASH_TEST_MODE, s.flashTestMode)
             .putString(KEY_LOGGER_DEF_URI, s.loggerDefUri)
+            .putString(KEY_LOGGER_DEF_NAME, s.loggerDefName)
             .apply()
     }
 
@@ -175,11 +190,13 @@ class SettingsStore(context: Context) {
         private const val KEY_POLLING_MODE = "polling_mode"
         private const val KEY_SIMULATOR_MODE = "simulator_mode"
         private const val KEY_SIMULATOR_PORT = "simulator_port"
+        private const val KEY_BUTTON_FILL = "button_fill_percent"
+        private const val KEY_VISITED_HOWTO = "visited_how_to_use"
+        private const val KEY_VISITED_NOTICES = "visited_notices"
         private const val KEY_CSV_FOLDER = "csv_folder_uri"
         private const val KEY_RAW_LOG_NAME = "csv_raw_log_name"
         private const val KEY_SESSION_LOG_NAME = "csv_session_log_name"
         private const val KEY_SESSION_LOG_HEIGHT = "session_log_height_dp"
-        private const val KEY_SELECTED_PRESET = "selected_preset_index"
         private const val KEY_INIT_SEQ = "selected_init_sequence_id"
         private const val KEY_KERNEL_URI = "kernel_uri"
         private const val KEY_KERNEL_PROTOCOL = "kernel_protocol"
@@ -189,5 +206,6 @@ class SettingsStore(context: Context) {
         private const val KEY_ROM_FOLDER = "rom_folder_uri"
         private const val KEY_FLASH_TEST_MODE = "flash_test_mode"
         private const val KEY_LOGGER_DEF_URI = "logger_def_uri"
+        private const val KEY_LOGGER_DEF_NAME = "logger_def_name"
     }
 }

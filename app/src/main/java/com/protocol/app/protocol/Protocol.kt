@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -20,6 +21,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import com.google.android.gms.wearable.MessageClient
+import com.google.android.gms.wearable.Wearable
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import java.io.File
@@ -63,6 +66,19 @@ private class OpenDocumentInFolder(
 class Protocol : ComponentActivity() {
 
     companion object {
+        /** Watch -> phone: one tap, no payload. The phone decides what it means.
+         *  These two paths must match `WatchTapActivity` in the :wear module. */
+        const val WATCH_PATH_TAP = "/protocol/tap"
+
+        /** Watch -> phone: step the staged preset. Payload is a signed step
+         *  count as UTF-8 text, so one message can carry several detents if the
+         *  wrist moved faster than the link. */
+        const val WATCH_PATH_PRESET = "/protocol/preset"
+
+        /** Phone -> watch: the current state name, UTF-8. When a preset is
+         *  staged, the staged name follows after a '|'. */
+        const val WATCH_PATH_STATE = "/protocol/state"
+
         private const val TACTRIX_VENDOR_ID = 1027
         private const val TACTRIX_PRODUCT_ID = 52301
         private const val ACTION_USB_PERMISSION =
@@ -225,9 +241,25 @@ class Protocol : ComponentActivity() {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
         }
-        viewModel.loadLoggerDef(applicationContext, uri.toString())
+        viewModel.loadLoggerDef(applicationContext, uri.toString(), queryDisplayName(uri))
         Toast.makeText(this, "Loading parameter definition…", Toast.LENGTH_SHORT).show()
     }
+
+    /**
+     * Human-readable name for a document URI, asked of the provider that owns it.
+     * The URI's own last path segment is a provider-specific document id (a
+     * Downloads pick yields something like "msf:1000000123"), so it cannot stand
+     * in for a filename. Null when the provider offers no name.
+     */
+    private fun queryDisplayName(uri: Uri): String? =
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val i = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (i >= 0 && cursor.moveToFirst() && !cursor.isNull(i)) cursor.getString(i) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
 
     // Dev Mode → SELECT KERNEL FILE. SAF single-document picker; the chosen RAM
     // kernel image (built separately, NEVER bundled in the APK) is persisted as a
@@ -537,6 +569,17 @@ class Protocol : ComponentActivity() {
         viewModel.attachLayoutStore(GaugeLayoutStore(applicationContext))
         viewModel.attachBackgroundStore(BackgroundStore(applicationContext))
         viewModel.attachSettingsStore(SettingsStore(applicationContext))
+        // Presets are filed under the fingerprint of the parameter set they were
+        // built against, so this must come BEFORE the definition is restored:
+        // restoring calls back into the store to swap in that definition's own
+        // presets, and with no store attached that call would do nothing and the
+        // user would open a definition they have used for months to an empty
+        // preset list.
+        viewModel.attachPresetStore(PresetStore(applicationContext))
+        // Settings carry only the definition's URI; the parsed parameters live in
+        // memory, so re-read the chosen file now or the app starts with a
+        // definition that looks loaded and supplies nothing.
+        viewModel.restoreLoggerDef(applicationContext)
         sessionLogStore = SessionLogStore(applicationContext)
         viewModel.attachSessionLogStore(sessionLogStore)
 
@@ -596,6 +639,7 @@ class Protocol : ComponentActivity() {
                     onPollingModeChange = { mode -> viewModel.setPollingMode(mode) },
                     onPollIntervalChange = { ms -> viewModel.setPollIntervalMs(ms) },
                     onSessionLogMaxChange = { rows -> viewModel.setSessionLogMaxSize(rows) },
+                    onButtonFillChange = { pct -> viewModel.setButtonFillPercent(pct) },
                     onDevModeChange = { on -> viewModel.setDevMode(on) },
                     onSimulatorModeChange = { on -> viewModel.setSimulatorMode(on) },
                     onSimulatorPortChange = { port -> viewModel.setSimulatorPort(port) },
@@ -606,6 +650,7 @@ class Protocol : ComponentActivity() {
                     onReadFirmware = { viewModel.devConsole.runFirmwareRead(applicationContext) },
                     onSelectKernel = { pickKernelLauncher.launch(arrayOf("*/*")) },
                     onSelectDef = { pickLoggerDefLauncher.launch(arrayOf("*/*")) },
+                    onClearDef = { viewModel.clearLoggerDef() },
                     onClearKernel = { clearSelectedKernel() },
                     onSelectKernelProtocol = { p -> viewModel.setKernelProtocol(p) },
                     onSetKernelNeedsPrep = { b -> viewModel.setKernelNeedsPrep(b) },
@@ -616,7 +661,14 @@ class Protocol : ComponentActivity() {
                     onSelectProtocol = { p -> viewModel.setProtocol(p) },
                     onConnectAdapter = { connectSelectedAdapter() },
                     onRunSequence = { cmds, delays, cb -> viewModel.devConsole.runManualSequence(cmds, delays, cb) },
-                    onApplyPreset = { i -> viewModel.applyPreset(i) },
+                    onCreatePreset = { viewModel.beginPresetDraft() },
+                    onApplyUserPreset = { id -> viewModel.applyUserPreset(id) },
+                    onDeleteUserPreset = { id -> viewModel.deleteUserPreset(id) },
+                    onToggleDraftPid = { id -> viewModel.togglePresetDraftPid(id) },
+                    onCancelDraft = { viewModel.cancelPresetDraft() },
+                    onDoneDraft = { viewModel.requestPresetName() },
+                    onSavePreset = { name -> viewModel.commitPresetDraft(name) },
+                    onDismissPresetName = { viewModel.dismissPresetName() },
                     onResizeSessionLog = { dp -> viewModel.setSessionLogHeightDp(dp) },
                     onAutoSaveLogs = { autoSaveBothLogs() },
                     onPickCsvFolder = { launchPickCsvFolder() },
@@ -627,7 +679,10 @@ class Protocol : ComponentActivity() {
                     onResetLayout = { viewModel.resetLayout() },
                     onDisconnectObdLink = { viewModel.disconnectObdLink() },
                     onResetAdapter = { viewModel.devConsole.resetObdLinkAdapter(applicationContext) },
-                    onShareSavedSession = { launchShareSavedSession() }
+                    onShareSavedSession = { launchShareSavedSession() },
+                    onWatchState = { state -> sendWatchState(state) },
+                    onCommitStagedPreset = { viewModel.commitStagedPreset() },
+                    onConsumeRemoteTap = { id -> viewModel.consumeRemoteTap(id) }
                 )
                 if (!disclaimerAcknowledged) {
                     StartupDisclaimerGate(onAcknowledge = { disclaimerAcknowledged = true })
@@ -646,6 +701,54 @@ class Protocol : ComponentActivity() {
     override fun onStop() {
         unregisterReceiverSafely()
         super.onStop()
+    }
+
+    // --- watch remote ---------------------------------------------------------
+    // Listening only while the app is in front. A manifest-declared service
+    // would listen with the app closed, which is both a wasted battery drain and
+    // an exported entry point that could start logging unprompted. The remote is
+    // only meaningful with Live Data on screen, so the Activity is the right
+    // scope for it.
+
+    override fun onResume() {
+        super.onResume()
+        runCatching { Wearable.getMessageClient(this).addListener(watchTapListener) }
+    }
+
+    override fun onPause() {
+        runCatching { Wearable.getMessageClient(this).removeListener(watchTapListener) }
+        super.onPause()
+    }
+
+    /** A tap from the watch enters the app through exactly one door. */
+    private val watchTapListener = MessageClient.OnMessageReceivedListener { event ->
+        when (event.path) {
+            WATCH_PATH_TAP -> viewModel.onRemoteTap()
+            // A bezel step only stages a choice. The tap above is what applies
+            // it, which is why this path never touches the gauges itself.
+            WATCH_PATH_PRESET -> {
+                val steps = String(event.data, Charsets.UTF_8).trim().toIntOrNull()
+                if (steps != null) viewModel.stepStagedPreset(steps)
+            }
+        }
+    }
+
+    /**
+     * Push the current state to the watch so its face reflects the phone rather
+     * than guessing. Fire-and-forget: a failure means the watch is out of range,
+     * which costs the remote and nothing else.
+     */
+    private fun sendWatchState(state: String) {
+        val payload = state.toByteArray(Charsets.UTF_8)
+        runCatching {
+            val messages = Wearable.getMessageClient(this)
+            Wearable.getNodeClient(this).connectedNodes
+                .addOnSuccessListener { nodes ->
+                    for (node in nodes) {
+                        messages.sendMessage(node.id, WATCH_PATH_STATE, payload)
+                    }
+                }
+        }
     }
 
     override fun onDestroy() {

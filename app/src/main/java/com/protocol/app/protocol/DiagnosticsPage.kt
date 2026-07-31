@@ -52,6 +52,11 @@ internal fun DiagnosticsPage(
     onResetDtc: () -> Unit,
     onExportDtc: () -> Unit
 ) {
+    // Expand hands the codes to the one full screen log viewer, where they can
+    // be scrolled, highlighted and copied. Inline they are a preview only, like
+    // every other log in the app (see LogSurface.kt).
+    val logHost = LocalFullscreenLogHost.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -71,18 +76,11 @@ internal fun DiagnosticsPage(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val tabShape = RoundedCornerShape(bottomStart = 10.dp)
-                Row(
-                    modifier = Modifier
-                        .height(IntrinsicSize.Min)
-                        .clip(tabShape)
-                        .background(SurfaceAlt, tabShape),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    LogTabButton("Clear", onClearDtc)
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(Color.White))
-                    LogTabButton("Export", onExportDtc)
-                }
+                LogActionTab(
+                    onClear = onClearDtc,
+                    onExport = onExportDtc,
+                    onExpand = { logHost.source = LogSource.Codes }
+                )
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 DtcContent(uiState)
@@ -122,15 +120,21 @@ internal fun DiagnosticsPage(
 
 private const val RESET_ARM_TIMEOUT_MS = 4000L
 
-// The scrollable decoded-code body — shown in the card and the root fullscreen.
+/**
+ * The decoded-code body, rendered both in the inline card and full screen.
+ *
+ * [interactive] gates the scroll for the same reason it does on every other log:
+ * inline this sits inside a horizontal pager, and a scrollable preview would eat
+ * drags meant for the page. Full screen there is nothing to compete with.
+ */
 @Composable
-internal fun DtcContent(uiState: ProtocolUiState) {
+internal fun DtcContent(uiState: ProtocolUiState, interactive: Boolean = false) {
     val scroll = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(10.dp)
-            .verticalScroll(scroll),
+            .verticalScroll(scroll, enabled = interactive),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         if (uiState.dtcStatus.isNotEmpty()) {

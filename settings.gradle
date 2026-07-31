@@ -16,3 +16,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "PROTOCOL"
 include ':app'
+// Wear OS companion — a remote for the Live Data tap loop. Optional: the phone
+// app is complete without it, and nothing in :app depends on this module.
+include ':wear'

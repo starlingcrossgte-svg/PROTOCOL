@@ -95,7 +95,7 @@ internal fun SimpleButton(
     text: String,
     onClick: () -> Unit,
     shape: androidx.compose.ui.graphics.Shape,
-    containerColor: Color = SurfaceBg,
+    containerColor: Color = LocalButtonFill.current,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 ) {

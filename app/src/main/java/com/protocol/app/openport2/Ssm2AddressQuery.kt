@@ -37,12 +37,32 @@ object Ssm2AddressQuery {
     private const val CMD_A8: Byte = 0xA8.toByte()
     private const val RSP_E8: Byte = 0xE8.toByte()
 
+    /**
+     * Most addresses one A8 request can carry, set by the frame's single-byte
+     * length field: len = 2 + 3*count, so count = (255 - 2) / 3 = 84. At 85 the
+     * length wraps and the ECU sees a different frame than the one intended.
+     *
+     * This is the format ceiling, not a statement about how many addresses a
+     * given ECU will actually accept in one request — that limit is lower and
+     * has not been measured here. Treat this as the point past which a request
+     * is definitely malformed.
+     *
+     * It matters now because a parameter can span several bytes: a 4-byte value
+     * spends four of these slots, so roughly twenty such parameters on one
+     * module reach the ceiling.
+     */
+    const val MAX_ADDRESSES_PER_QUERY = 84
+
     fun buildA8Query(
         addresses: List<Ssm2Address>,
         destination: Byte = DEST_ECM,
         flags: Byte = 0x00
     ): ByteArray {
         require(addresses.isNotEmpty()) { "at least one address required" }
+        // Refuse rather than emit a frame whose length byte has wrapped.
+        require(addresses.size <= MAX_ADDRESSES_PER_QUERY) {
+            "A8 request limited to $MAX_ADDRESSES_PER_QUERY addresses, got ${addresses.size}"
+        }
         val dataLen = 2 + addresses.size * 3
         val frameLen = dataLen + 5 // header(3) + len(1) + data + checksum(1)
         val frame = ByteArray(frameLen)

@@ -1,5 +1,11 @@
 package com.protocol.app.protocol
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,10 +28,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,6 +57,7 @@ import com.protocol.app.R
 
 @Composable
 internal fun HomePage(
+    uiState: ProtocolUiState,
     onOpenSubPage: (SubPage) -> Unit
 ) {
     Column(
@@ -141,12 +150,25 @@ internal fun HomePage(
             verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            HomeMenuButton(label = "Settings") { onOpenSubPage(SubPage.Settings) }
-            HomeMenuButton(label = "Flash ECU") { onOpenSubPage(SubPage.Flash) }
-            HomeMenuButton(label = "Minor Tuning") { onOpenSubPage(SubPage.Tuning) }
-            HomeMenuButton(label = "Dev Mode") { onOpenSubPage(SubPage.Developer) }
-            HomeMenuButton(label = "Library") { onOpenSubPage(SubPage.Library) }
-            HomeMenuButton(label = "Notices") { onOpenSubPage(SubPage.Notices) }
+            // Labels name the FUNCTION, not the feature area. The three tuning
+            // stages are deliberately distinguished: a calibration FILE is edited
+            // in the ROM Table Editor, written to the module by Read / Flash
+            // Firmware, and volatile RAM values are changed by Live RAM Tuning.
+            HomeMenuButton(label = "Configuration") { onOpenSubPage(SubPage.Settings) }
+            HomeMenuButton(label = "Read / Write ROM") { onOpenSubPage(SubPage.Flash) }
+            HomeMenuButton(label = "Live RAM Tuning") { onOpenSubPage(SubPage.Tuning) }
+            HomeMenuButton(label = "ROM Table Editor") { onOpenSubPage(SubPage.TableEditor) }
+            HomeMenuButton(label = "Manual Adapter Control") { onOpenSubPage(SubPage.Developer) }
+            HomeMenuButton(label = "Adapter Command Library") { onOpenSubPage(SubPage.Library) }
+            // Pulse until opened once. Persisted, so it does not come back.
+            HomeMenuButton(
+                label = "How To Use",
+                pulse = !uiState.settings.visitedHowToUse
+            ) { onOpenSubPage(SubPage.Navigation) }
+            HomeMenuButton(
+                label = "About & License",
+                pulse = !uiState.settings.visitedNotices
+            ) { onOpenSubPage(SubPage.Notices) }
         }
         // Developer Mode is now its own page (Dev Mode button above) — no longer
         // inlined here.
@@ -157,17 +179,34 @@ internal fun HomePage(
 private fun HomeMenuButton(
     label: String,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp),
+    /** Animates the border white to red until visited. Fill and label untouched. */
+    pulse: Boolean = false,
     onClick: () -> Unit
 ) {
     // Box-based to avoid Material3 Button's offscreen clipping layer and
     // ripple-indication layer. Rounded corners (8.dp) via background(shape) +
     // border(shape) — same curved style as the Dev console, but the home
     // button's own size (16.dp padding / bodyLarge) is kept. Label centered.
+    val borderColor = if (pulse) {
+        val transition = rememberInfiniteTransition(label = "unvisited")
+        val phase by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1400, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "phase"
+        )
+        lerp(Accent, PulseRed, phase)
+    } else {
+        Accent
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceBg, shape)
-            .border(1.dp, Accent, shape)
+            .background(LocalButtonFill.current, shape)
+            .border(1.dp, borderColor, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 16.dp),
         contentAlignment = Alignment.Center
@@ -182,6 +221,8 @@ private fun HomeMenuButton(
         )
     }
 }
+
+private val PulseRed = Color(0xFFE53935)
 
 @Composable
 private fun SmallActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {

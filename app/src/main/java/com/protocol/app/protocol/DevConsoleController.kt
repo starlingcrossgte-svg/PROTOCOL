@@ -340,7 +340,7 @@ internal class DevConsoleController(private val host: DevConsoleHost) {
             val state = host.state
             // The A8 01 (respond-continuously) frame is built from the same
             // on-page ECM PIDs the poller uses — no hand-typed hex to fat-finger.
-            val addrs = Ssm2Pids.DEFAULT_DEMO_PIDS
+            val addrs = (Ssm2Pids.DEFAULT_DEMO_PIDS + state.loadedPids)
                 .filter { it.id in state.gaugeLayout.pidIds && it.category == Ssm2PidCategory.ECU }
                 .flatMap { it.addresses }
             if (addrs.isEmpty()) { log("continuous test: no ECM params on the page"); return@launch }
