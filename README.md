@@ -1,6 +1,10 @@
-# PROTOCOL
+# PROTOCOL Android Subaru SSM2 Datalogger and ECU Flashing
 
-Android tool for Subaru SSM2 diagnostics and bench ECU/TCM firmware work.
+PROTOCOL is a Subaru tuning and diagnostics app that runs on Android. It reads live engine and
+transmission data over SSM2, reads and clears diagnostic trouble codes, and reads and writes ECU
+firmware, directly from a phone with no laptop and no dedicated handheld.
+
+Built by Cross Starling. Free software under the GPLv3.
 
 > ## ⚠ Project status: UNFINISHED and EXPERIMENTAL
 > PROTOCOL is a work in progress reverse engineering and diagnostics project. It is **not** a
@@ -9,16 +13,43 @@ Android tool for Subaru SSM2 diagnostics and bench ECU/TCM firmware work.
 
 ## What it does
 
-- Live SSM2 parameter logging from the ECM and TCM over K-line and CAN, across multiple adapters
-  (Tactrix OpenPort, OBDLink and STN, and a plain FT232 KKL cable).
-- Diagnostic trouble code read and clear.
-- Bench SH7058 firmware **read and write** over ISO-TP and UDS.
+- Live SSM2 datalogging from the engine control module and the transmission control module, over
+  both K line and CAN, with configurable gauges, min and max tracking, and CSV export.
+- Displays data in multiple formats, including raw hex for decoding.
+- Diagnostic trouble codes, read and clear, with a decoded fault catalogue.
+- ECU firmware read and write on Renesas SH7058 modules over ISO TP (ISO 15765-2) and UDS.
+- Wear OS remote, so logging can be started, stopped, and switched between parameter presets from a
+  watch while the phone stays mounted.
+- Raw command console for manual bus work, sequence building, and adapter bring up.
+
+## Adapters
+
+- Tactrix OpenPort 2.0 and clones, over USB OTG, K line and CAN.
+- OBDLink MX+, over Bluetooth, K line and CAN.
+- OBDLink EX, over USB, K line and CAN.
+- Generic FT232RL VAG KKL cable, over USB, K line only. There is no adapter firmware in the loop
+  with this cable, so the phone itself is the SSM2 protocol master.
 
 ## Bring your own payload
 
 PROTOCOL ships the **transport mechanism only**. Flash kernels and ECU definitions are **not**
 bundled in the app. They are user supplied external files loaded at runtime. This repository and
 the built APK contain no kernel or ROM binaries.
+
+Parameter definitions are ingested from standard logger definition XML, so the parameter set is
+data rather than something hard coded into the app.
+
+## Goals
+
+- Calibration map editing on the device, so a ROM image can be opened against its definition and
+  its tables edited on the phone. Desktop software does this. Nothing on a phone does it yet.
+- Definition driven vehicle support, so adding a car becomes a definition file rather than a code
+  change, and coverage can grow without touching Kotlin.
+
+## Built with
+
+100% Kotlin and Jetpack Compose, with one third party dependency. No accounts, no telemetry, no
+cloud services, and no analytics. The app talks to your car and to nothing else.
 
 ## ⚠ Safety
 
